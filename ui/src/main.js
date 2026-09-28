@@ -649,11 +649,12 @@ async function transmit(message, options = {}) {
     else { log('error', 'ERROR', String(e).slice(0, 200)); setAgentState('ERROR'); progressDone(false); }
   }
   activeController = null; running = false; clearInterval(tick);
-  // progressDone handled in complete/error; fallback if no complete
-  if (running === false && progTimer) {
-    // if handle didn't already close, keep bar a bit then close via timeout inside progressDone
-  }
+  // Nothing else resets the state to IDLE: speak() only does so via stopVoice()
+  // on the path where audio actually played, and it returns early when muted or
+  // the answer is empty. Without this the core label stays stuck on RESPONDING
+  // forever after the first silent run.
   await speakDone;
+  if (state.agentStatus !== 'IDLE' && state.agentStatus !== 'ERROR') setAgentState('IDLE');
 }
 
 function handle(ev) {
