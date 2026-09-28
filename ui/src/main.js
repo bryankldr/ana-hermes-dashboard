@@ -832,10 +832,13 @@ async function loadStatus() {
   try {
     const s = await api.getStatus();
     els.stModel.textContent = s.model || '—';
-    els.stMode.textContent = s.mode || '—';
-    els.stCtx.textContent = s.context || '—';
-    els.stMem.textContent = s.memory || '—';
-
+    // These five fields all come from /api/status. Do not read keys the server
+    // never sends: mode lives behind /api/mode, and there is no context or
+    // memory counter anywhere in the API — the labels show what the runtime
+    // actually reports instead of sitting at "—" forever.
+    els.stMode.textContent = s.profile || '—';
+    els.stCtx.textContent = s.permission || '—';
+    els.stMem.textContent = s.runtime || '—';
     els.stSess.textContent = s.session || '—';
     // Same payload feeds the tools chips and system telemetry, so one fetch
     // renders all three panels instead of three separate calls.
