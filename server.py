@@ -13,7 +13,6 @@ import mimetypes
 import os
 import pathlib
 import secrets
-import subprocess
 import sys
 import threading
 import queue
@@ -36,6 +35,7 @@ if _env.exists():
 
 import commands         # noqa: E402
 import runtime          # noqa: E402
+import services         # noqa: E402
 import terminal as ana_terminal  # noqa: E402
 import voice            # noqa: E402
 
@@ -81,163 +81,6 @@ def persona():
     overlay = "[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS." if mode=="asisten" else "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real."
     return "\n\n".join(x for x in (base, overlay, extra) if x)
 
-
-
-def _scan_projects():
-    """Scan WORKDIR for git repos, return project cards."""
-    import subprocess
-    workdir = pathlib.Path(runtime.WORKDIR).expanduser()
-    projects = []
-    try:
-        for d in sorted(workdir.iterdir()):
-            if not d.is_dir() or d.name.startswith("."):
-                continue
-            git_dir = d / ".git"
-            if not git_dir.exists():
-                continue
-            def _run(cmd):
-                try:
-                    r = subprocess.run(cmd, cwd=d, text=True, capture_output=True, timeout=10)
-                    return (r.stdout or r.stderr).strip()
-                except Exception:
-                    return ""
-            branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"]) or "?"
-            last_commit = _run(["git", "log", "-1", "--format=%h %s (%cr)"]) or "no commits"
-            if "fatal:" in last_commit or "error:" in last_commit.lower():
-                last_commit = "git error"
-            dirty = _run(["git", "status", "--porcelain"])
-            dirty_count = len([l for l in dirty.splitlines() if l.strip()]) if dirty else 0
-            projects.append({
-                "name": d.name,
-                "path": str(d),
-                "branch": branch,
-                "last_commit": last_commit,
-                "dirty": dirty_count,
-                "dirty_files": dirty.splitlines()[:5] if dirty else []
-            })
-    except Exception as e:
-        projects.append({"name": "error", "error": str(e)[:200]})
-    return {"projects": projects, "workdir": str(workdir)}
-
-
-def _list_sessions():
-    """Return recent Hermes sessions grouped by time period."""
-    try:
-        base = runtime._hermes_base()
-        proc = subprocess.run(base + ["sessions", "list"], cwd=runtime.WORKDIR,
-                              text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
-        out = (proc.stdout or proc.stderr or "").strip()
-        sessions = []
-        for line in out.splitlines():
-            line = line.strip()
-            if not line or line.startswith("Title") or line.startswith("─"):
-                continue
-            parts = line.split()
-            if len(parts) >= 4:
-                sid = parts[-1]
-                if runtime.valid_session(sid):
-                    title = " ".join(parts[:-3]) or "—"
-                    last_active = parts[-3] + " " + parts[-2]
-                    sessions.append({"id": sid, "title": title[:60], "last_active": last_active})
-            if len(sessions) >= 50:
-                break
-        # Group by time period
-        groups = {"today": [], "yesterday": [], "last_week": [], "older": []}
-        for s in sessions:
-            la = s["last_active"].lower()
-            if "m ago" in la or "h ago" in la or "just now" in la:
-                groups["today"].append(s)
-            elif "d ago" in la:
-                days = 0
-                for part in la.split():
-                    if part.isdigit():
-                        days = int(part)
-                        break
-                if days == 1:
-                    groups["yesterday"].append(s)
-                elif days <= 7:
-                    groups["last_week"].append(s)
-                else:
-                    groups["older"].append(s)
-            else:
-                groups["older"].append(s)
-        return {"groups": groups, "current": SESSION["id"]}
-    except Exception as e:
-        return {"groups": {"today": [], "yesterday": [], "last_week": [], "older": []}, "current": SESSION["id"], "error": str(e)[:200]}
-
-
-def _load_briefing():
-    """Read latest daily note from vault, extract Briefing section."""
-    import os
-    vault = os.environ.get("OBSIDIAN_VAULT_PATH", "")
-    if not vault:
-        return {"briefing": "", "source": "OBSIDIAN_VAULT_PATH not set", "date": ""}
-    daily = pathlib.Path(vault) / "10 Daily"
-    if not daily.exists():
-        return {"briefing": "", "source": str(daily), "date": ""}
-    # find latest daily note
-    notes = sorted(daily.glob("*.md"), reverse=True)
-    if not notes:
-        return {"briefing": "", "source": str(daily), "date": ""}
-    latest = notes[0]
-    text = latest.read_text(encoding="utf-8", errors="replace")
-    # extract ## Briefing section
-    m = re.search(r"##\s*Briefing\s*\n(.*?)(?=\n##\s|\Z)", text, re.S | re.I)
-    briefing = m.group(1).strip() if m else ""
-    return {"briefing": briefing, "source": str(latest), "date": latest.stem}
-
-def _vault_status():
-    """Vault + skill inventory for HUD panels."""
-    try:
-        skill_note = ROOT / "SKILL" / "skill_note.md"
-        skill_exists = skill_note.exists()
-        skill_preview = ""
-        if skill_exists:
-            t = skill_note.read_text(encoding="utf-8", errors="replace")
-            skill_preview = t[:800]
-        # count daily notes
-        vault = os.environ.get("OBSIDIAN_VAULT_PATH", "")
-        daily_count = 0
-        if vault:
-            daily = pathlib.Path(vault) / "10 Daily"
-            if daily.exists():
-                daily_count = len(list(daily.glob("*.md")))
-        return {"skill_note_exists": skill_exists, "skill_preview": skill_preview, "daily_count": daily_count, "vault": vault}
-    except Exception as e:
-        return {"error": str(e)[:200]}
-
-def _avd_status():
-    """Check AVD Pixel_9 + adb status."""
-    try:
-        emu = pathlib.Path.home() / "Android" / "Sdk" / "emulator" / "emulator"
-        avds = ""
-        try:
-            r = subprocess.run([str(emu), "-list-avds"], text=True, capture_output=True, timeout=8)
-            avds = (r.stdout or "").strip()
-        except Exception:
-            pass
-        adb_out = ""
-        try:
-            r2 = subprocess.run(["adb", "devices"], text=True, capture_output=True, timeout=5)
-            adb_out = (r2.stdout or r2.stderr or "").strip()
-        except Exception as e:
-            adb_out = str(e)[:200]
-        # parse device state
-        device = "offline"
-        boot = ""
-        if "emulator-5554" in adb_out:
-            if "device" in adb_out:
-                device = "device"
-            elif "offline" in adb_out:
-                device = "offline"
-            try:
-                r3 = subprocess.run(["adb", "-s", "emulator-5554", "shell", "getprop", "sys.boot_completed"], text=True, capture_output=True, timeout=5)
-                boot = (r3.stdout or "").strip()
-            except Exception:
-                pass
-        return {"avds": avds, "adb": adb_out[:500], "device": device, "boot_completed": boot}
-    except Exception as e:
-        return {"error": str(e)[:200]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -347,23 +190,24 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/projects":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
-            return self._json(_scan_projects())
+            return self._json(services.scan_projects(runtime.WORKDIR))
         if p == "/api/briefing":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
-            return self._json(_load_briefing())
+            return self._json(services.load_briefing())
         if p == "/api/sessions":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
-            return self._json(_list_sessions())
+            return self._json(services.list_sessions(
+                runtime._hermes_base(), runtime.WORKDIR, runtime.valid_session, SESSION["id"]))
         if p == "/api/vault":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
-            return self._json(_vault_status())
+            return self._json(services.vault_status())
         if p == "/api/avd":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
-            return self._json(_avd_status())
+            return self._json(services.avd_status())
         if p == "/api/missions":
             if not self._token_ok():
                 return self._json({"error": "unauthorized"}, 401)
@@ -535,29 +379,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "stopped": stopped})
         if p == "/api/avd":
             try:
-                body = json.loads(raw or b"{}")
-                action = (body.get("action") or "").strip().lower()
-                if action == "start":
-                    emu = str(pathlib.Path.home() / "Android" / "Sdk" / "emulator" / "emulator")
-                    # check if already running
-                    try:
-                        r = subprocess.run(["adb", "devices"], text=True, capture_output=True, timeout=5)
-                        if "emulator-5554" in (r.stdout or "") and "device" in (r.stdout or ""):
-                            return self._json({"ok": True, "msg": "AVD already running (emulator-5554 device)"})
-                    except Exception:
-                        pass
-                    subprocess.Popen([emu, "-avd", "Pixel_9", "-gpu", "host", "-no-snapshot-load"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-                    return self._json({"ok": True, "msg": "AVD Pixel_9 starting..."})
-                elif action == "stop":
-                    try:
-                        subprocess.run(["adb", "-s", "emulator-5554", "emu", "kill"], text=True, timeout=10, capture_output=True)
-                    except Exception as e:
-                        return self._json({"ok": False, "error": str(e)[:200]}, 500)
-                    return self._json({"ok": True, "msg": "AVD stop signal sent"})
-                else:
-                    return self._json({"error": "action must be start|stop"}, 400)
-            except Exception as e:
-                return self._json({"error": str(e)[:300]}, 500)
+                ok, body = services.avd_action(
+                    (json.loads(raw or b"{}") or {}).get("action"))
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            if ok is None:
+                return self._json(body, 400)
+            return self._json({"ok": ok, **body}, 200 if ok else 500)
 
         # ── terminal endpoints ──────────────────────────────
         if p == "/api/terminal":
