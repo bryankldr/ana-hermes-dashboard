@@ -9,6 +9,7 @@ lifecycle, and voice. No framework: plain asserts, exits non-zero on failure.
 """
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -148,6 +149,22 @@ for asset, needle in [("/src/main.js", b"import"), ("/styles/hud.css", b"hud"),
                       ("/src/utils/helpers.js", b"cleanForSpeech")]:
     st, _, raw = req(asset, token=False, origin=False)
     check(f"GET {asset}", st == 200 and needle in raw, f"status={st} len={len(raw)}")
+
+# Vendored xterm: the HUD must not depend on any CDN at runtime. If these three
+# stop being served, the terminal is dead and nothing else in the page says so.
+for asset, needle, min_size in [("/vendor/xterm.js", b"Terminal", 100_000),
+                                 ("/vendor/xterm.css", b".xterm", 1_000),
+                                 ("/vendor/xterm-addon-fit.js", b"FitAddon", 500)]:
+    st, _, raw = req(asset, token=False, origin=False)
+    check(f"GET {asset}", st == 200 and needle in raw and len(raw) >= min_size,
+          f"status={st} len={len(raw)} need>={min_size}")
+
+# No external script/style may remain in the served HTML.
+st, _, html = req("/", token=False, origin=False)
+text = html.decode("utf-8", "replace")
+external = [m for m in re.findall(r'(?:src|href)="(https?://[^"]+)"', text)
+            if "fonts.googleapis" not in m and "fonts.gstatic" not in m]
+check("no CDN dependency for scripts/styles", not external, f"still remote: {external}")
 
 for bad in ["/../server.py", "/..%2f..%2fetc%2fpasswd", "/src/../../server.py",
             "/%2e%2e/%2e%2e/etc/passwd", "/src/main.js/../../server.py"]:
