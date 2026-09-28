@@ -318,6 +318,7 @@ function initIntel() {
       api.setSession(null).then(() => {
         currentSessionId = null;
         document.getElementById('sessionId').textContent = '—';
+        els.stSess.textContent = '—';
         intelLog('🆕 New session started', 'session');
         log('session', 'SESSION', 'new session');
         refreshSessionSelector();
