@@ -1,5 +1,6 @@
 .env
 .ana_mode
+.ana_token
 state.json
 layout.json
 .no-mcp.json

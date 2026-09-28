@@ -983,6 +983,70 @@ html, body {
   font-size: 12px;
 }
 
+/* ═══ PANEL OPTIONS DROPDOWN ═══ */
+.panel-options-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.panel-options-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: rgba(10, 18, 30, 0.97);
+  border: 1px solid rgba(0, 220, 255, 0.25);
+  border-radius: 4px;
+  padding: 8px;
+  z-index: 1000;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.panel-options-menu.open {
+  display: block;
+}
+
+.panel-options-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--neon);
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid rgba(0, 220, 255, 0.15);
+  margin-bottom: 6px;
+}
+
+.panel-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panel-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.15s;
+}
+
+.panel-opt:hover {
+  background: rgba(0, 220, 255, 0.08);
+  color: var(--text);
+}
+
+.panel-opt input[type="checkbox"] {
+  accent-color: var(--neon);
+  cursor: pointer;
+}
+
 /* ═══ TERMINAL PANEL ═══ */
 .terminal-panel { display:flex; flex-direction:column; min-height:260px; }
 .terminal-panel .panel-body { flex:1; min-height:220px; }

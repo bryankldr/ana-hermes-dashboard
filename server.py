@@ -40,7 +40,13 @@ import terminal as ana_terminal  # noqa: E402
 import voice            # noqa: E402
 
 PORT = int(os.environ.get("ANA_PORT", "8730"))
-API_TOKEN = secrets.token_urlsafe(32)
+API_TOKEN = os.environ.get("ANA_TOKEN") or secrets.token_urlsafe(32)
+# Persist the token so local tooling (smoke.py, the HUD) can pick it up
+# without a restart loop. Only the token is written — never a secret value.
+try:
+    (ROOT / ".ana_token").write_text(API_TOKEN + "\n", encoding="utf-8")
+except OSError:
+    pass
 RUN_LOCK = threading.Lock()
 MAX_JSON_BODY = 1024 * 1024
 MAX_AUDIO_BODY = 12 * 1024 * 1024
@@ -332,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
                 for k, v in layouts.items():
                     if not isinstance(k, str) or not isinstance(v, dict):
                         return self._json({"error": "invalid layout entry"}, 400)
-                data = {"locked": bool(body.get("locked", True)), "layouts": layouts}
+                data = {"locked": bool(body.get("locked", True)), "layouts": layouts, "disabled": body.get("disabled", [])}
                 layout_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
                 return self._json(data)
             except json.JSONDecodeError:

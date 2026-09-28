@@ -53,6 +53,11 @@ export function createTerminal({ api, token, log, hud, isOpen }) {
       </div>
     `;
     hud.appendChild(panel);
+    // Without a rail the layout manager falls back to the rect the panel
+    // already has, which is 0,0 full width — it then lands on top of the
+    // top controls and covers STATUS/TOOLS/mute/Clear/Terminal. Park it in
+    // the right rail and let the manager do the placement.
+    panel.dataset.rail = 'right';
     panel.querySelector('.term-close').addEventListener('click', close);
     PANELS.set(KEY, panel);
     if (window._layoutManager) window._layoutManager.register(KEY);

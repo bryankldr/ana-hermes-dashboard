@@ -16,9 +16,17 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8730").rstrip("/")
 TOKEN = os.environ.get("ANA_TOKEN", "")
+if not TOKEN:
+    # The server writes its token to .ana_token on start; pick it up so a
+    # restart does not invalidate the harness.
+    try:
+        TOKEN = (Path(__file__).parent / ".ana_token").read_text().strip()
+    except OSError:
+        pass
 ORIGIN = BASE
 
 fails: list[str] = []

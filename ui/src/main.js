@@ -958,6 +958,70 @@ setInterval(async () => {
   } catch (_) {}
 }, 4000);
 
+// ═══ PANEL OPTIONS — enable / disable any panel ═══
+function initPanelOptions(layout) {
+  const btn = document.getElementById('optBtn');
+  if (!btn) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'panel-options-wrap';
+  wrap.innerHTML = `
+    <div class="panel-options-menu" id="panelOptionsMenu">
+      <div class="panel-options-head">PANELS</div>
+      <div class="panel-options-list" id="panelOptionsList"></div>
+    </div>`;
+  topControls.appendChild(wrap);
+
+  const menu = wrap.querySelector('#panelOptionsMenu');
+  const list = wrap.querySelector('#panelOptionsList');
+
+  // Every panel the layout manager knows about, plus the terminal.
+  const ids = [...new Set([...Object.keys(layout.items), 'termPanel'])];
+  const titles = {
+    agentPanel: 'AGENT STATUS', statusMatrix: 'SYSTEM MATRIX',
+    workspacePanel: 'WORKSPACE', intelPanel: 'INTELLIGENCE SURFACE',
+    pipelinePanel: 'AGENT PIPELINE', eventLog: 'EVENT STREAM',
+    codeViewer: 'CODE VIEWER', toolsPanel: 'CONNECTED TOOLS',
+    sysTelemetry: 'SYSTEM TELEMETRY', cmdPanel: 'COMMAND MATRIX',
+    response: 'RESPONSE', chatBar: 'CHAT', core: 'CORE',
+    topControls: 'TOP CONTROLS', bottomTelemetry: 'BOTTOM TELEMETRY',
+    missionKanban: 'MISSION KANBAN', vaultPanel: 'VAULT STATUS',
+    avdPanel: 'ANDROID AVD', projectList: 'ACTIVE REPOSITORIES',
+    briefingPanel: 'PROACTIVE BRIEFING', termPanel: 'TERMINAL',
+  };
+
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const label = document.createElement('label');
+    label.className = 'panel-opt';
+    label.innerHTML = `<input type="checkbox" data-id="${esc(id)}" checked> ${esc(titles[id] || id)}`;
+    list.appendChild(label);
+  }
+
+  // Restore saved disabled state
+  for (const id of layout.disabled) {
+    const cb = list.querySelector(`input[data-id="${CSS.escape(id)}"]`);
+    if (cb) cb.checked = false;
+  }
+
+  list.addEventListener('change', e => {
+    const cb = e.target.closest('input[data-id]');
+    if (!cb) return;
+    const id = cb.dataset.id;
+    layout.setPanelEnabled(id, cb.checked);
+    log('status', 'PANEL', `${titles[id] || id} ${cb.checked ? 'shown' : 'hidden'}`);
+  });
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    menu.classList.toggle('open');
+  });
+  document.addEventListener('click', e => {
+    if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove('open');
+  });
+}
+
 // ═══ INIT ═══
 function init() {
   initParticles(); initDials(); initOctFrame(); initRadialTicks(); initOrbitalParticles();
@@ -996,6 +1060,14 @@ function init() {
     termBtn.addEventListener('click', terminal.toggle);
     topControls.appendChild(termBtn);
 
+    // Options button — panel enable/disable list
+    const optBtn = document.createElement('button');
+    optBtn.className = 'layout-toggle';
+    optBtn.id = 'optBtn';
+    optBtn.innerHTML = '<span class="toggle-icon">⚙</span> Options';
+    optBtn.title = 'Show / hide panels';
+    topControls.appendChild(optBtn);
+
     const t = document.createElement('button');
     t.className = 'layout-toggle' + (layout.locked ? '' : ' active');
     t.id = 'layoutLockBtn';
@@ -1017,6 +1089,8 @@ function init() {
       layout.reset();
     };
     topControls.appendChild(resetBtn);
+    // Panel options must run after optBtn exists in the DOM
+    initPanelOptions(layout);
   }
   log('status', 'INIT', 'ANA FUI HUD terintegrasi penuh.');
   setAgentState('IDLE');

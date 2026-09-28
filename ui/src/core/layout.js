@@ -12,8 +12,13 @@ export class LayoutManager {
     this.minH = opts.minH || 60;
     this.grid = opts.grid || 4;
     this.locked = true;
-    this.config = { locked: true, layouts: {} };
+    this.config = { locked: true, layouts: {}, disabled: [] };
     this.items = {};
+    this.disabled = new Set();
+    // Freed panels get an increasing z-index so they sit above the rails
+    // (z-index:10). Counting up keeps the stacking order stable and identical
+    // across reloads, so a saved layout looks the same every time.
+    this.freeZ = 20;
     this.measure();
     this._initRailCursor();
     this.injectHandles();
@@ -47,10 +52,15 @@ export class LayoutManager {
       if (!res.ok) return;
       const data = await res.json();
       if (!data || typeof data !== 'object') return;
-      this.config = { locked: !!data.locked, layouts: data.layouts || {} };
+      this.config = { locked: !!data.locked, layouts: data.layouts || {}, disabled: data.disabled || [] };
       this.locked = !!data.locked;
+      this.disabled = new Set(this.config.disabled);
       for (const [id, cfg] of Object.entries(this.config.layouts)) {
         this.applyCfg(this.items[id], cfg);
+      }
+      for (const id of this.disabled) {
+        const el = this.items[id];
+        if (el) el.style.display = 'none';
       }
       this.applyLock();
       const btn = document.getElementById('layoutLockBtn');
@@ -69,12 +79,20 @@ export class LayoutManager {
         w: el.style.width || '', h: el.style.height || '',
       };
     }
-    this.config = { locked: this.locked, layouts };
+    this.config = { locked: this.locked, layouts, disabled: [...this.disabled] };
     fetch(LAYOUT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Ana-Token': getToken() },
       body: JSON.stringify(this.config),
     }).catch(() => {});
+  }
+
+  setPanelEnabled(id, enabled) {
+    const el = this.items[id];
+    if (!el) return;
+    el.style.display = enabled ? '' : 'none';
+    if (enabled) this.disabled.delete(id); else this.disabled.add(id);
+    this.save();
   }
 
   toggleLock() {
@@ -113,6 +131,13 @@ export class LayoutManager {
     el.style.margin = '0';
     el.style.flex = 'none';
     el.dataset.free = '1';
+    // A freed panel becomes a sibling of the rails under .hud, but the rails
+    // carry z-index:10 and the panel had none, so the rail painted over the
+    // whole panel. Every drag handle and every control under it was unclickable
+    // and the smaller the panel got, the more of it the rail covered. A z-index
+    // on the panel puts it back on top; the base stays low so nothing jumps
+    // above the core or the top controls.
+    el.style.zIndex = String(this.freeZ++);
     this.items[id] = el;
     for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
       const h = document.createElement('div');
@@ -189,6 +214,7 @@ export class LayoutManager {
       el.style.margin = '0';
       el.style.flex = 'none';
       el.dataset.free = '1';
+      el.style.zIndex = String(this.freeZ++);
     }
   }
 
@@ -228,6 +254,23 @@ export class LayoutManager {
       'linear-gradient(90deg,rgba(0,220,255,.06) 1px,transparent 1px);' +
       `background-size:${this.grid}px ${this.grid}px;`;
     document.body.appendChild(ov);
+  }
+
+  // A panel dragged past the edge of the window ends up outside the viewport,
+  // where no cursor can reach it — the user cannot grab it back and has to hit
+  // Reset. Pull it back far enough to always keep a grabbable strip on screen.
+  reclamp(el) {
+    if (!el) return;
+    const pr = this.hud.getBoundingClientRect();
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const num = v => parseFloat(v) || 0;
+    let x = num(el.style.left), y = num(el.style.top);
+    if (x > pr.width - 24) x = pr.width - 24;
+    if (y > pr.height - 24) y = pr.height - 24;
+    if (x < 24 - w) x = 24 - w;
+    if (y < 24 - h) y = 24 - h;
+    el.style.left = this.snap(x) + 'px';
+    el.style.top = this.snap(y) + 'px';
   }
 
   bind() {
@@ -273,6 +316,7 @@ export class LayoutManager {
       if (!mode || !el) return;
       el.classList.remove('dragging');
       mode = null; el = null;
+      this.reclamp(el);
       this.save();
     };
     this.hud.addEventListener('mousedown', onDown);
