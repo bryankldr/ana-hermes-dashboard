@@ -1,6 +1,9 @@
-import { bus, state } from './core/bus.js';
+import { state } from './core/bus.js';
 import { api } from './core/api.js';
 import { LayoutManager } from './core/layout.js';
+import { now, rid, esc, cleanForSpeech } from './utils/helpers.js';
+import { ensurePanel } from './utils/dom.js';
+import { createTerminal } from './terminal.js';
 
 // ═══ DOM refs ═══
 const $ = id => document.getElementById(id);
@@ -36,9 +39,7 @@ let progSteps = [], progStart = 0, progTimer = null;
 let codeDiffBuf = '';
 
 // ═══ HELPERS ═══
-const now = () => new Date().toLocaleTimeString('en-GB', { hour12: false });
-const rid = () => 'run_' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 24) : Math.random().toString(16).slice(2, 14));
-const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+// now/rid/esc/cleanForSpeech live in utils/helpers.js (imported above).
 
 function setAgentState(agentState) {
   state.agentStatus = agentState;
@@ -135,22 +136,15 @@ function showCodeDiff(title, diff){
 async function refreshKanban(){
   try{
     const data=await api.getMissions();
-    let el=document.getElementById('missionKanban');
-    if(!el){
-      el=document.createElement('div'); el.id='missionKanban'; el.className='panel';
-      el.innerHTML='<div class=\"panel-title\">MISSION KANBAN</div><div class=\"panel-body\"><div id=\"kanbanGrid\" style=\"display:flex;gap:6px\"></div></div>';
-      document.querySelector('.left-rail')?.appendChild(el);
-      if(window._layoutManager) window._layoutManager.register('missionKanban');
-    }
+    const el=ensurePanel({id:'missionKanban',title:'MISSION KANBAN',body:'<div id="kanbanGrid" style="display:flex;gap:6px"></div>',rail:'left'});
     const grid=el.querySelector('#kanbanGrid');
     const tasks=(data.tasks||[]).slice(-8);
     const missions=(data.missions||[]).slice(-8);
     const open=tasks.filter(t=>!t.done);
     const done=tasks.filter(t=>t.done).concat(missions.filter(m=>m.status==='done'));
-    const col=(title, items, emptyMsg)=>'<div class=\"kanban-col\"><div class=\"kanban-head\">'+title+' ('+items.length+')</div>'+(items.length?items.map(it=>'<div class=\"kanban-card '+(it.done||it.status==='done'?'done':'')+'\" title=\"'+esc(it.text||it.mission||'')+'\">'+esc((it.text||it.mission||'').slice(0,48))+'<div style=\"font-size:10px;color:var(--text-dim)\">'+esc(it.at?new Date(it.at*1000).toLocaleTimeString(): '')+'</div></div>').join(''):'<div class=\"kanban-empty\">'+emptyMsg+'</div>')+'</div>';
+    const col=(title, items, emptyMsg)=>'<div class="kanban-col"><div class="kanban-head">'+title+' ('+items.length+')</div>'+(items.length?items.map(it=>'<div class="kanban-card '+(it.done||it.status==='done'?'done':'')+'" title="'+esc(it.text||it.mission||'')+'">'+esc((it.text||it.mission||'').slice(0,48))+'<div style="font-size:10px;color:var(--text-dim)">'+esc(it.at?new Date(it.at*1000).toLocaleTimeString(): '')+'</div></div>').join(''):'<div class="kanban-empty">'+emptyMsg+'</div>')+'</div>';
     grid.innerHTML=col('OPEN',open,'Kosong — /mission &lt;task&gt;')+col('DONE',done.slice(-6),'—');
-    grid.querySelectorAll('.kanban-card').forEach(c=>{
-      if(c.classList.contains('done')) return;
+    grid.querySelectorAll('.kanban-card:not(.done)').forEach(c=>{
       c.addEventListener('click', ()=>{
         const txt=c.getAttribute('title')||c.textContent;
         log('kanban','KANBAN','→ '+txt.slice(0,60));
@@ -164,41 +158,29 @@ async function refreshKanban(){
 async function refreshVault(){
   try{
     const data=await api.getVault();
-    let el=document.getElementById('vaultPanel');
-    if(!el){
-      el=document.createElement('div'); el.id='vaultPanel'; el.className='panel';
-      el.innerHTML='<div class=\"panel-title\">VAULT STATUS</div><div class=\"panel-body\" id=\"vaultBody\"></div>';
-      document.querySelector('.left-rail')?.appendChild(el);
-      if(window._layoutManager) window._layoutManager.register('vaultPanel');
-    }
+    const el=ensurePanel({id:'vaultPanel',title:'VAULT STATUS',body:'<div id="vaultBody"></div>',rail:'left'});
     const body=el.querySelector('#vaultBody');
     const exists=data.skill_note_exists;
-    body.innerHTML='<div class=\"vault-stat\"><span>Vault</span><b>'+esc((data.vault||'').split('/').slice(-2).join('/')||'—')+'</b></div>'
-      +'<div class=\"vault-stat\"><span>Daily notes</span><b>'+(data.daily_count??'—')+'</b></div>'
-      +'<div class=\"vault-stat\"><span>SKILL/skill_note.md</span><b style=\"color:'+(exists?'#4ade80':'#f87171')+'\">'+(exists?'✓ ada':'✗ belum')+'</b></div>'
-      +(exists?'<div style=\"font-size:10px;color:var(--text-dim);margin-top:4px;max-height:60px;overflow:auto;white-space:pre-wrap\">'+esc((data.skill_preview||'').slice(0,400))+'</div>':'');
+    body.innerHTML='<div class="vault-stat"><span>Vault</span><b>'+esc((data.vault||'').split('/').slice(-2).join('/')||'—')+'</b></div>'
+      +'<div class="vault-stat"><span>Daily notes</span><b>'+(data.daily_count??'—')+'</b></div>'
+      +'<div class="vault-stat"><span>SKILL/skill_note.md</span><b style="color:'+(exists?'#4ade80':'#f87171')+'">'+(exists?'✓ ada':'✗ belum')+'</b></div>'
+      +(exists?'<div style="font-size:10px;color:var(--text-dim);margin-top:4px;max-height:60px;overflow:auto;white-space:pre-wrap">'+esc((data.skill_preview||'').slice(0,400))+'</div>':'');
   }catch(e){}
 }
 async function refreshAvd(){
   try{
     const data=await api.getAvd();
-    let el=document.getElementById('avdPanel');
-    if(!el){
-      el=document.createElement('div'); el.id='avdPanel'; el.className='panel';
-      el.innerHTML='<div class=\"panel-title\">ANDROID AVD</div><div class=\"panel-body\" id=\"avdBody\"></div>';
-      document.querySelector('.left-rail')?.appendChild(el);
-      if(window._layoutManager) window._layoutManager.register('avdPanel');
-    }
+    const el=ensurePanel({id:'avdPanel',title:'ANDROID AVD',body:'<div id="avdBody"></div>',rail:'left'});
     const body=el.querySelector('#avdBody');
     const running=data.device==='device' && data.boot_completed==='1';
     const offline=!data.device || data.device==='offline';
     const statusCls=running?'running':'offline';
     const statusTxt=running?'● RUNNING (boot 1)': offline?'○ OFFLINE': '◐ '+esc(data.device||'?');
-    body.innerHTML='<div style=\"display:flex;align-items:center;gap:6px;flex-wrap:wrap\">'
-      +'<span class=\"avd-status '+statusCls+'\">'+statusTxt+'</span>'
-      +'<span style=\"font-size:10px;color:var(--text-dim)\">'+esc((data.avds||'').split('\n')[0]||'Pixel_9')+'</span></div>'
-      +'<div style=\"display:flex;gap:4px;margin-top:6px\"><button id=\"avdStart\" class=\"avd-btn avd-start\">▶ Start</button><button id=\"avdStop\" class=\"avd-btn avd-stop\">■ Stop</button><button id=\"avdRefresh\" class=\"avd-btn\" style=\"background:rgba(0,220,255,0.06);border:1px solid rgba(0,220,255,0.15);color:var(--text-dim)\">↻</button></div>'
-      +'<div style=\"font-size:10px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap\">'+esc((data.adb||'').slice(0,160))+'</div>';
+    body.innerHTML='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+      +'<span class="avd-status '+statusCls+'">'+statusTxt+'</span>'
+      +'<span style="font-size:10px;color:var(--text-dim)">'+esc((data.avds||'').split('\n')[0]||'Pixel_9')+'</span></div>'
+      +'<div style="display:flex;gap:4px;margin-top:6px"><button id="avdStart" class="avd-btn avd-start">▶ Start</button><button id="avdStop" class="avd-btn avd-stop">■ Stop</button><button id="avdRefresh" class="avd-btn" style="background:rgba(0,220,255,0.06);border:1px solid rgba(0,220,255,0.15);color:var(--text-dim)">↻</button></div>'
+      +'<div style="font-size:10px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap">'+esc((data.adb||'').slice(0,160))+'</div>';
     body.querySelector('#avdStart')?.addEventListener('click', async()=>{
       log('avd','AVD','starting Pixel_9...'); const r=await api.avdAction('start'); log('avd','AVD', r.msg||r.error||JSON.stringify(r).slice(0,120)); setTimeout(refreshAvd, 5000);
     });
@@ -441,11 +423,7 @@ function initTelemetry() {
 }
 
 // ═══ SPEAK ═══
-function cleanForSpeech(text) {
-  return String(text || '').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/).map(l => l.trim())
-    .filter(l => l && !/^(session_id:|session:|duration:|messages:|query:|initializing agent|resume this session|hermes --resume|[-─=]{3,})/i.test(l))
-    .join(' ').replace(/```[\s\S]*?```/g, ' ').replace(/[*_#>`]/g, '').replace(/\s{2,}/g, ' ').trim();
-}
+// cleanForSpeech is imported from utils/helpers.js.
 function playMp3(url) {
   return new Promise(resolve => {
     const a = new Audio(url);
@@ -740,131 +718,6 @@ function renderAnswer(finaldone) {
   els.responseText.scrollTop = els.responseText.scrollHeight;
 }
 
-// ═══ TERMINAL ═══
-const TERMINAL_SESSIONS = new Map();
-const TERMINAL_PANELS = new Map();
-
-function toggleTerminal() {
-  const panel = TERMINAL_PANELS.get('termPanel');
-  if (panel && panel.isConnected) {
-    closeTerminalPanel();
-    return;
-  }
-  openTerminal();
-}
-
-function closeTerminalPanel() {
-  const panel = TERMINAL_PANELS.get('termPanel');
-  const id = TERMINAL_SESSIONS.get('termPanel');
-  // abort stream
-  const ctrl = TERMINAL_SESSIONS.get('termPanel:ctrl');
-  if (ctrl) try { ctrl.abort(); } catch(_) {}
-  const term = id ? TERMINAL_SESSIONS.get('termPanel+' + id) : null;
-  if (term) try { term.dispose(); } catch(_) {}
-  const ro = id ? TERMINAL_SESSIONS.get('termPanel+' + id + ':resize') : null;
-  if (ro) try { ro.disconnect(); } catch(_) {}
-  if (id) api.post('/api/terminal', { action: 'close', id }).catch(()=>{});
-  // clear maps
-  if (id) {
-    TERMINAL_SESSIONS.delete('termPanel+' + id);
-    TERMINAL_SESSIONS.delete('termPanel+' + id + ':resize');
-    TERMINAL_SESSIONS.delete('termPanel:ctrl');
-  }
-  TERMINAL_SESSIONS.delete('termPanel');
-  if (panel) panel.remove();
-  TERMINAL_PANELS.delete('termPanel');
-  log('note','TERM','terminal closed');
-}
-
-async function openTerminal() {
-  const hud = els.hud;
-  if (!hud) return;
-  if (TERMINAL_PANELS.get('termPanel')?.isConnected) return;
-
-  const panel = document.createElement('div');
-  panel.className = 'panel terminal-panel';
-  panel.id = 'termPanel';
-  panel.innerHTML = `
-    <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center">TERMINAL <span class="term-id" style="font-weight:400;opacity:.6"></span><button class="term-close" title="Close" style="background:transparent;border:1px solid var(--neon-dim);color:var(--text-dim);border-radius:2px;padding:0 6px;cursor:pointer;font-size:11px">✕</button></div>
-    <div class="panel-body" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
-      <div id="termCanvas" style="flex:1;min-height:220px;background:#001126"></div>
-    </div>
-  `;
-  hud.appendChild(panel);
-  panel.querySelector('.term-close').addEventListener('click', closeTerminalPanel);
-  TERMINAL_PANELS.set('termPanel', panel);
-  panel.dataset.layoutId = 'termPanel';
-  if (window._layoutManager) window._layoutManager.register('termPanel');
-
-  const termIdEl = panel.querySelector('.term-id');
-  const canvas = panel.querySelector('#termCanvas');
-
-  let j;
-  try { j = await api.post('/api/terminal', { action: 'create', cols: 90, rows: 28 }); }
-  catch { log('error','TERM','Server unreachable'); panel.remove(); TERMINAL_PANELS.delete('termPanel'); return; }
-  if (!j.ok || !j.id) { log('error','TERM','Gagal create terminal: ' + (j.error||'unknown')); panel.remove(); TERMINAL_PANELS.delete('termPanel'); return; }
-  const id = j.id;
-  if (termIdEl) termIdEl.textContent = `(${id.slice(0,8)})`;
-  TERMINAL_SESSIONS.set('termPanel', id);
-
-  const term = new Terminal({
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: 'Share Tech Mono, monospace',
-    theme: { background: '#001126', foreground: '#B0D8E8', cursor: '#00E8FF', selectionBackground: 'rgba(0,232,255,0.3)' },
-    scrollback: 5000,
-    convertEol: true,
-  });
-  const fitAddon = new FitAddon.FitAddon();
-  term.loadAddon(fitAddon);
-  term.open(canvas);
-  // fit after open, then report size to server
-  try { fitAddon.fit(); } catch(_){}
-  const cols = term.cols, rows = term.rows;
-  api.post('/api/terminal', { action: 'resize', id, cols, rows }).catch(()=>{});
-
-  const resizeObs = new ResizeObserver(() => {
-    try { fitAddon.fit(); api.post('/api/terminal', { action: 'resize', id, cols: term.cols, rows: term.rows }).catch(()=>{}); } catch(_){}
-  });
-  resizeObs.observe(canvas);
-  // also on window resize
-  const onWinResize = () => { try { fitAddon.fit(); } catch(_){} };
-  window.addEventListener('resize', onWinResize);
-
-  term.onData(data => { api.post('/api/terminal', { action: 'input', id, data }).catch(()=>{}); });
-  term.focus();
-
-  // Raw PTY stream via fetch (server sends application/octet-stream, not SSE)
-  const ctrl = new AbortController();
-  TERMINAL_SESSIONS.set('termPanel:ctrl', ctrl);
-  TERMINAL_SESSIONS.set('termPanel+' + id, term);
-  TERMINAL_SESSIONS.set('termPanel+' + id + ':resize', resizeObs);
-  TERMINAL_SESSIONS.set('termPanel+' + id + ':winresize', onWinResize);
-  const url = `/api/terminal-stream?id=${encodeURIComponent(id)}&token=${encodeURIComponent(ANA_TOKEN)}`;
-  try {
-    const res = await fetch(url, { headers: { 'X-Ana-Token': ANA_TOKEN }, signal: ctrl.signal });
-    if (!res.ok) { log('error','TERM','stream failed HTTP ' + res.status); return; }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder('utf-8', { fatal: false });
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value && value.length) term.write(dec.decode(value, { stream: true }));
-    }
-  } catch (e) {
-    if (e?.name !== 'AbortError') log('note','TERM','stream ended: ' + String(e).slice(0,120));
-  } finally {
-    window.removeEventListener('resize', onWinResize);
-  }
-}
-
-// Keyboard shortcut: Ctrl+` opens/closes terminal
-document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === '`') {
-    e.preventDefault();
-    toggleTerminal();
-  }
-});
 function applyMode(m) {
   state.mode = (m === 'asisten' ? 'asisten' : 'coding');
   els.modeBtn.textContent = state.mode.toUpperCase();
@@ -886,15 +739,16 @@ async function loadVoices() {
     const d = await r.json(); voicesCache = d.voices || [];
     const cur = d.current || '';
     const all = d.has_eleven ? [{ id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (EN, multilingual)', gender: 'female', desc: 'Calm British' }, ...voicesCache] : [...voicesCache];
-    // Add voice picker to right rail if not exists
-    let vp = document.getElementById('voicePicker');
-    if (!vp) {
-      vp = document.createElement('div'); vp.className = 'panel'; vp.id = 'voicePicker';
-      vp.innerHTML = `<div class="panel-title">VOICE CONFIG</div><div class="panel-body">
-        <select id="voiceSelect" class="voice-select">${all.map(v => `<option value="${v.id}" ${v.id === cur ? 'selected' : ''}>${v.name}</option>`).join('')}</select>
+    const vp = ensurePanel({
+      id: 'voicePicker', title: 'VOICE CONFIG', rail: 'right',
+      body: `<select id="voiceSelect" class="voice-select"></select>
         <div class="voice-btns"><button id="voicePreview" class="voice-btn">Preview</button><button id="voiceApply" class="voice-btn primary">Pakai</button></div>
-        <div id="voiceDesc" class="voice-desc"></div></div>`;
-      document.querySelector('.right-rail').appendChild(vp);
+        <div id="voiceDesc" class="voice-desc"></div>`,
+    });
+    // Wire the buttons once; the option list is refreshed on every call,
+    // because applyVoice() re-invokes loadVoices() to show the new selection.
+    if (!vp.dataset.wired) {
+      vp.dataset.wired = '1';
       vp.querySelector('#voicePreview').addEventListener('click', previewVoice);
       vp.querySelector('#voiceApply').addEventListener('click', applyVoice);
     }
@@ -945,49 +799,34 @@ async function applyVoice() {
 
 // ═══ TOOLS CHIPS ═══
 function initToolsChips() {
-  const panel = document.createElement('div');
-  panel.className = 'panel'; panel.id = 'toolsPanel';
-  panel.innerHTML = `<div class="panel-title">CONNECTED TOOLS</div><div class="panel-body"><div id="toolsList" class="tools-chips"><span class="chip ghost">loading...</span></div></div>`;
-  document.querySelector('.left-rail').appendChild(panel);
+  ensurePanel({ id: 'toolsPanel', title: 'CONNECTED TOOLS', rail: 'left',
+    body: '<div id="toolsList" class="tools-chips"><span class="chip ghost">loading...</span></div>' });
 }
-async function refreshTools() {
-  try {
-    const s = await api.getStatus();
-    const tools = (s.tools || []).slice(0, 12);
-    const list = document.getElementById('toolsList');
-    if (list) list.innerHTML = tools.length ? tools.map(t => `<span class="chip">${esc(t)}</span>`).join('') : '<span class="chip ghost">Hermes tool list unavailable</span>';
-  } catch (e) {}
+function renderTools(tools) {
+  const list = document.getElementById('toolsList');
+  if (list) list.innerHTML = (tools || []).length
+    ? tools.map(t => `<span class="chip">${esc(t)}</span>`).join('')
+    : '<span class="chip ghost">Hermes tool list unavailable</span>';
 }
-
 // ═══ SYSTEM TELEMETRY ═══
 function initSystemTelemetry() {
-  const panel = document.createElement('div');
-  panel.className = 'panel'; panel.id = 'sysTelemetry';
-  panel.innerHTML = `<div class="panel-title">SYSTEM TELEMETRY</div><div class="panel-body">
-    <div class="tele-grid">
+  ensurePanel({ id: 'sysTelemetry', title: 'SYSTEM TELEMETRY', rail: 'left',
+    body: `<div class="tele-grid">
       <div class="tele-item"><span class="tele-label">Brain</span><b id="sy-brain" class="tele-val">—</b></div>
       <div class="tele-item"><span class="tele-label">Runtime</span><b id="sy-runtime" class="tele-val">—</b></div>
       <div class="tele-item"><span class="tele-label">Profile</span><b id="sy-profile" class="tele-val">—</b></div>
       <div class="tele-item"><span class="tele-label">Uplink</span><b id="sy-uplink" class="tele-val">—</b></div>
       <div class="tele-item"><span class="tele-label">Clock</span><b id="sy-clock" class="tele-val">—</b></div>
-    </div></div>`;
-  document.querySelector('.left-rail').appendChild(panel);
+    </div>` });
   setInterval(() => { const c = document.getElementById('sy-clock'); if (c) c.textContent = now(); }, 1000);
 }
-async function refreshSystemTelemetry() {
-  try {
-    const s = await api.getStatus();
-    const brain = document.getElementById('sy-brain');
-    if (brain) brain.textContent = s.runtime === 'hermes' ? 'Hermes Agent' : 'Hermes offline';
-    const runtime = document.getElementById('sy-runtime');
-    if (runtime) runtime.textContent = s.runtime || '—';
-    const prof = document.getElementById('sy-profile');
-    if (prof) prof.textContent = s.profile || 'default';
-    const uplink = document.getElementById('sy-uplink');
-    if (uplink) uplink.textContent = 'online';
-  } catch (e) {}
+function renderSystemTelemetry(s) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('sy-brain', s.runtime === 'hermes' ? 'Hermes Agent' : 'Hermes offline');
+  set('sy-runtime', s.runtime || '—');
+  set('sy-profile', s.profile || 'default');
+  set('sy-uplink', 'online');
 }
-
 // ═══ STATUS ═══
 async function loadStatus() {
   try {
@@ -998,18 +837,10 @@ async function loadStatus() {
     els.stMem.textContent = s.memory || '—';
 
     els.stSess.textContent = s.session || '—';
-    // Also refresh tools + system telemetry
-    const tools = (s.tools || []).slice(0, 12);
-    const toolsList = document.getElementById('toolsList');
-    if (toolsList) toolsList.innerHTML = tools.length ? tools.map(t => `<span class="chip">${esc(t)}</span>`).join('') : '<span class="chip ghost">Hermes tool list unavailable</span>';
-    const brain = document.getElementById('sy-brain');
-    if (brain) brain.textContent = s.runtime === 'hermes' ? 'Hermes Agent' : 'Hermes offline';
-    const runtime = document.getElementById('sy-runtime');
-    if (runtime) runtime.textContent = s.runtime || '—';
-    const prof = document.getElementById('sy-profile');
-    if (prof) prof.textContent = s.profile || 'default';
-    const uplink = document.getElementById('sy-uplink');
-    if (uplink) uplink.textContent = 'online';
+    // Same payload feeds the tools chips and system telemetry, so one fetch
+    // renders all three panels instead of three separate calls.
+    renderTools(s.tools?.slice(0, 12));
+    renderSystemTelemetry(s);
   } catch (e) { console.error('Status error:', e); }
 }
 
@@ -1018,12 +849,8 @@ async function refreshProjects() {
   try {
     const data = await api.getProjects();
     const projects = data.projects || [];
-    let pl = document.getElementById('projectList');
-    if (!pl) {
-      pl = document.createElement('div'); pl.className = 'panel'; pl.id = 'projectList';
-      pl.innerHTML = `<div class="panel-title">ACTIVE REPOSITORIES</div><div class="panel-body"><div class="proj-grid" id="projGrid"></div></div>`;
-      document.querySelector('.left-rail').appendChild(pl);
-    }
+    const pl = ensurePanel({ id: 'projectList', title: 'ACTIVE REPOSITORIES', rail: 'left',
+      body: '<div class="proj-grid" id="projGrid"></div>' });
     const grid = pl.querySelector('#projGrid');
     if (!projects.length) { grid.innerHTML = '<span class="chip ghost">No active git repositories</span>'; return; }
     grid.innerHTML = projects.map(p => {
@@ -1049,16 +876,9 @@ async function refreshProjects() {
 async function refreshBriefing() {
   try {
     const data = await api.getBriefing();
-    let el = document.getElementById('briefingContent');
-    if (!el) {
-      const bp = document.createElement('div'); bp.className = 'panel'; bp.id = 'briefingPanel';
-      bp.innerHTML = `<div class="panel-title">PROACTIVE BRIEFING</div><div class="panel-body"><div id="briefingContent" class="briefing-body">Memuat briefing...</div></div>`;
-      document.querySelector('.left-rail').appendChild(bp);
-      el = bp.querySelector('#briefingContent');
-      // re-register with LayoutManager if already created
-      if (window._layoutManager) window._layoutManager.register('briefingPanel');
-    }
-    el.textContent = data.briefing || 'Belum ada briefing hari ini. Dijadwalkan otomatis pukul 08:00 WIB.';
+    const bp = ensurePanel({ id: 'briefingPanel', title: 'PROACTIVE BRIEFING', rail: 'left',
+      body: '<div id="briefingContent" class="briefing-body">Memuat briefing...</div>' });
+    bp.querySelector('#briefingContent').textContent = data.briefing || 'Belum ada briefing hari ini. Dijadwalkan otomatis pukul 08:00 WIB.';
   } catch (e) {}
 }
 
@@ -1119,18 +939,17 @@ function init() {
     'bottomTelemetry'
   ].filter(id => document.getElementById(id)));
   window._layoutManager = layout;
-  // Register dynamically created panels once they exist
-  loadVoices().then(() => { if (window._layoutManager) window._layoutManager.register('voicePicker'); });
-  refreshProjects().then(() => { if (window._layoutManager) window._layoutManager.register('projectList'); });
-  refreshBriefing().then(() => { if (window._layoutManager) window._layoutManager.register('briefingPanel'); });
-  refreshTools().then(() => { if (window._layoutManager) window._layoutManager.register('toolsPanel'); });
-  refreshSystemTelemetry().then(() => { if (window._layoutManager) window._layoutManager.register('sysTelemetry'); });
-  // ANA Fase C+D: kanban / vault / avd
-  refreshKanban().then(() => { if (window._layoutManager) window._layoutManager.register('missionKanban'); });
-  refreshVault().then(() => { if (window._layoutManager) window._layoutManager.register('vaultPanel'); });
-  refreshAvd().then(() => { if (window._layoutManager) window._layoutManager.register('avdPanel'); });
+  // Dynamically created panels register themselves inside ensurePanel(), so
+  // these only have to fire — no .then(register) bookkeeping to keep in sync.
+  loadVoices(); refreshProjects(); refreshBriefing();
+  refreshKanban(); refreshVault(); refreshAvd();
   setInterval(() => { refreshKanban().catch(()=>{}); }, 6000);
   setInterval(() => { refreshAvd().catch(()=>{}); }, 7000);
+  // Terminal is its own module (ui/src/terminal.js); it owns its DOM,
+  // pty session and stream reader, and binds Ctrl+` itself.
+  const terminal = createTerminal({
+    api, token: ANA_TOKEN, log, hud: els.hud, isOpen: () => !!document.getElementById('termPanel'),
+  });
   const topControls = document.getElementById('topControls');
   if (topControls) {
     // Terminal button — inserted left of Lock per spec
@@ -1139,7 +958,7 @@ function init() {
     termBtn.id = 'termBtn';
     termBtn.innerHTML = '<span class="toggle-icon">⌘</span> Terminal';
     termBtn.title = 'Toggle terminal (Ctrl+`)';
-    termBtn.addEventListener('click', toggleTerminal);
+    termBtn.addEventListener('click', terminal.toggle);
     topControls.appendChild(termBtn);
 
     const t = document.createElement('button');
