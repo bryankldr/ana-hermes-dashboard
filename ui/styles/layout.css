@@ -1,0 +1,81 @@
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { height:100%; width:100%; overflow:hidden; }
+body {
+  background: radial-gradient(ellipse at 50% 50%, #0A2A5A 0%, #051B3A 55%, #020F2A 100%);
+  color: var(--text-main);
+  font-family: var(--font-tech);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.02em;
+}
+/* Starfield dots (decor) */
+body::after {
+  content:"";
+  position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.18;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, #6ECFFF 100%, transparent 100%),
+    radial-gradient(1px 1px at 70% 15%, #FFFFFF 100%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 40% 80%, #6ECFFF 100%, transparent 100%),
+    radial-gradient(1px 1px at 85% 70%, #FFFFFF 100%, transparent 100%),
+    radial-gradient(1px 1px at 10% 85%, #6ECFFF 100%, transparent 100%);
+  background-repeat: no-repeat;
+}
+.grid-bg {
+  position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.35;
+  background-image:
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask: radial-gradient(80% 70% at 50% 50%, #000 40%, transparent 100%);
+}
+.scanlines {
+  position:fixed; inset:0; z-index:40; pointer-events:none; opacity:0.22;
+  background: linear-gradient(transparent 0%, rgba(45,242,255,0.04) 50%, transparent 100%);
+  background-size: 100% 8px;
+  animation: scanAnim 7s linear infinite;
+}
+@keyframes scanAnim { from{background-position:0 -100vh} to{background-position:0 100vh} }
+.ambient { position:fixed; border-radius:50%; filter:blur(40px); pointer-events:none; }
+.a1 { width:28vw; height:28vw; left:32%; top:18%; background: rgba(45,242,255,0.10); }
+.a2 { width:20vw; height:20vw; right:6%; bottom:8%; background: rgba(0,229,255,0.06); }
+
+/* ── FUI Container ── */
+.hud-container, .hud {
+  position:relative; z-index:1;
+  height:100vh;
+  display:grid;
+  grid-template-rows: auto 1fr auto;
+  padding: var(--hud-outer-margin);
+  gap: var(--hud-gap);
+}
+/* Legacy .hud grid fallback */
+.hud { grid-template-rows: auto 1fr; }
+.hud.workspace, main.workspace { gap: var(--hud-gap); }
+
+/* ── Glass Panel + Corner Brackets ── */
+.fui-panel, .glass {
+  background: var(--bg-panel);
+  border: 1px solid var(--neon-border);
+  border-radius: var(--panel-radius);
+  box-shadow: 0 0 28px rgba(0,0,0,0.55), inset 0 0 18px var(--neon-faint);
+  backdrop-filter: blur(4px);
+  position:relative;
+  overflow:hidden;
+}
+.fui-panel::before, .fui-panel::after,
+.glass::before, .glass::after {
+  content:""; position:absolute; pointer-events:none;
+  width: var(--bracket-size); height: var(--bracket-size);
+  border-color: var(--neon); border-style:solid;
+  filter: drop-shadow(0 0 4px var(--neon-glow));
+}
+.fui-panel::before, .glass::before { top: var(--bracket-gap); left: var(--bracket-gap); border-width: var(--bracket-thick) 0 0 var(--bracket-thick); border-radius:0; }
+.fui-panel::after,  .glass::after  { bottom: var(--bracket-gap); right: var(--bracket-gap); border-width: 0 var(--bracket-thick) var(--bracket-thick) 0; border-radius:0; }
+
+/* Override old .glass pseudo that drew gradient — replace with bracket only */
+.glass::before, .glass::after { background:none !important; }
+
+/* ── Brandmark ── */
+.brandmark {
+  position:fixed; bottom:6px; right:12px; z-index:2;
+  font-family: var(--font-tech); font-size:7px; letter-spacing:0.22em; color: var(--text-dim); opacity:0.6;
+}

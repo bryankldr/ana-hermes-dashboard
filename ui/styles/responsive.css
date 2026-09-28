@@ -1,0 +1,29 @@
+@media (min-width:1440px){ .workspace{grid-template-columns:380px 1fr 420px} }
+@media (min-width:1024px) and (max-width:1439px){ .workspace{grid-template-columns:320px 1fr 360px} .center-panel{gap:14px} }
+@media (min-width:768px) and (max-width:1023px){
+  .workspace{grid-template-columns:280px 1fr; grid-template-rows:1fr auto}
+  .right-panel{grid-column:1 / -1; flex-direction:row; flex-wrap:wrap}
+  .right-panel > *{flex:1; min-width:260px}
+  .reactor{width:min(32vh,340px)}
+}
+@media (min-width:480px) and (max-width:767px){
+  .workspace{grid-template-columns:1fr; grid-template-rows:auto 1fr auto; overflow-y:auto}
+  .left-panel,.right-panel{flex-direction:row; flex-wrap:wrap; overflow:visible}
+  .left-panel > *, .right-panel > *{flex:1; min-width:200px}
+  .center-panel{order:-1; padding:8px 0}
+  .reactor{width:min(28vh,280px)}
+}
+@media (max-width:479px){
+  .hud-container{padding:8px; gap:8px}
+  .workspace{grid-template-columns:1fr; grid-template-rows:auto 1fr auto; overflow-y:auto}
+  .left-panel,.right-panel{flex-direction:column; overflow:visible}
+  .center-panel{order:-1; padding:6px 0}
+  .reactor{width:200px}
+  .topbar{flex-direction:column; align-items:flex-start; padding:8px 12px}
+  .bottombar{height:auto; flex-direction:column; align-items:stretch; padding:8px 12px}
+  .console-deck{max-width:100%}
+  .response{min-height:80px; max-height:160px}
+  .code-panel{height:180px}
+}
+@media (max-height:600px){ .reactor{width:180px} .center-panel{gap:8px} .response{min-height:60px; max-height:120px} }
+@media (min-width:1920px){ .workspace{grid-template-columns:420px 1fr 480px} .reactor{width:min(42vh,480px)} }

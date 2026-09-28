@@ -1,0 +1,75 @@
+/* ── Typography (exact screenshot) ── */
+.hdr-title, .log-lbl, .lbl {
+  font-family: var(--font-tech);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-header);
+  display:flex; align-items:center; gap:8px;
+}
+.hdr-title::before {
+  content:""; display:inline-block; width:3px; height:10px;
+  background: var(--neon); box-shadow: 0 0 6px var(--neon-glow);
+  flex:0 0 auto;
+}
+.mono-text { font-family: var(--font-mono); font-size: 10px; letter-spacing:0.04em; }
+.sub, .tip { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); line-height:1.5; }
+.tip b { color: var(--amber); }
+
+/* ── Chips / Pills ── */
+.chip, .status-pill, .pill {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing:0.06em;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--neon-border);
+  background: rgba(2,15,42,0.75); color: var(--text-body);
+  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+}
+.chip.ghost { color: var(--text-dim); border-color: rgba(90,122,138,0.25); font-style:italic; }
+.status-pill.online::before, .pill.ok i { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-pill.warn::before, .pill.warn i { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.pill i { width:8px; height:8px; border-radius:50%; flex:0 0 auto; background: var(--neon); box-shadow:0 0 6px var(--neon); }
+
+/* ── Buttons ── */
+.ctl, .ctl-btn, .cmd, [data-quick] {
+  cursor:pointer;
+  font-family: var(--font-mono); font-size:10px; font-weight:600; letter-spacing:0.08em;
+  padding: 7px 10px; border-radius:6px;
+  border: 1px solid var(--neon-border);
+  background: rgba(5,27,58,0.85); color: var(--text-main);
+  transition: border-color .18s, box-shadow .18s, transform .18s, background .18s;
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  white-space:nowrap; user-select:none;
+}
+.ctl:hover, .ctl-btn:hover, .cmd:hover, [data-quick]:hover {
+  border-color: var(--neon-border-strong); box-shadow: 0 0 14px var(--neon-dim); transform: translateY(-1px);
+}
+.ctl.primary, .ctl.run, .ctl-btn.primary {
+  background: linear-gradient(180deg, rgba(45,242,255,0.22), rgba(45,242,255,0.07));
+  border-color: var(--neon); color: var(--neon); box-shadow: 0 0 12px var(--neon-dim);
+}
+.ctl.mic.on, .ctl-btn.active { background: rgba(255,93,108,0.16); border-color: var(--red); color: var(--red); }
+.ctl.mode { color: var(--amber); border-color: rgba(255,182,72,0.45); background: rgba(255,182,72,0.08); }
+.ctl.mode.asisten { color: var(--green); border-color: rgba(57,245,166,0.45); background: rgba(57,245,166,0.08); }
+.ctl.mute.off { opacity:0.45; }
+.cmd { flex-direction:column; align-items:flex-start; padding:10px 12px; text-align:left; line-height:1.2; }
+.cmd b { font-size:11px; color: var(--neon); }
+.cmd span { font-size:8px; letter-spacing:0.12em; color: var(--text-dim); margin-top:4px; }
+.cmd.armed { border-color: var(--neon); background: rgba(45,242,255,0.1); box-shadow: 0 0 18px var(--neon-dim); }
+.miniBtns button { font-size:9px; padding:6px 8px; }
+
+/* ── Inputs ── */
+.field { border:1px solid var(--neon-border); border-radius:8px; background: rgba(3,14,28,0.75); padding:3px; transition: .18s; }
+.field:focus-within { border-color: var(--neon); box-shadow: 0 0 14px var(--neon-dim); }
+.field textarea, #input, #chatInput, .chat-input-field {
+  width:100%; background:transparent; border:0; outline:0; resize:none;
+  color: var(--text-main); font-family: var(--font-mono); font-size:11px; line-height:1.55;
+}
+#input::placeholder, #chatInput::placeholder, .chat-input-field::placeholder { color: var(--text-dim); opacity:0.6; }
+#voiceSelect { background: rgba(2,15,42,0.75) !important; border:1px solid var(--neon-border) !important; color: var(--text-main) !important; }
+#voiceSelect:focus { border-color: var(--neon) !important; box-shadow: 0 0 10px var(--neon-dim); }
+
+/* ── Live dot ── */
+.live { font-family: var(--font-mono); font-size:8px; letter-spacing:0.16em; color: var(--text-header); }
+.live::before { content:"◍ "; color: var(--green); animation: blink 1.4s steps(1) infinite; }
+@keyframes blink { 50%{opacity:.25} }

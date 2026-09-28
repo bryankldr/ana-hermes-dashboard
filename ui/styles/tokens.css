@@ -1,0 +1,68 @@
+:root {
+  /* === Background (exact screenshot) === */
+  --bg-base: #020F2A;
+  --bg-mid: #051B3A;
+  --bg-glow: #0A2A5A;
+  --bg-grid: rgba(10, 42, 74, 0.3);
+  --bg-panel: rgba(5, 27, 58, 0.6);
+  --bg-panel-solid: #071a3a;
+
+  /* === Neon Cyan (Primary) === */
+  --neon: #2DF2FF;
+  --neon-bright: #00E5FF;
+  --neon-glow: rgba(45, 242, 255, 0.7);
+  --neon-dim: rgba(45, 242, 255, 0.15);
+  --neon-faint: rgba(45, 242, 255, 0.06);
+  --neon-border: rgba(45, 242, 255, 0.25);
+  --neon-border-strong: rgba(45, 242, 255, 0.6);
+
+  /* === Text === */
+  --text-header: #7AF8FF;
+  --text-header-bright: #A0FEFF;
+  --text-body: #B0D8E8;
+  --text-dim: #5A7A8A;
+  --text-telemetry: #C8EFFF;
+  --text-main: #E0F7FF;
+
+  /* === Compat aliases (old files still work) === */
+  --bg-dark: var(--bg-base);
+  --bg-deep: var(--bg-base);
+  --bg-shadow: #001126;
+  --bg-mid-compat: var(--bg-mid);
+  --cyan-bright: var(--neon);
+  --cyan-mid: #16b8d4;
+  --cyan-dim: #0A4A5A;
+  --cyan-faint: var(--neon-faint);
+  --neon-mid: var(--neon-border);
+  --neon-strong: var(--neon-border-strong);
+  --core-bright: #BFFFFF;
+  --core-white: #FFFFFF;
+  --font-display: var(--font-disp);
+  --bg-panel-border: var(--neon-border);
+  --bg-panel-glow: var(--neon-glow);
+
+  /* === Accents === */
+  --amber: #FFB648;
+  --amber-bright: #FFB648;
+  --green: #39F5A6;
+  --green-bright: #39F5A6;
+  --red: #FF5D6C;
+  --red-bright: #FF5D6C;
+  --violet: #A884FF;
+
+  /* === Fonts (exact screenshot) === */
+  --font-tech: "Share Tech Mono", "JetBrains Mono", "Roboto Mono", Consolas, monospace;
+  --font-mono: "JetBrains Mono", "Roboto Mono", Consolas, monospace;
+  --font-disp: "Orbitron", "Chakra Petch", system-ui, sans-serif;
+
+  /* === Metrics === */
+  --panel-radius: 8px;
+  --panel-radius-inner: 4px;
+  --bracket-size: 20px;
+  --bracket-thick: 2.5px;
+  --bracket-gap: 2px;
+  --panel-border: 1px;
+  --hud-outer-margin: 16px;
+  --hud-gap: 12px;
+  --panel-padding: 12px;
+}

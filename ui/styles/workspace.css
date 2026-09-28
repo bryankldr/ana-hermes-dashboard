@@ -1,0 +1,44 @@
+/* ── Top Bar ── */
+.topbar {
+  display:flex; justify-content:space-between; align-items:center;
+  padding: 10px 18px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--neon-dim);
+  background: linear-gradient(180deg, rgba(5,27,58,0.85), rgba(2,15,42,0.65));
+}
+.topbar .hdr-title { font-size:13px; letter-spacing:0.18em; }
+
+/* ── Workspace 3-col ── */
+.workspace {
+  display:grid;
+  grid-template-columns: 340px 1fr 380px;
+  gap: 12px;
+  min-height:0;
+  align-items:start;
+}
+.left-panel, .right-panel {
+  display:flex; flex-direction:column; gap:12px;
+  overflow-y:auto; overflow-x:hidden;
+  min-height:0; padding:2px;
+  scrollbar-width:thin; scrollbar-color: var(--neon-dim) transparent;
+}
+.center-panel {
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+  gap: 16px; min-height:0; padding: 8px 0 0;
+}
+
+/* ── Bottom Bar ── */
+.bottombar {
+  min-height: 44px; height:auto;
+  padding: 8px 16px;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  border-top: 1px solid var(--neon-dim);
+  background: rgba(2,15,42,0.6);
+  flex-wrap:wrap;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width:4px; height:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background: var(--neon-dim); border-radius:999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--neon-border); }

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="ana-token" content="__ANA_TOKEN__">
+  <title>ANA · Autonomous AI HUD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/hud.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+</head>
+<body>
+<div class="hud" id="hud">
+
+  <!-- ═══ BACKGROUND LAYERS ═══ -->
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+  <canvas id="particles"></canvas>
+
+  <!-- ═══ OUTER FRAME ═══ -->
+  <div class="frame">
+    <div class="frame-corner tl"></div>
+    <div class="frame-corner tr"></div>
+    <div class="frame-corner bl"></div>
+    <div class="frame-corner br"></div>
+    <div class="frame-bar top-left"></div>
+    <div class="frame-bar top-right"></div>
+    <div class="frame-bar bottom"></div>
+  </div>
+
+  <!-- ═══ TOP CONTROLS ═══ -->
+  <div class="top-controls" id="topControls"></div>
+
+  <!-- ═══ TOP DIALS ═══ -->
+  <div class="top-dials" id="topDials"></div>
+
+  <!-- ═══ LEFT RAIL ═══ -->
+  <div class="left-rail">
+    <div class="panel" id="agentPanel">
+      <div class="panel-title">AGENT STATUS</div>
+      <div class="panel-body">
+        <div class="stat-row"><span>MODEL</span><b id="stModel">—</b></div>
+        <div class="stat-row"><span>MODE</span><b id="stMode">—</b></div>
+        <div class="stat-row"><span>CONTEXT</span><b id="stCtx">—</b></div>
+        <div class="stat-row"><span>MEMORY</span><b id="stMem">—</b></div>
+        <div class="stat-row"><span>SESSION</span><b id="stSess">—</b></div>
+      </div>
+    </div>
+    <div class="panel" id="statusMatrix">
+      <div class="panel-title">SYSTEM MATRIX</div>
+      <div class="panel-body">
+        <div class="matrix-grid" id="matrixGrid"></div>
+      </div>
+    </div>
+    <div class="panel" id="workspacePanel">
+      <div class="panel-title">WORKSPACE</div>
+      <div class="panel-body">
+        <svg id="workspaceSvg" viewBox="0 0 160 110" class="wireframe"></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ CENTRAL CORE ═══ -->
+  <div class="core" id="core">
+    <svg id="coreSvg" viewBox="0 0 470 370" class="core-svg">
+      <!-- Octagonal frame -->
+      <polygon id="octFrame" points="" fill="none" stroke="rgba(0,232,255,0.25)" stroke-width="1"/>
+      <!-- Concentric circles -->
+      <circle cx="235" cy="185" r="120" fill="none" stroke="rgba(0,232,255,0.15)" stroke-width="1" stroke-dasharray="4 6"/>
+      <circle cx="235" cy="185" r="90" fill="none" stroke="rgba(0,232,255,0.2)" stroke-width="1" stroke-dasharray="2 4"/>
+      <circle cx="235" cy="185" r="60" fill="none" stroke="rgba(0,232,255,0.3)" stroke-width="1"/>
+      <circle cx="235" cy="185" r="30" fill="none" stroke="rgba(0,232,255,0.4)" stroke-width="1"/>
+      <!-- Radial ticks -->
+      <g id="radialTicks"></g>
+      <!-- Orbital particles -->
+      <g id="orbitalParticles"></g>
+      <!-- Core glow -->
+      <circle cx="235" cy="185" r="8" fill="#BFFFFF" class="core-glow"/>
+      <circle cx="235" cy="185" r="4" fill="#FFFFFF" class="core-center"/>
+    </svg>
+    <div class="core-label" id="coreLabel">IDLE</div>
+  </div>
+
+  <!-- ═══ RIGHT RAIL ═══ -->
+  <div class="right-rail">
+    <div class="panel" id="intelPanel">
+      <div class="panel-title">INTELLIGENCE SURFACE</div>
+      <div class="panel-body">
+        <div id="intelTerminal" class="intel-terminal"><div class="intel-line dim">Waiting for agent activity...</div></div>
+      </div>
+    </div>
+    <div class="panel" id="pipelinePanel">
+      <div class="panel-title">AGENT PIPELINE</div>
+      <div class="panel-body">
+        <div class="pipeline" id="pipeline">
+          <div class="pipe-node" data-stage="intent">INTENT</div>
+          <div class="pipe-arrow">↓</div>
+          <div class="pipe-node" data-stage="context">CONTEXT</div>
+          <div class="pipe-arrow">↓</div>
+          <div class="pipe-node" data-stage="memory">MEMORY</div>
+          <div class="pipe-arrow">↓</div>
+          <div class="pipe-node" data-stage="reasoning">REASONING</div>
+          <div class="pipe-arrow">↓</div>
+          <div class="pipe-node" data-stage="tools">TOOLS</div>
+          <div class="pipe-arrow">↓</div>
+          <div class="pipe-node" data-stage="result">RESULT</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ BOTTOM TELEMETRY ═══ -->
+  <div class="bottom-telemetry" id="bottomTelemetry">
+    <div class="tele-left">
+      <div class="tele-bar"><div class="tele-fill" id="teleCpu"></div></div>
+      <span class="tele-label">CPU</span>
+    </div>
+    <div class="tele-center" id="equalizerWrap">
+      <canvas id="equalizer" width="80" height="24"></canvas>
+    </div>
+    <div class="tele-right">
+      <div class="tele-bar"><div class="tele-fill" id="teleRam"></div></div>
+      <span class="tele-label">RAM</span>
+    </div>
+  </div>
+
+  <!-- ═══ INTERACTION LAYER ═══ -->
+  <div class="response-card" id="response">
+    <div class="response-label">RESPONSE</div>
+    <div class="response-text" id="responseText">Siap menerima perintah.</div>
+  </div>
+  <div class="chat-bar" id="chatBar">
+    <input type="text" id="chatInput" placeholder="Ketik perintah..." autocomplete="off">
+    <button id="sendBtn" class="btn-send">➤</button>
+    <button id="micBtn" class="btn-mic">🎤</button>
+    <button id="modeBtn" class="btn-mode">CODING</button>
+  </div>
+
+  <!-- ═══ EVENT LOG ═══ -->
+  <div class="event-log" id="eventLog">
+    <div class="event-log-header">EVENT STREAM</div>
+    <div class="event-entries" id="eventEntries"></div>
+  </div>
+
+  <!-- ═══ CODE VIEWER ═══ -->
+  <div class="code-viewer" id="codeViewer">
+    <div class="cv-header">AGENT EXECUTION</div>
+    <pre class="cv-body" id="cvBody"></pre>
+  </div>
+
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

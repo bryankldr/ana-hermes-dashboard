@@ -1,0 +1,14 @@
+.env
+.ana_mode
+state.json
+layout.json
+.no-mcp.json
+__pycache__/
+*.pyc
+*.log
+ui/backup/
+ana.png
+dasboard_hud.png
+.DS_Store
+docs/screenshot.png
+Autonomous_AI_Assistant_HUD_Skill/
