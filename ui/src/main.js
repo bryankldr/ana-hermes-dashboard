@@ -962,6 +962,7 @@ setInterval(async () => {
 function initPanelOptions(layout) {
   const btn = document.getElementById('optBtn');
   if (!btn) return;
+  if (document.getElementById('panelOptionsMenu')) return;
 
   const wrap = document.createElement('div');
   wrap.className = 'panel-options-wrap';
@@ -987,7 +988,7 @@ function initPanelOptions(layout) {
     topControls: 'TOP CONTROLS', bottomTelemetry: 'BOTTOM TELEMETRY',
     missionKanban: 'MISSION KANBAN', vaultPanel: 'VAULT STATUS',
     avdPanel: 'ANDROID AVD', projectList: 'ACTIVE REPOSITORIES',
-    briefingPanel: 'PROACTIVE BRIEFING', termPanel: 'TERMINAL',
+    briefingPanel: 'PROACTIVE BRIEFING', termPanel: 'TERMINAL', voicePicker: 'VOICE CONFIG',
   };
 
   for (const id of ids) {
@@ -1023,7 +1024,7 @@ function initPanelOptions(layout) {
 }
 
 // ═══ INIT ═══
-function init() {
+async function init() {
   initParticles(); initDials(); initOctFrame(); initRadialTicks(); initOrbitalParticles();
   initMatrix(); initWorkspace(); initIntel(); initEqualizer(); initTelemetry();
   initCommandMatrix(); initQuickButtons(); initMuteClear();
@@ -1040,8 +1041,12 @@ function init() {
   window._layoutManager = layout;
   // Dynamically created panels register themselves inside ensurePanel(), so
   // these only have to fire — no .then(register) bookkeeping to keep in sync.
-  loadVoices(); refreshProjects(); refreshBriefing();
-  refreshKanban(); refreshVault(); refreshAvd();
+  // Await them so initPanelOptions sees every panel in the DOM.
+  await Promise.allSettled([loadVoices(), refreshProjects(), refreshBriefing(),
+    refreshKanban(), refreshVault(), refreshAvd()]);
+  // Panel options must run after every ensurePanel() call above, otherwise
+  // the dynamic panels (voicePicker, briefingPanel, projectList,
+  // missionKanban, vaultPanel, avdPanel) are missing from the menu.
   setInterval(() => { refreshKanban().catch(()=>{}); }, 6000);
   setInterval(() => { refreshAvd().catch(()=>{}); }, 7000);
   // Terminal is its own module (ui/src/terminal.js); it owns its DOM,
@@ -1089,9 +1094,9 @@ function init() {
       layout.reset();
     };
     topControls.appendChild(resetBtn);
-    // Panel options must run after optBtn exists in the DOM
-    initPanelOptions(layout);
   }
+  // optBtn is created inside the topControls block; defer until next frame.
+  requestAnimationFrame(() => initPanelOptions(layout));
   log('status', 'INIT', 'ANA FUI HUD terintegrasi penuh.');
   setAgentState('IDLE');
   // Boot
