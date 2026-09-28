@@ -59,6 +59,18 @@ def _load_mode():
     except OSError:
         return os.environ.get("ANA_MODE","coding").strip().lower() or "coding"
 MODE = {"v": _load_mode()}
+
+
+def _clamp(value, lo, hi, default):
+    """Terminal dimensions arrive as JSON, so they can be a string, a list or
+    None. int() raises on any of those and would kill the request thread, so
+    anything unusable falls back to the caller's default."""
+    try:
+        return max(lo, min(hi, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def get_mode(): return MODE["v"]
 def set_mode(v):
     v = (v or "").strip().lower()
@@ -85,6 +97,12 @@ def persona():
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # With HTTP/1.1 keep-alive and no socket timeout, a client that opens a
+    # connection and then goes quiet pins its thread for the life of the
+    # process, and ThreadingHTTPServer spawns one thread per connection without
+    # a ceiling. 30s of silence is far longer than any real request here needs
+    # and lets the server reap the thread itself.
+    timeout = 30
 
     def log_message(self, fmt, *args):
         if os.environ.get("ANA_VERBOSE"):
@@ -235,8 +253,15 @@ class Handler(BaseHTTPRequestHandler):
             tid = (qs.get("id", [""])[0] or "").strip()
             return self._terminal_stream(tid)
         rel = "index.html" if p == "/" else p.lstrip("/")
-        f = (UI / rel).resolve()
-        if not str(f).startswith(str(UI.resolve())) or not f.is_file():
+        # A plain startswith() check passes for "../ui_secret" and
+        # "../uix/anything" because there is no separator between the prefix
+        # and the attacker-controlled part. relative_to() is exact.
+        try:
+            f = (UI / rel).resolve()
+            f.relative_to(UI.resolve())
+        except (ValueError, OSError):
+            return self._bytes(b"not found", "text/plain", 404)
+        if not f.is_file():
             return self._bytes(b"not found", "text/plain", 404)
         ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
         data = f.read_bytes()
@@ -283,19 +308,31 @@ class Handler(BaseHTTPRequestHandler):
             raw = self._read(MAX_AUDIO_BODY if p == "/api/listen" else MAX_JSON_BODY)
         except (TypeError, ValueError):
             return self._json({"error": "request body too large"}, 413)
+        # Parse once, for every JSON endpoint. Valid JSON that is not an object
+        # (a bare string, number or list) used to reach `.get()` outside the
+        # try below, so the handler thread died and the client saw a closed
+        # socket with no status line at all instead of a 400.
+        if p not in {"/api/listen"} and ctype == "application/json":
+            try:
+                body = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                return self._json({"error": "bad json"}, 400)
+            if not isinstance(body, dict):
+                return self._json({"error": "body must be a JSON object"}, 400)
+        else:
+            body = {}
 
         if p == "/api/layout":
             try:
-                payload = json.loads(raw or b"{}")
                 layout_file = ROOT / "layout.json"
                 # validate: layouts must be dict, each entry is dict
-                layouts = payload.get("layouts", {})
+                layouts = body.get("layouts", {})
                 if not isinstance(layouts, dict):
                     return self._json({"error": "layouts must be dict"}, 400)
                 for k, v in layouts.items():
                     if not isinstance(k, str) or not isinstance(v, dict):
                         return self._json({"error": "invalid layout entry"}, 400)
-                data = {"locked": bool(payload.get("locked", True)), "layouts": layouts}
+                data = {"locked": bool(body.get("locked", True)), "layouts": layouts}
                 layout_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
                 return self._json(data)
             except json.JSONDecodeError:
@@ -304,11 +341,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)[:200]}, 500)
 
         if p == "/api/session":
-            try:
-                payload = json.loads(raw or b"{}")
-            except json.JSONDecodeError:
-                return self._json({"error": "bad json"}, 400)
-            sid = payload.get("session_id")
+            sid = body.get("session_id")
             if sid and runtime.valid_session(sid):
                 SESSION["id"] = str(sid)
                 return self._json({"ok": True, "session": SESSION["id"]})
@@ -317,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/speak":
             try:
-                text = (json.loads(raw or b"{}").get("text") or "").strip()
+                text = (body.get("text") or "").strip()
                 return self._bytes(voice.speak(text), "audio/mpeg")
             except Exception as e:                        # noqa: BLE001
                 return self._json({"error": str(e)[:200]}, 503)
@@ -331,7 +364,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/voice-preview":
             try:
-                body = json.loads(raw or b"{}")
                 vid = (body.get("voice_id") or "").strip()
                 txt = (body.get("text") or "Halo Pak, ini preview suara ANA.").strip()[:400]
                 # allow both ElevenLabs IDs and free Edge IDs
@@ -346,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)[:300]}, 500)
         if p == "/api/voice":
             try:
-                vid = (json.loads(raw or b"{}").get("voice_id") or "").strip()
+                vid = (body.get("voice_id") or "").strip()
                 allowed = {v["id"] for v in voice.curated_voices()} | {v["id"] for v in getattr(voice, "FREE_VOICES", [])} | {"21m00Tcm4TlvDq8ikWAM"}
                 if vid not in allowed: raise ValueError("voice_id tidak ada di daftar")
                 # persist to .env
@@ -363,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)[:200]}, 400)
         if p == "/api/mode":
             try:
-                v = (json.loads(raw or b"{}").get("mode") or "").strip().lower()
+                v = (body.get("mode") or "").strip().lower()
                 set_mode(v)
                 return self._json(dict(ok=True, mode=get_mode()))
             except Exception as e:
@@ -379,71 +411,76 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "stopped": stopped})
         if p == "/api/avd":
             try:
-                ok, body = services.avd_action(
-                    (json.loads(raw or b"{}") or {}).get("action"))
-            except json.JSONDecodeError:
-                return self._json({"error": "bad json"}, 400)
+                ok, info = services.avd_action(body.get("action"))
+            except Exception as e:                        # noqa: BLE001
+                return self._json({"error": str(e)[:200]}, 500)
             if ok is None:
-                return self._json(body, 400)
-            return self._json({"ok": ok, **body}, 200 if ok else 500)
+                return self._json(info, 400)
+            return self._json({"ok": ok, **info}, 200 if ok else 500)
 
         # ── terminal endpoints ──────────────────────────────
         if p == "/api/terminal":
+            # A bad action, id or dimension is a client mistake, so nothing in
+            # here may raise past this handler: the thread would die and the
+            # client would see a closed socket rather than a status code.
             try:
-                body = json.loads(raw or b"{}")
-            except json.JSONDecodeError:
-                return self._json({"error": "bad json"}, 400)
-            action = (body.get("action") or "").strip()
-            if action == "create":
-                cols = max(20, min(200, int(body.get("cols", 80))))
-                rows = max(5, min(60, int(body.get("rows", 24))))
-                t = ana_terminal.create(cols, rows)
-                return self._json({"ok": True, "id": t.id, "cols": t.cols, "rows": t.rows})
-            if action == "close":
-                tid = (body.get("id") or "").strip()
-                if not tid:
-                    return self._json({"error": "id required"}, 400)
-                ok = ana_terminal.close(tid)
-                return self._json({"ok": ok})
-            if action == "resize":
-                tid = (body.get("id") or "").strip()
-                t = ana_terminal.get(tid)
-                if not t:
-                    return self._json({"error": "terminal not found"}, 404)
-                cols = max(20, min(200, int(body.get("cols", t.cols))))
-                rows = max(5, min(60, int(body.get("rows", t.rows))))
-                t.resize(cols, rows)
-                return self._json({"ok": True, "cols": t.cols, "rows": t.rows})
-            if action == "input":
-                tid = (body.get("id") or "").strip()
-                t = ana_terminal.get(tid)
-                if not t:
-                    return self._json({"error": "terminal not found"}, 404)
-                data = body.get("data", "")
-                if isinstance(data, str):
-                    data = data.encode("utf-8", "surrogateescape")
-                if not isinstance(data, (bytes, bytearray)):
-                    return self._json({"error": "data must be string"}, 400)
-                t.write(bytes(data))
-                return self._json({"ok": True})
-            return self._json({"error": "unknown action"}, 400)
+                action = (body.get("action") or "").strip()
+                if action == "create":
+                    cols = _clamp(body.get("cols"), 20, 200, 80)
+                    rows = _clamp(body.get("rows"), 5, 60, 24)
+                    t = ana_terminal.create(cols, rows)
+                    return self._json({"ok": True, "id": t.id, "cols": t.cols, "rows": t.rows})
+                if action == "close":
+                    tid = (body.get("id") or "").strip()
+                    if not tid:
+                        return self._json({"error": "id required"}, 400)
+                    ok = ana_terminal.close(tid)
+                    return self._json({"ok": ok})
+                if action == "resize":
+                    tid = (body.get("id") or "").strip()
+                    t = ana_terminal.get(tid)
+                    if not t:
+                        return self._json({"error": "terminal not found"}, 404)
+                    cols = _clamp(body.get("cols"), 20, 200, t.cols)
+                    rows = _clamp(body.get("rows"), 5, 60, t.rows)
+                    t.resize(cols, rows)
+                    return self._json({"ok": True, "cols": t.cols, "rows": t.rows})
+                if action == "input":
+                    tid = (body.get("id") or "").strip()
+                    t = ana_terminal.get(tid)
+                    if not t:
+                        return self._json({"error": "terminal not found"}, 404)
+                    data = body.get("data", "")
+                    if isinstance(data, str):
+                        data = data.encode("utf-8", "surrogateescape")
+                    if not isinstance(data, (bytes, bytearray)):
+                        return self._json({"error": "data must be string"}, 400)
+                    t.write(bytes(data))
+                    return self._json({"ok": True})
+                return self._json({"error": "unknown action"}, 400)
+            except ValueError as e:
+                return self._json({"error": str(e)[:200]}, 400)
+            except OSError as e:
+                # PTY creation can fail outright (no shell, fd exhaustion). The
+                # terminal code closes its own fds, so this is a clean 503 and
+                # not a dropped connection.
+                return self._json({"error": str(e)[:200]}, 503)
 
         if p == "/api/run":
             if not RUN_LOCK.acquire(blocking=False):
                 return self._json({"error": "ANA is already processing a request"}, 409)
             try:
-                return self._stream_run(raw)
+                return self._stream_run(body)
             finally:
                 RUN_LOCK.release()
 
         return self._json({"error": "no such endpoint"}, 404)
 
     # ── the run: NDJSON stream of events ─────────────────────
-    def _stream_run(self, raw):
-        try:
-            payload = json.loads(raw or b"{}")
-        except json.JSONDecodeError:
-            return self._json({"error": "bad json"}, 400)
+    def _stream_run(self, payload):
+        # The body was parsed and type-checked in do_POST; re-reading the raw
+        # bytes here meant a bare string or number crashed this thread after the
+        # response headers were gone, so the client only saw a dropped socket.
         message = (payload.get("message") or "").strip()
         extra = (payload.get("system") or "").strip()
         system = "\n\n".join(x for x in (persona(), extra) if x) or None

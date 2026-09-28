@@ -87,6 +87,26 @@ def jreq(path, method="GET", body=None, token=True, origin=True):
         return st, hd, None
 
 
+def rawreq(path, body_bytes, method="POST", token=True, origin=True):
+    """POST a body verbatim, bypassing json.dumps. Status is 0 when the server
+    drops the connection instead of answering — that is the failure these
+    checks exist to catch, so it must not raise out of the harness."""
+    url = BASE + path
+    headers = {"Content-Type": "application/json"}
+    if token and TOKEN:
+        headers["X-Ana-Token"] = TOKEN
+    if origin:
+        headers["Origin"] = ORIGIN
+    r = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(r, timeout=15) as resp:
+            return resp.status, dict(resp.headers), resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+    except (urllib.error.URLError, OSError) as e:
+        return 0, {}, str(e).encode()
+
+
 # ── 1. every GET endpoint answers 200 with the expected JSON shape ──
 print("[1] GET endpoints")
 GET_SHAPES = {
@@ -269,6 +289,28 @@ for method, path, payload in CASES:
     st, _, _ = jreq(path, method, payload)
     check(f"{path} {payload.get('action', payload.get('mode', ''))} no 500",
           st != 500, f"got 500 for {payload}")
+
+# ── 7b. a JSON body that is not an object ──
+# These are valid JSON, so the old "bad json" guard let them through, and the
+# handler then called .get() on a str/int/list. BaseHTTPRequestHandler only
+# catches TimeoutError, so the thread died and the client saw a closed socket
+# with no status line at all — no 400, no 500, just a network error in the UI.
+print("[7b] non-object JSON body")
+for path in ("/api/session", "/api/run", "/api/avd", "/api/terminal", "/api/mode"):
+    for raw in (b'"hi"', b"5", b"[]", b"true", b"null"):
+        st, _, body = rawreq(path, raw)
+        check(f"{path} body={raw.decode()} rejected cleanly", st == 400,
+              f"got {st} {body[:60]!r} (a dropped connection raises instead)")
+
+# ── 7c. terminal dimensions must not raise ──
+print("[7c] terminal dimensions")
+for cols, rows in (("abc", 24), (None, 24), (80, [1]), ("", ""), ({}, {})):
+    st, _, body = jreq("/api/terminal", "POST",
+                       {"action": "create", "cols": cols, "rows": rows})
+    check(f"terminal cols={cols!r} rows={rows!r} falls back to defaults", st == 200,
+          f"got {st} {str(body)[:80]}")
+    if st == 200 and isinstance(body, dict) and body.get("id"):
+        jreq("/api/terminal", "POST", {"action": "close", "id": body["id"]})
 
 # ── 8. server still alive after all of that ──
 print("[8] liveness")

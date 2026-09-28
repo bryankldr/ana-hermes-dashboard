@@ -12,6 +12,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -25,7 +26,27 @@ _DEFAULT = {"profile": [], "goal": "", "personality": "", "tasks": [], "missions
 def _load_unlocked():
     try:
         d = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        return {**_DEFAULT, **d}
+        # A hand-edited or truncated state file can be a list, a number or null.
+        # {**DEFAULT, **d} raises TypeError on anything but a mapping, and that
+        # escaped the except below, so one bad file made every run and the
+        # context block die instead of falling back to defaults.
+        if not isinstance(d, dict):
+            return dict(_DEFAULT)
+        out = {**_DEFAULT, **d}
+        # Same problem one level down: a task without "text" made the kanban
+        # builder raise KeyError. Normalise the list fields to the right shape.
+        for key in ("profile", "tasks", "missions"):
+            if not isinstance(out.get(key), list):
+                out[key] = []
+        for t in out["tasks"] + out["missions"]:
+            if not isinstance(t, dict):
+                continue
+            t.setdefault("text", t.get("mission", "") or "")
+            t.setdefault("done", t.get("status") == "done")
+        for key in ("goal", "personality"):
+            if not isinstance(out.get(key), str):
+                out[key] = ""
+        return out
     except (OSError, json.JSONDecodeError):
         return dict(_DEFAULT)
 
@@ -184,10 +205,17 @@ def handle(message, runner=None):
 
     if cmd == "mode":
         arg = arg.strip().lower()
-        try:
-            import server as _srv
-        except Exception:
-            _srv = None
+        # Under `python3 server.py` the live module is __main__; `import server`
+        # would load a SECOND copy with its own MODE dict, so /mode reported a
+        # successful switch that never touched the running server. Reuse
+        # whichever module object is actually live, and only fall back to a
+        # plain import when this is used outside the server (tests, scripts).
+        _srv = sys.modules.get("server") or sys.modules.get("__main__")
+        if not hasattr(_srv, "get_mode"):
+            try:
+                import server as _srv  # noqa: F811
+            except Exception:
+                _srv = None
         if not arg or arg == "status":
             cur = _srv.get_mode() if _srv else "coding"
             return dict(message=None, reply=f"Mode ANA saat ini: {cur}", note=f"mode={cur}")

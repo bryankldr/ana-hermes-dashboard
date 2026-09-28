@@ -42,16 +42,25 @@ class _Terminal:
             "LANG": env.get("LANG", "C.UTF-8"),
         })
 
-        self.proc = subprocess.Popen(
-            [_SHELL, "--noprofile", "--norc"],
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            cwd=runtime.WORKDIR,
-            env=env,
-            preexec_fn=os.setsid,
-            close_fds=True,
-        )
+        # openpty() hands us two descriptors and only one of them is handed to
+        # Popen. If Popen raises (bad ANA_SHELL, fd table full) nothing closed
+        # them, and the object was never registered, so the descriptors leaked
+        # for the life of the process. Repeated failures exhausted the table.
+        try:
+            self.proc = subprocess.Popen(
+                [_SHELL, "--noprofile", "--norc"],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=runtime.WORKDIR,
+                env=env,
+                preexec_fn=os.setsid,
+                close_fds=True,
+            )
+        except BaseException:
+            os.close(slave_fd)
+            os.close(self.master_fd)
+            raise
         os.close(slave_fd)
         os.set_blocking(self.master_fd, False)
 
