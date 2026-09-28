@@ -526,7 +526,14 @@ function startBrowserRecognition() {
     const shown = (finalText || interim || '').trim();
     if (shown) els.coreLabel.textContent = 'HEARD: ' + shown.slice(0, 30);
   };
-  recognition.onerror = e => log('error', 'VOICE', `browser speech: ${e.error || 'error'}`);
+  // Fatal errors mean this device/browser will never work; retrying just spams
+  // the event log. no-speech and aborted are normal, so they fall through to
+  // the onend restart.
+  const FATAL = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported']);
+  recognition.onerror = e => {
+    log('error', 'VOICE', `browser speech: ${e.error || 'error'}`);
+    if (FATAL.has(e.error)) stopConvo();
+  };
   recognition.onend = async () => {
     const text = finalText.trim();
     if (!convo) return;
