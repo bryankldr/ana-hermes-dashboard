@@ -15,10 +15,30 @@ export class LayoutManager {
     this.config = { locked: true, layouts: {} };
     this.items = {};
     this.measure();
+    this._initRailCursor();
     this.injectHandles();
     this.bind();
     this.applyLock();
     this.loadConfig();
+  }
+
+  // Layout.json bisa berasal dari viewport lebih besar (monitor ganti, panel
+  // di-drag saat layar lebar). Terapkan hanya yang masih muat; yang lain
+  // dibiarkan pada positioning default hasil measure() — tidak ada cara user
+  // menarik panel yang sudah jatuh di luar layar.
+  applyCfg(el, cfg) {
+    if (!el || !cfg) return false;
+    const pr = this.hud.getBoundingClientRect();
+    const num = (v, d = 0) => parseFloat(String(v ?? '').replace('px', '')) || d;
+    const x = num(cfg.x), y = num(cfg.y);
+    const w = num(cfg.w, el.offsetWidth), h = num(cfg.h, el.offsetHeight);
+    if (x + w > pr.width + 1 || y + h > pr.height + 1) return false;
+    if (cfg.x) el.style.left = cfg.x;
+    if (cfg.y) el.style.top = cfg.y;
+    if (cfg.w) el.style.width = cfg.w;
+    if (cfg.h) el.style.height = cfg.h;
+    el.dataset.free = '1';
+    return true;
   }
 
   async loadConfig() {
@@ -30,13 +50,7 @@ export class LayoutManager {
       this.config = { locked: !!data.locked, layouts: data.layouts || {} };
       this.locked = !!data.locked;
       for (const [id, cfg] of Object.entries(this.config.layouts)) {
-        const el = this.items[id];
-        if (!el || !cfg) continue;
-        if (cfg.x) el.style.left = cfg.x;
-        if (cfg.y) el.style.top = cfg.y;
-        if (cfg.w) el.style.width = cfg.w;
-        if (cfg.h) el.style.height = cfg.h;
-        el.dataset.free = '1';
+        this.applyCfg(this.items[id], cfg);
       }
       this.applyLock();
       const btn = document.getElementById('layoutLockBtn');
@@ -76,11 +90,21 @@ export class LayoutManager {
     this.ids.push(id);
     const r = el.getBoundingClientRect();
     const pr = this.hud.getBoundingClientRect();
+    // Width is still correct here: ensurePanel() appended the panel to its
+    // rail and this reads the rect before the detach below. But by now
+    // measure() has already emptied the rail, so a plain r.top just returns
+    // the rail's own top and every dynamic panel lands on the same y. Use the
+    // rail's stacking cursor instead — the only thing that still knows where
+    // the rail's contents ended up.
+    let x = r.left - pr.left;
+    let y = r.top - pr.top;
+    const cur = this.railCursor?.[el.dataset.rail];
+    if (cur) { x = cur.x; y = cur.y; cur.y += r.height + 4; }
     if (el.parentElement !== this.hud) this.hud.appendChild(el);
     el.dataset.layoutId = id;
     el.style.position = 'absolute';
-    el.style.left = (r.left - pr.left) + 'px';
-    el.style.top = (r.top - pr.top) + 'px';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
     el.style.width = r.width + 'px';
     el.style.height = r.height + 'px';
     el.style.right = 'auto';
@@ -101,33 +125,58 @@ export class LayoutManager {
     ind.textContent = '✎';
     el.appendChild(ind);
     // apply saved config if exists
-    const cfg = this.config.layouts?.[id];
-    if (cfg) {
-      if (cfg.x) el.style.left = cfg.x;
-      if (cfg.y) el.style.top = cfg.y;
-      if (cfg.w) el.style.width = cfg.w;
-      if (cfg.h) el.style.height = cfg.h;
+    this.applyCfg(el, this.config.layouts?.[id]);
+  }
+
+  // Where the next dynamic panel in this rail should start: just below the
+  // lowest panel already placed in it. Must run after measure(), while the
+  // static panels are still on record.
+  _initRailCursor() {
+    const pr = this.hud.getBoundingClientRect();
+    this.railCursor = { left: null, right: null };
+    for (const id of this.ids) {
+      const el = this.items[id];
+      if (!el || !el.getBoundingClientRect().width) continue;
+      const r = el.getBoundingClientRect();
+      const side = el.dataset.rail;
+      if (!side) continue;
+      const cur = this.railCursor[side]
+        || (this.railCursor[side] = { x: r.left - pr.left, y: r.top - pr.top });
+      cur.x = r.left - pr.left;
+      cur.y = Math.max(cur.y, r.bottom - pr.top) + 4;
     }
   }
 
   measure() {
+    // Two separate passes, and neither may mutate the DOM mid-measure:
+    //  1. read every rect while each panel is still in its rail, so a panel
+    //     reports its flex width (.left-rail 220px / .right-rail 240px) —
+    //     re-parented under .hud it fills the full 1280px;
+    //  2. only then detach them. Appending inside pass 1 would reflow the
+    //     rail and shift every not-yet-measured sibling up to the rail top,
+    //     so all of them would report the same y.
+    const pr = this.hud.getBoundingClientRect();
+    const boxes = [];
     for (const id of this.ids) {
       const el = document.getElementById(id);
       if (!el) continue;
-      if (el.parentElement !== this.hud) this.hud.appendChild(el);
-    }
-    for (const id of this.ids) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      const pr = this.hud.getBoundingClientRect();
       el.dataset.layoutId = id;
+      // Remember the rail before the detach below empties it. Only panels that
+      // actually live in a rail get a side — .core/.topControls/.eventLog are
+      // direct children of .hud and must stay out of the stacking cursors.
+      if (!el.dataset.rail) el.dataset.rail = el.closest('.left-rail') ? 'left'
+        : el.closest('.right-rail') ? 'right' : '';
       this.items[id] = el;
+      const r = el.getBoundingClientRect();
+      boxes.push([el, r.left - pr.left, r.top - pr.top, r.width, r.height]);
+    }
+    for (const [el, x, y, w, h] of boxes) {
+      if (el.parentElement !== this.hud) this.hud.appendChild(el);
       el.style.position = 'absolute';
-      el.style.left = (r.left - pr.left) + 'px';
-      el.style.top = (r.top - pr.top) + 'px';
-      el.style.width = r.width + 'px';
-      el.style.height = r.height + 'px';
+      el.style.left = x + 'px';
+      el.style.top = y + 'px';
+      el.style.width = w + 'px';
+      el.style.height = h + 'px';
       el.style.right = 'auto';
       el.style.bottom = 'auto';
       el.style.transform = 'none';

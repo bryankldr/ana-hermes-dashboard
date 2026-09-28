@@ -21,6 +21,10 @@ export function ensurePanel({ id, title = '', body = '', rail = 'left', classNam
   el = document.createElement('div');
   el.id = id;
   el.className = ('panel ' + className).trim();
+  // LayoutManager.register() runs after measure() has already emptied the
+  // rail, so it cannot see which rail this panel came from — it needs the
+  // side to pick the right stacking cursor.
+  el.dataset.rail = rail;
   el.innerHTML = (title ? `<div class="panel-title">${title}</div>` : '')
     + (body ? `<div class="panel-body">${body}</div>` : '');
   const host = document.querySelector(RAILS[rail] || RAILS.left);
