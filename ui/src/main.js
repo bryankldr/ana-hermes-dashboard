@@ -35,8 +35,10 @@ const SILENCE = 900, MIN_TURN_MS = 350, MAX_TURN_MS = 18000, NO_SPEECH_MS = 1000
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const speechSynth = window.speechSynthesis;
 // ANA live progress state
-let progSteps = [], progStart = 0, progTimer = null;
+let progSteps = [], progStart = 0, progTimer = null, progHideTimer = null;
 let codeDiffBuf = '';
+// In-flight guard for the 7s AVD poll; one server-side poll can take 18s.
+let avdPending = false;
 
 // ═══ HELPERS ═══
 // now/rid/esc/cleanForSpeech live in utils/helpers.js (imported above).
@@ -67,6 +69,7 @@ function ensureProgressPanel(){
 }
 function progressReset(msg){
   progSteps=[]; progStart=Date.now(); codeDiffBuf='';
+  if(progHideTimer){ clearTimeout(progHideTimer); progHideTimer=null; }
   const panel=ensureProgressPanel();
   panel.classList.add('active');
   document.getElementById('progressBar').style.width='6%';
@@ -102,7 +105,17 @@ function progressDone(ok=true){
   // finalize last active
   const wrap=document.getElementById('progressSteps');
   if(wrap) wrap.querySelectorAll('.progress-step.active').forEach(e=>{e.classList.remove('active');e.classList.add(ok?'done':'error');});
-  setTimeout(()=>{ const p=document.getElementById('progressPanel'); if(p) p.classList.remove('active'); if(bar){bar.style.width='0%'; bar.style.background='';}}, 3500);
+  // Keep the handle: an untracked 3.5s timer from the previous run fired after
+  // the next one had already opened the panel and removed .active, so LIVE
+  // PROGRESS vanished mid-run. Clearing it here keeps the panel visible for
+  // the run that is actually in flight.
+  if (progHideTimer) { clearTimeout(progHideTimer); progHideTimer = null; }
+  progHideTimer = setTimeout(() => {
+    progHideTimer = null;
+    const p = document.getElementById('progressPanel');
+    if (p) p.classList.remove('active');
+    if (bar) { bar.style.width = '0%'; bar.style.background = ''; }
+  }, 3500);
 }
 
 // ═══ CODE DIFF VIEWER — Fase B ═══
@@ -168,6 +181,11 @@ async function refreshVault(){
   }catch(e){}
 }
 async function refreshAvd(){
+  // The server shells out to adb (5s), getprop (5s) and emulator -list-avds (8s),
+  // so one poll can take 18s against a 7s tick. Without a guard three requests
+  // overlap and the oldest response lands last, silently reverting the panel to
+  // a state that was already false.
+  if(avdPending) return; avdPending=true;
   try{
     const data=await api.getAvd();
     const el=ensurePanel({id:'avdPanel',title:'ANDROID AVD',body:'<div id="avdBody"></div>',rail:'left'});
@@ -189,6 +207,7 @@ async function refreshAvd(){
     });
     body.querySelector('#avdRefresh')?.addEventListener('click', refreshAvd);
   }catch(e){}
+  finally{ avdPending=false; }
 }
 
 // ═══ EVENT LOG ═══
@@ -354,7 +373,9 @@ async function refreshSessionSelector() {
       if (sessions.length === 0) continue;
       html += `<optgroup label="${label}">`;
       for (const s of sessions) {
-        html += `<option value="${s.id}" ${s.id === current ? 'selected' : ''}>${s.title} · ${s.last_active}</option>`;
+        // Session titles come from `hermes sessions list` and were interpolated
+        // raw, so a title containing a tag rendered as markup inside the select.
+        html += `<option value="${esc(s.id)}" ${s.id === current ? 'selected' : ''}>${esc(s.title)} · ${esc(s.last_active)}</option>`;
       }
       html += '</optgroup>';
     }
@@ -378,14 +399,16 @@ function intelMsg(role, text) {
   if (convoMsgs.length > 40) convoMsgs.shift();
   const term = document.getElementById('intelTerminal');
   if (!term) return;
-  term.innerHTML = '';
-  for (const m of convoMsgs) {
-    const line = document.createElement('div');
-    line.className = 'intel-line ' + (m.role === 'user' ? 'user' : 'assistant');
-    line.textContent = (m.role === 'user' ? '▸ YOU: ' : '▸ ANA: ') + m.text;
-    term.appendChild(line);
-  }
+  // Append, do not rebuild. intelLog() and intelTool() write straight into this
+  // same node, so the old innerHTML='' replay deleted every tool trace and
+  // session line the moment a run finished — the trace existed only while the
+  // run was in flight, which is the one moment you do not need to read it.
+  const line = document.createElement('div');
+  line.className = 'intel-line ' + (role === 'user' ? 'user' : 'assistant');
+  line.textContent = (role === 'user' ? '▸ YOU: ' : '▸ ANA: ') + text;
+  term.appendChild(line);
   term.scrollTop = term.scrollHeight;
+  while (term.children.length > 80) term.removeChild(term.firstChild);
 }
 function intelTool(name, input, ok, output) {
   const term = document.getElementById('intelTerminal');

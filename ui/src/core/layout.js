@@ -167,7 +167,13 @@ export class LayoutManager {
       if (!el.dataset.rail) el.dataset.rail = el.closest('.left-rail') ? 'left'
         : el.closest('.right-rail') ? 'right' : '';
       this.items[id] = el;
+      // A hidden element reports a 0×0 rect, and writing that back as inline
+      // width/height pinned it at zero for good: #codeViewer ships display:none
+      // and stayed 0px tall even after .visible was added, so the code diff
+      // viewer rendered as a 2px sliver. Nothing hidden gets measured.
+      if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
       const r = el.getBoundingClientRect();
+      if (r.width < 1 && r.height < 1) continue;
       boxes.push([el, r.left - pr.left, r.top - pr.top, r.width, r.height]);
     }
     for (const [el, x, y, w, h] of boxes) {
