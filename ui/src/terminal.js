@@ -60,7 +60,23 @@ export function createTerminal({ api, token, log, hud, isOpen }) {
     panel.dataset.rail = 'right';
     panel.querySelector('.term-close').addEventListener('click', close);
     PANELS.set(KEY, panel);
-    if (window._layoutManager) window._layoutManager.register(KEY);
+    if (window._layoutManager) {
+      window._layoutManager.register(KEY);
+      // Terminal panel created after initPanelOptions ran — add it to the
+      // Options menu if the menu already exists.
+      if (document.getElementById('panelOptionsMenu')) {
+        const list = document.getElementById('panelOptionsList');
+        if (list && !list.querySelector('input[data-id="termPanel"]')) {
+          const label = document.createElement('label');
+          label.className = 'panel-opt';
+          label.innerHTML = `<input type="checkbox" data-id="termPanel" checked> TERMINAL`;
+          list.appendChild(label);
+          label.querySelector('input').addEventListener('change', e => {
+            window._layoutManager.setPanelEnabled('termPanel', e.target.checked);
+          });
+        }
+      }
+    }
 
     const termIdEl = panel.querySelector('.term-id');
     const canvas = panel.querySelector('#termCanvas');
