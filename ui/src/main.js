@@ -422,21 +422,48 @@ function intelTool(name, input, ok, output) {
 }
 
 // ═══ EQUALIZER ═══
-function initEqualizer() {
+let eqAnim = null;
+function startEqualizer() {
+  if (eqAnim) return;
   const canvas = els.equalizer, ctx = canvas.getContext('2d');
   canvas.width = 80; canvas.height = 24;
-  const bars = 12, barW = canvas.width / bars; let phase = 0;
+  const bars = 16, barW = canvas.width / bars; let phase = 0;
   function draw() {
+    if (!document.body.classList.contains('speaking') && !els.hud.classList.contains('speaking')) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      eqAnim = null; return;
+    }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (let i = 0; i < bars; i++) {
-      const h = 4 + Math.sin(phase + i*0.35)*8 + Math.random()*4;
-      ctx.fillStyle = `rgba(0, 232, 255, ${0.3 + h/32})`;
-      ctx.fillRect(i*barW+1, canvas.height-h, barW-2, h);
+      // Smooth sine wave with slight randomness for organic feel
+      const baseH = 3 + Math.sin(phase + i * 0.4) * 6;
+      const noise = (Math.random() - 0.5) * 2;
+      const h = Math.max(2, Math.min(20, baseH + noise));
+      const alpha = 0.4 + (h / 24) * 0.6;
+      const hue = 180 + (h / 20) * 30; // cyan to blue-green
+      ctx.fillStyle = `hsla(${hue}, 90%, 60%, ${alpha})`;
+      ctx.fillRect(i * barW + 1, canvas.height - h, barW - 2, h);
+      // Subtle glow on taller bars
+      if (h > 12) {
+        ctx.shadowColor = `hsla(${hue}, 90%, 60%, 0.6)`;
+        ctx.shadowBlur = 4;
+        ctx.fillRect(i * barW + 1, canvas.height - h, barW - 2, h);
+        ctx.shadowBlur = 0;
+      }
     }
-    phase += 0.12; requestAnimationFrame(draw);
+    phase += 0.15;
+    eqAnim = requestAnimationFrame(draw);
   }
   draw();
 }
+window.startEqualizer = startEqualizer;
+
+function stopEqualizer() {
+  if (eqAnim) { cancelAnimationFrame(eqAnim); eqAnim = null; }
+  const canvas = els.equalizer;
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+}
+window.stopEqualizer = stopEqualizer;
 
 // ═══ TELEMETRY SIMULATION ═══
 function initTelemetry() {
@@ -464,6 +491,7 @@ function speak(text) {
     const spoken = text.length > 700 ? text.slice(0, 680).replace(/\s+\S*$/, '') + '…' : text;
     suppress = true;
     els.hud.classList.add('speaking');
+    startEqualizer();
 
     // prefer server TTS (edge-tts mp3) — same path as voice preview
     try {
@@ -478,6 +506,7 @@ function speak(text) {
           const blob = await r.blob();
           const url = URL.createObjectURL(blob);
           const okPlay = await playMp3(url);
+          stopEqualizer();
           els.hud.classList.remove('speaking');
           log('voice', 'VOICE', 'TTS played (server)');
           return resolve();
@@ -497,14 +526,16 @@ function speak(text) {
         u.lang = 'id-ID';
         try { const vs = speechSynth.getVoices(); const idv = vs.find(v => /id[-_]ID/i.test(v.lang)) || vs.find(v => /Indones/i.test(v.name)); if (idv) u.voice = idv; } catch (_) {}
         u.rate = 1.0; u.pitch = 1.0; u.volume = 1;
-        u.onend = u.onerror = () => { els.hud.classList.remove('speaking'); log('voice', 'VOICE', 'TTS played (browser)'); resolve(); };
+        u.onend = u.onerror = () => { stopEqualizer(); els.hud.classList.remove('speaking'); log('voice', 'VOICE', 'TTS played (browser)'); resolve(); };
         speechSynth.speak(u);
         return;
       } catch (e) {
+        stopEqualizer();
         els.hud.classList.remove('speaking');
         log('error', 'VOICE', 'browser TTS error: ' + String(e).slice(0, 120));
       }
     }
+    stopEqualizer();
     els.hud.classList.remove('speaking');
     resolve();
   });
@@ -803,7 +834,11 @@ async function previewVoice() {
       const ct = r.headers.get('content-type') || '';
       if (ct.includes('audio')) {
         const blob = await r.blob(); const url = URL.createObjectURL(blob);
-        const a = new Audio(url); a.onended = () => URL.revokeObjectURL(url); await a.play();
+        startEqualizer();
+        els.hud.classList.add('speaking');
+        const a = new Audio(url);
+        a.onended = () => { URL.revokeObjectURL(url); stopEqualizer(); els.hud.classList.remove('speaking'); };
+        await a.play();
         log('voice', 'VOICE', 'preview ' + name); return;
       }
     }
@@ -814,10 +849,12 @@ async function previewVoice() {
     const u = new SpeechSynthesisUtterance(text); u.lang = 'id-ID';
     try { const vs = speechSynth.getVoices(); const idv = vs.find(v => /id[-_]ID/i.test(v.lang)) || vs.find(v => /Indones/i.test(v.name)); if (idv) u.voice = idv; } catch (_) {}
     u.rate = 1.0; u.pitch = 1.0;
-    u.onend = () => log('voice', 'VOICE', 'preview browser ' + name);
-    u.onerror = e => log('error', 'VOICE', 'browser TTS error ' + (e.error || ''));
+    startEqualizer();
+    els.hud.classList.add('speaking');
+    u.onend = () => { stopEqualizer(); els.hud.classList.remove('speaking'); log('voice', 'VOICE', 'preview browser ' + name); };
+    u.onerror = e => { stopEqualizer(); els.hud.classList.remove('speaking'); log('error', 'VOICE', 'browser TTS error ' + (e.error || '')); };
     speechSynth.speak(u);
-  } catch (e) { log('error', 'VOICE', String(e).slice(0, 150)); }
+  } catch (e) { stopEqualizer(); els.hud.classList.remove('speaking'); log('error', 'VOICE', String(e).slice(0, 150)); }
 }
 async function applyVoice() {
   const sel = document.getElementById('voiceSelect'); if (!sel) return;
@@ -1032,7 +1069,7 @@ function initPanelOptions(layout) {
 // ═══ INIT ═══
 async function init() {
   initParticles(); initDials(); initOctFrame(); initRadialTicks(); initOrbitalParticles();
-  initMatrix(); initWorkspace(); initIntel(); initEqualizer(); initTelemetry();
+  initMatrix(); initWorkspace(); initIntel(); initTelemetry();
   initCommandMatrix(); initQuickButtons(); initMuteClear();
   initToolsChips(); initSystemTelemetry();
   loadStatus(); setInterval(loadStatus, 30000);
