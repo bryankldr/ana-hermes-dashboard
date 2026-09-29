@@ -976,19 +976,25 @@ function initPanelOptions(layout) {
   const menu = wrap.querySelector('#panelOptionsMenu');
   const list = wrap.querySelector('#panelOptionsList');
 
-  // Every panel the layout manager knows about, plus the terminal.
-  const ids = [...new Set([...Object.keys(layout.items), 'termPanel'])];
+  // Only content panels that have .panel class and can be shown/hidden.
+  // Structural panels (eventLog, codeViewer, response, chatBar, core,
+  // topControls, bottomTelemetry) are tracked by LayoutManager for
+  // persist but cannot be toggled as they have no intrinsic dimensions.
+  const contentPanelIds = [
+    'agentPanel', 'statusMatrix', 'workspacePanel', 'intelPanel',
+    'pipelinePanel', 'toolsPanel', 'sysTelemetry', 'cmdPanel',
+    'voicePicker', 'briefingPanel', 'projectList', 'missionKanban',
+    'vaultPanel', 'avdPanel', 'termPanel',
+  ];
+  const ids = contentPanelIds.filter(id => document.getElementById(id));
   const titles = {
     agentPanel: 'AGENT STATUS', statusMatrix: 'SYSTEM MATRIX',
     workspacePanel: 'WORKSPACE', intelPanel: 'INTELLIGENCE SURFACE',
-    pipelinePanel: 'AGENT PIPELINE', eventLog: 'EVENT STREAM',
-    codeViewer: 'CODE VIEWER', toolsPanel: 'CONNECTED TOOLS',
+    pipelinePanel: 'AGENT PIPELINE', toolsPanel: 'CONNECTED TOOLS',
     sysTelemetry: 'SYSTEM TELEMETRY', cmdPanel: 'COMMAND MATRIX',
-    response: 'RESPONSE', chatBar: 'CHAT', core: 'CORE',
-    topControls: 'TOP CONTROLS', bottomTelemetry: 'BOTTOM TELEMETRY',
-    missionKanban: 'MISSION KANBAN', vaultPanel: 'VAULT STATUS',
-    avdPanel: 'ANDROID AVD', projectList: 'ACTIVE REPOSITORIES',
-    briefingPanel: 'PROACTIVE BRIEFING', termPanel: 'TERMINAL', voicePicker: 'VOICE CONFIG',
+    voicePicker: 'VOICE CONFIG', briefingPanel: 'PROACTIVE BRIEFING',
+    projectList: 'ACTIVE REPOSITORIES', missionKanban: 'MISSION KANBAN',
+    vaultPanel: 'VAULT STATUS', avdPanel: 'ANDROID AVD', termPanel: 'TERMINAL',
   };
 
   for (const id of ids) {
