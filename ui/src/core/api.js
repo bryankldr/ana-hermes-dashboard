@@ -63,7 +63,17 @@ export class ApiClient {
       headers: this.headers(),
       body: JSON.stringify({ session_id: sessionId })
     });
-    return res.json();
+    const data = await res.json();
+    // Notify other tabs of session change via localStorage
+    if (data.ok) {
+      if (data.session) {
+        localStorage.setItem('ana_session', JSON.stringify({ id: data.session, meta: data.meta, ts: Date.now() }));
+      } else {
+        localStorage.removeItem('ana_session');
+      }
+      window.dispatchEvent(new StorageEvent('storage', { key: 'ana_session', newValue: localStorage.getItem('ana_session') }));
+    }
+    return data;
   }
 
   async post(path, body = {}) {

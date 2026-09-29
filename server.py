@@ -17,6 +17,7 @@ import sys
 import threading
 import queue
 import re
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -87,7 +88,25 @@ def set_mode(v):
     return v
 
 # One continuing Hermes conversation until the user hits /new.
-SESSION: dict[str, str | None] = {"id": None}
+# Extended with metadata for cross-tab sync and TTL.
+SESSION: dict[str, str | None | dict | None] = {
+    "id": None,
+    "meta": None,  # {"title": str, "created": float, "message_count": int} | None
+}
+SESSION_TTL_SEC = int(os.environ.get("ANA_SESSION_TTL", "3600"))  # 1h default
+
+def _session_expired() -> bool:
+    meta = SESSION.get("meta")
+    if not isinstance(meta, dict) or "created" not in meta:
+        return False
+    created = meta.get("created")
+    if not isinstance(created, (int, float)):
+        return False
+    return (time.time() - created) > SESSION_TTL_SEC
+
+def _clear_session():
+    SESSION["id"] = None
+    SESSION["meta"] = None
 
 def persona():
     try:
@@ -350,8 +369,9 @@ class Handler(BaseHTTPRequestHandler):
             sid = body.get("session_id")
             if sid and runtime.valid_session(sid):
                 SESSION["id"] = str(sid)
-                return self._json({"ok": True, "session": SESSION["id"]})
-            SESSION["id"] = None
+                SESSION["meta"] = {"title": body.get("title", "—"), "created": time.time(), "message_count": 0}
+                return self._json({"ok": True, "session": SESSION["id"], "meta": SESSION["meta"]})
+            _clear_session()
             return self._json({"ok": True, "session": None})
 
         if p == "/api/speak":
@@ -408,12 +428,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)[:200]}, 400)
         if p == "/api/new":
             runtime.cancel_active()
-            SESSION["id"] = None
+            _clear_session()
             return self._json({"ok": True})
 
         if p == "/api/cancel":
             stopped = runtime.cancel_active()
-            SESSION["id"] = None
+            _clear_session()
             return self._json({"ok": True, "stopped": stopped})
         if p == "/api/avd":
             try:
@@ -525,6 +545,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
+        # Check session TTL before running
+        if _session_expired():
+            _clear_session()
+
         def emit(ev):
             self.wfile.write((json.dumps(ev) + "\n").encode())
             self.wfile.flush()
@@ -536,7 +560,7 @@ class Handler(BaseHTTPRequestHandler):
             if cmd.get("note"):
                 emit(dict(t="note", message=cmd["note"]))
             if cmd.get("fresh"):
-                SESSION["id"] = None
+                _clear_session()
             if cmd.get("message") is None:
                 # answered locally — no model call needed
                 emit(dict(t="delta", text=cmd.get("reply", "Done.")))
@@ -552,13 +576,17 @@ class Handler(BaseHTTPRequestHandler):
                 # Save session when Hermes emits it (from session_id: marker)
                 if ev.get("t") == "session" and runtime.valid_session(sid):
                     SESSION["id"] = str(sid)
+                    if SESSION["meta"] is None:
+                        SESSION["meta"] = {"title": "—", "created": time.time(), "message_count": 0}
                 # Only remember a session that actually COMPLETED. Storing it from
                 # `status` (which fires at init) means one broken run poisons every
                 # run after it with --resume <half-born session>.
                 if ev.get("t") == "complete" and runtime.valid_session(sid):
                     SESSION["id"] = sid
+                    if SESSION["meta"]:
+                        SESSION["meta"]["message_count"] = SESSION["meta"].get("message_count", 0) + 1
                 if ev.get("t") == "error":
-                    SESSION["id"] = None       # drop a bad/stale session so the next run is fresh
+                    _clear_session()       # drop a bad/stale session so the next run is fresh
                 emit(ev)
         except (BrokenPipeError, ConnectionResetError):
             pass                                          # client navigated away

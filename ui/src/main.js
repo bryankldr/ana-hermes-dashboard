@@ -1073,6 +1073,53 @@ async function init() {
   initCommandMatrix(); initQuickButtons(); initMuteClear();
   initToolsChips(); initSystemTelemetry();
   loadStatus(); setInterval(loadStatus, 30000);
+
+  // Cross-tab session sync: read persisted session on boot
+  (() => {
+    try {
+      const stored = localStorage.getItem('ana_session');
+      if (stored) {
+        const { id, meta, ts } = JSON.parse(stored);
+        if (id && Date.now() - ts < 86400000) { // 24h max age
+          currentSessionId = id;
+          const sidEl = document.getElementById('sessionId');
+          if (sidEl) sidEl.textContent = id;
+          els.stSess.textContent = id.slice(0, 8);
+          intelLog(`🔗 Restored session: ${id}`, 'session');
+        }
+      }
+    } catch (_) {}
+  })();
+
+  // Listen for session changes from other tabs
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'ana_session') {
+      try {
+        if (e.newValue) {
+          const { id, meta } = JSON.parse(e.newValue);
+          if (id && id !== currentSessionId) {
+            currentSessionId = id;
+            const sidEl = document.getElementById('sessionId');
+            if (sidEl) sidEl.textContent = id;
+            els.stSess.textContent = id.slice(0, 8);
+            intelLog(`🔗 Session synced from another tab: ${id}`, 'session');
+            refreshSessionSelector();
+          }
+        } else {
+          // Session cleared in another tab
+          if (currentSessionId) {
+            currentSessionId = null;
+            const sidEl = document.getElementById('sessionId');
+            if (sidEl) sidEl.textContent = '—';
+            els.stSess.textContent = '—';
+            intelLog('🔗 Session cleared from another tab', 'session');
+            refreshSessionSelector();
+          }
+        }
+      } catch (_) {}
+    }
+  });
+
   // Layout: drag / resize / lock toggle
   const layout = new LayoutManager(els.hud, [
     'agentPanel','statusMatrix','workspacePanel',
