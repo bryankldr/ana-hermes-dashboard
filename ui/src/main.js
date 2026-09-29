@@ -808,8 +808,7 @@ async function loadVoices() {
         <div class="voice-btns"><button id="voicePreview" class="voice-btn">Preview</button><button id="voiceApply" class="voice-btn primary">Pakai</button></div>
         <div id="voiceDesc" class="voice-desc"></div>`,
     });
-    // Wire the buttons once; the option list is refreshed on every call,
-    // because applyVoice() re-invokes loadVoices() to show the new selection.
+    // Wire buttons once (ensurePanel updates body in place, preserving event handlers)
     if (!vp.dataset.wired) {
       vp.dataset.wired = '1';
       vp.querySelector('#voicePreview').addEventListener('click', previewVoice);
@@ -856,6 +855,7 @@ async function previewVoice() {
     speechSynth.speak(u);
   } catch (e) { stopEqualizer(); els.hud.classList.remove('speaking'); log('error', 'VOICE', String(e).slice(0, 150)); }
 }
+window.previewVoice = previewVoice;
 async function applyVoice() {
   const sel = document.getElementById('voiceSelect'); if (!sel) return;
   try {

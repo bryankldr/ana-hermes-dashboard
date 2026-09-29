@@ -17,7 +17,14 @@ const RAILS = { left: '.left-rail', right: '.right-rail', center: '#coreSvg', hu
  */
 export function ensurePanel({ id, title = '', body = '', rail = 'left', className = '', register = true }) {
   let el = document.getElementById(id);
-  if (el) return el;
+  if (el) {
+    // Update body content if provided (for dynamic panels like voicePicker)
+    if (body) {
+      const bodyEl = el.querySelector('.panel-body');
+      if (bodyEl) bodyEl.innerHTML = body;
+    }
+    return el;
+  }
   el = document.createElement('div');
   el.id = id;
   el.className = ('panel ' + className).trim();
