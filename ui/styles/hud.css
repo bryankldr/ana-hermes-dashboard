@@ -994,6 +994,7 @@ html, body {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
+  left: auto;
   min-width: 220px;
   max-height: 400px;
   overflow-y: auto;
