@@ -971,6 +971,11 @@ class Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host", "") or "").strip()
         if not host:
             return False
+        # Reverse-proxy/tunnel domain allowlist (mis. Cloudflare -> localhost:8730).
+        extra = {h.strip().lower() for h in os.environ.get("ANA_ALLOWED_HOSTS", "").split(",") if h.strip()}
+        bare = host.rsplit(":", 1)[0] if ":" in host else host
+        if extra and (host.lower() in extra or bare.lower() in extra):
+            return True
         # Localhost-only mode: strict allowlist (anti DNS-rebinding).
         if BIND_HOST == "127.0.0.1":
             return host in {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
