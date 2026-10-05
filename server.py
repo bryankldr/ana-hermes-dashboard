@@ -990,11 +990,19 @@ class Handler(BaseHTTPRequestHandler):
         # Localhost-only mode: strict.
         if BIND_HOST == "127.0.0.1":
             return origin in {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
-        # External mode: terima origin apa pun dengan port benar (http/https).
+        # External mode: terima origin apa pun dengan port benar (http/https),
+        # atau origin domain tanpa port eksplisit (https baku :443) bila host
+        # domainnya ada di ANA_ALLOWED_HOSTS (tunnel/proxy resmi).
         # Proteksi utama tetap X-Ana-Token; origin check hanya layer tambahan.
         try:
             o = urlparse(origin)
-            return o.port == PORT and o.scheme in {"http", "https"}
+            if o.port == PORT and o.scheme in {"http", "https"}:
+                return True
+            if not o.port and o.scheme == "https":
+                extra = {h.strip().lower() for h in os.environ.get("ANA_ALLOWED_HOSTS", "").split(",") if h.strip()}
+                host = (o.hostname or "").lower()
+                return bool(host and host in extra)
+            return False
         except (ValueError, TypeError):
             return False
 
