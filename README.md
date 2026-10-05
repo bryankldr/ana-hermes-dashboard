@@ -9,8 +9,8 @@ A local, voice-enabled ANA dashboard for [Hermes Agent](https://github.com/NousR
 - Futuristic browser-based mission-control HUD
 - Natural conversational replies with a concise ANA voice persona
 - Continuous voice conversation: listen → transcribe → answer → speak → listen
-- Optional ElevenLabs speech-to-text and text-to-speech
-- Browser speech fallback when ElevenLabs is not configured
+- Edge TTS (id-ID) for voice output
+- Browser speech fallback when Edge TTS is unreachable
 - Working command matrix and slash commands
 - Hermes session continuity across voice turns
 - Access to the active Hermes profile's tools, skills, browser, memory, and MCP integrations
@@ -52,12 +52,11 @@ Hermes can perform the clone, setup, launch, and health check with its terminal 
 
 ## Voice setup
 
-Voice works without configuration when the browser provides SpeechRecognition and speechSynthesis. For more reliable speech, add an ElevenLabs key to the private `.env` file:
+Voice works without any API key: transcription uses the browser Web Speech API, voice
+output uses Microsoft Edge TTS (id-ID). Set the voice in the UI or via `.env`:
 
 ```bash
-ELEVENLABS_API_KEY=your_private_key
-ELEVENLABS_VOICE_ID=JBFqnCBsd6RMkjVDRZzb
-ELEVENLABS_MODEL=eleven_turbo_v2_5
+ANA_VOICE_ID=id-ID-ArdiNeural
 ```
 
 Restart the dashboard after editing `.env`. The key stays server-side and is never sent to frontend JavaScript.
@@ -96,8 +95,8 @@ Every button executes its base command immediately. Commands that accept a paylo
 | `/new` | Start a fresh Hermes thread |
 | `/goal <text\|status\|clear>` | Set, read, or clear the standing objective |
 | `/tools` | Run `hermes tools list` |
-| `/browser <task>` | Ask Hermes to use its browser/Chrome tools |
-| `/background <mission>` | Run a background Hermes mission |
+| `/browser <task>` | Ask Ana to use its browser/Chrome tools |
+| `/background <mission>` | Run a background Ana mission |
 | `/mission [task]` | Read or add to the local mission queue |
 | `/personality <tone>` | Read or change the ANA tone overlay |
 | `/commands` | Show all dashboard commands |
@@ -112,10 +111,10 @@ Normal text and voice requests go directly to Hermes Agent.
 
 ```text
 Browser HUD
-  ├─ microphone → browser MediaRecorder → ElevenLabs STT (optional)
+  ├─ microphone → browser Web Speech API (transkripsi di browser)
   ├─ POST /api/run → Python NDJSON server
   ├─ Hermes CLI quiet mode → active Hermes profile and tools
-  └─ response → ElevenLabs TTS or browser speech synthesis
+  └─ response → Edge TTS (server) or browser speech synthesis
 ```
 
 Key files:
@@ -124,7 +123,7 @@ Key files:
 server.py       local HTTP API and NDJSON streaming
 runtime.py      Hermes CLI subprocess and session continuity
 commands.py     dashboard slash commands and mission queue
-voice.py        optional ElevenLabs STT/TTS proxy
+voice.py        Edge TTS (id-ID), tanpa API key
 persona.md      concise spoken ANA persona
 ui/             dependency-free HTML/CSS/JavaScript HUD
 install.sh      first-run setup and launch
@@ -138,7 +137,7 @@ start.sh        local launcher
 - Agent runs are serialized so multiple tabs cannot race the shared Hermes session.
 - Raw prompt logging is disabled unless `ANA_RAW_LOG` is explicitly configured; opt-in logs are created with mode `0600` and symlink protection.
 - `.env`, state files, Python caches, and local credentials are ignored by Git.
-- The dashboard never bundles Google, Zapier, Gmail, ElevenLabs, or Hermes credentials.
+- The dashboard never bundles Google, Zapier, Gmail, or Hermes credentials.
 - Connected apps remain owned and authenticated by the user's Hermes profile.
 - Review third-party skills and MCP servers before installing them.
 
@@ -168,7 +167,7 @@ Then set `HERMES_CMD` in `.env` if needed.
 
 ### Microphone does not activate
 
-Allow microphone access for `127.0.0.1` in the browser's site settings. ElevenLabs is optional; without it, use a browser that supports Web Speech APIs.
+Allow microphone access for `127.0.0.1` in the browser's site settings. Transcription needs a browser with Web Speech APIs; voice output uses Edge TTS.
 
 ### A newly connected tool is missing
 

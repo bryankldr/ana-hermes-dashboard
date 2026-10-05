@@ -1,174 +1,218 @@
-import pathlib
 """
-Text to speech — ElevenLabs (berbayar) bila ada key, fallback gratis edge-tts (id-ID).
+Text to speech — Microsoft Edge TTS (id-ID), tanpa API key.
 
-Edge-tts gratis via Microsoft: id-ID-GadisNeural (female), id-ID-ArdiNeural (male).
-Tanpa API key tetap bunyi, ganti suara di dashboard langsung terdengar.
+Dua timbre id-ID yang tersedia:
+  id-ID-GadisNeural (perempuan)  -> agent_name ANNA
+  id-ID-ArdiNeural  (laki-laki)  -> agent_name MAX
+
+STT (speech-to-text) tidak ada di sini: transkripsi memakai Web Speech API dari
+browser (frontend). Edge TTS hanya sintesis suara, tidak mengenali suara.
 """
 import asyncio
-import json
 import os
-import subprocess
-import sys
+import pathlib
 import tempfile
-import urllib.error
-import urllib.request
+import threading
 
-# ElevenLabs
-DEFAULT_VOICE = "21m00Tcm4TlvDq8ikWAM"
-MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+_TTS_SEM = threading.Semaphore(2)
 
-# Gratis edge-tts
 FREE_DEFAULT = "id-ID-GadisNeural"
+VOICE_FILE = pathlib.Path(__file__).resolve().parent / ".ana_voice"
+
+# agent_name = nama yang diucapkan, terpisah dari nama voice. Suara laki-laki
+# memperkenalkan diri dengan nama laki-laki: timbre dan nama profil tidak harus
+# sama, dan sistem (profil Hermes) tidak perlu diubah untuk itu.
 FREE_VOICES = [
-    {"id": "id-ID-GadisNeural", "name": "Gadis", "gender": "female", "desc": "Female warm friendly — gratis, paling natural id (Edge)"},
-    {"id": "id-ID-ArdiNeural", "name": "Ardi", "gender": "male", "desc": "Male friendly positive — gratis, natural id (Edge)"},
+    {"id": "id-ID-GadisNeural", "name": "Gadis", "gender": "female", "agent_name": "ANNA",
+     "desc": "Hangat dan ramah — paling natural untuk bahasa Indonesia"},
+    {"id": "id-ID-ArdiNeural", "name": "Ardi", "gender": "male", "agent_name": "MAX",
+     "desc": "Friendly dan positif — natural untuk bahasa Indonesia"},
 ]
+_DEFAULT_AGENT_NAME = "ANNA"
 
-# Curated ElevenLabs Indonesia (tetap ada bila key diisi)
-CURATED_ID_VOICES = [
-    {"id":"yLyL4E4r0QfLyYpCwPir", "name":"Sikedewi", "gender":"female", "desc":"30-35th, jernih, neutral — narasi & berita"},
-    {"id":"o5s6XRBkPSTD4syv6mZg", "name":"Arunika", "gender":"female", "desc":"Professional TV, artikulasi kristal"},
-    {"id":"HnnPtoATgzx4ubChwm24", "name":"Zaak", "gender":"female", "desc":"Young friendly, news/IVR"},
-    {"id":"GdyFAZdMpKMBHw5pc1Bu", "name":"Livna", "gender":"female", "desc":"Neutral clear mid-range"},
-    {"id":"ffTJE9l3Kt2ipEM32UOc", "name":"Aita", "gender":"female", "desc":"Youthful expressive, drama"},
-    {"id":"I7sakys8pBZ1Z5f0UhT9", "name":"Putri Maharani", "gender":"female", "desc":"Warm expressive, storytelling"},
-    {"id":"eRyKqfgsJAedPgBBSuqA", "name":"Meraki", "gender":"female", "desc":"Middle-aged calm"},
-    {"id":"IALUBpQ56gzxhNH8HDDK", "name":"Mizani", "gender":"male", "desc":"Warm baritone, storytelling"},
-    {"id":"v70fYBHUOrHA3AKIBjPq", "name":"Mahaputra", "gender":"male", "desc":"Young male clear standard"},
-    {"id":"gmnazjXOFoOcWA59sd5m", "name":"Pratama", "gender":"male", "desc":"Young energetic, gaming"},
-    {"id":"93hTIgYC2wj4AtGhp6WE", "name":"Ganesh", "gender":"male", "desc":"Warm intimate baritone"},
-    {"id":"2vWyCz46C1DzMIf4aE0n", "name":"Youvandra Febrial", "gender":"male", "desc":"Male story/fairy-tale"},
-    {"id":"3mAVBNEqop5UbHtD8oxQ", "name":"Zephlyn", "gender":"male", "desc":"Calm neutral Balinese"},
-]
 
-def _eleven_available():
-    return bool(os.environ.get("ELEVENLABS_API_KEY"))
+def _ids():
+    return {v["id"] for v in FREE_VOICES}
 
-def has_eleven():
-    return _eleven_available()
 
 def available():
-    # selalu True setelah edge-tts terpasang
     return True
 
+
+def has_eleven():
+    """Jalur ElevenLabs sudah dihapus; selalu False."""
+    return False
+
+
 def voice_id():
-    v = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
-    if v:
-        return v
-    return FREE_DEFAULT
+    """Voice aktif. Sumber urutan: file .ana_voice, env ANA_VOICE_ID, default."""
+    try:
+        v = VOICE_FILE.read_text(encoding="utf-8").strip()
+        if v in _ids():
+            return v
+    except OSError:
+        pass
+    v = (os.environ.get("ANA_VOICE_ID") or "").strip()
+    return v if v in _ids() else FREE_DEFAULT
+
+
+def set_voice(vid):
+    vid = (vid or "").strip()
+    if vid not in _ids():
+        raise ValueError("voice_id tidak ada di daftar")
+    os.environ["ANA_VOICE_ID"] = vid
+    try:
+        VOICE_FILE.write_text(vid, encoding="utf-8")
+    except OSError:
+        pass
+    return vid
+
+
+def agent_name(vid=None):
+    """Nama yang diucapkan untuk sebuah voice id."""
+    hit = next((v for v in FREE_VOICES if v["id"] == (vid or voice_id()).strip()), None)
+    return (hit or {}).get("agent_name", _DEFAULT_AGENT_NAME)
+
 
 def curated_voices():
-    if _eleven_available():
-        return CURATED_ID_VOICES
     return FREE_VOICES
 
-def _is_free_id(vid):
-    return vid in {v["id"] for v in FREE_VOICES}
 
 async def _edge_save(text, voice, out_path):
     import edge_tts
     comm = edge_tts.Communicate(text, voice=voice)
     await comm.save(out_path)
 
+
+# Edge TTS hangs instead of erroring above roughly 6k characters (measured:
+# 6000 ok, 8000/10000/12000 all TimeoutError) — one giant request never returns,
+# so /api/speak would sit forever. Chunk at sentence boundaries and concatenate
+# the MP3 frames: MP3 is a stream of self-contained frames, so byte-concatenating
+# whole files plays back correctly (verified: 3.816s + 3.504s -> 7.320s).
+# 1200 chars per chunk leaves headroom under the hard limit and under the
+# per-request time Edge needs for long input.
+_CHUNK_CHARS = 1200
+_CHUNK_TIMEOUT = 120.0  # seconds per chunk; whole-file requests ran 69s
+
+
+def _split_for_speech(text, limit=_CHUNK_CHARS):
+    """Split at sentence/clause boundaries, packing up to *limit* chars per chunk.
+
+    Never split mid-word: a chunk boundary inside a token makes Edge mispronounce
+    it or drop it. Falls back to whitespace when a single sentence exceeds the
+    limit, and to a hard slice only if even one word is longer than the limit.
+    """
+    import re
+    text = text.strip()
+    if len(text) <= limit:
+        return [text] if text else []
+
+    # Split after . ! ? … followed by space (or end of string).
+    parts = re.split(r'(?<=[.!?…])\s+', text)
+    chunks, cur = [], ""
+    for p in parts:
+        if not p:
+            continue
+        cand = p if not cur else cur + " " + p
+        if len(cand) <= limit:
+            cur = cand
+            continue
+        if cur:
+            chunks.append(cur)
+            cur = ""
+        if len(p) <= limit:
+            cur = p
+        else:
+            # One oversized sentence: break on whitespace near the limit.
+            words, buf = p.split(), ""
+            for w in words:
+                # A single token longer than the limit (a URL, a base64 blob) has
+                # no split point: emit it as full-width slices rather than
+                # truncating, so no characters are silently dropped.
+                while len(w) > limit:
+                    if buf:
+                        chunks.append(buf)
+                        buf = ""
+                    chunks.append(w[:limit])
+                    w = w[limit:]
+                cand = w if not buf else buf + " " + w
+                if len(cand) <= limit:
+                    buf = cand
+                else:
+                    if buf:
+                        chunks.append(buf)
+                    buf = w
+            cur = buf
+    if cur:
+        chunks.append(cur)
+    return [c for c in chunks if c.strip()]
+
+
 def _edge_speak_sync(text, voice):
-    # mp3 bytes via temp file
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
-        tmp = tf.name
+    chunks = _split_for_speech(text)
+    if not chunks:
+        return b""
+
+    async def synth():
+        import edge_tts
+        # Synthesize chunks sequentially, not concurrently: Edge rate-limits and a
+        # 3-chunk burst is exactly the load pattern that times out.
+        parts = []
+        with tempfile.TemporaryDirectory() as td:
+            for i, c in enumerate(chunks):
+                out = os.path.join(td, f"c{i}.mp3")
+                comm = edge_tts.Communicate(c, voice=voice)
+                await asyncio.wait_for(comm.save(out), timeout=_CHUNK_TIMEOUT)
+                parts.append(pathlib.Path(out).read_bytes())
+        return b"".join(parts)
+
     try:
-        asyncio.run(_edge_save(text, voice, tmp))
-        return pathlib.Path(tmp).read_bytes()
-    finally:
-        try:
-            pathlib.Path(tmp).unlink(missing_ok=True)
-        except: pass
+        return asyncio.run(synth())
+    except asyncio.TimeoutError as e:
+        raise RuntimeError(f"edge tts timed out on a {len(text)}-char request "
+                           f"({len(chunks)} chunks)") from e
+
+
+# Hard ceiling on one /api/speak call. Not an Edge limit — _edge_speak_sync already
+# chunks around the real ~6k boundary — but a runaway guard so a pathological
+# answer cannot hold an HTTP thread and synthesize for minutes. 30k chars is
+# roughly 25 chunks, about 8-10 minutes of speech, far beyond any report answer.
+_SPEAK_MAX_CHARS = 30000
+
 
 def speak(text):
-    """Returns mp3 bytes — gratis edge-tts bila ElevenLabs tidak ada."""
-    text = (text or "").strip()
+    """Returns mp3 bytes untuk voice aktif.
+
+    Reads the whole answer: no truncation. Long input is chunked in
+    _edge_speak_sync so each Edge request stays under the service limit.
+    """
+    text = (text or "").strip()[:_SPEAK_MAX_CHARS]
     if not text:
         raise ValueError("empty text")
-    vid = voice_id()
-    # ElevenLabs bila key ada dan vid bukan free
-    if _eleven_available() and not _is_free_id(vid):
-        req = urllib.request.Request(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
-            data=json.dumps({
-                "text": text[:2500],
-                "model_id": MODEL,
-                "voice_settings": {"stability": 0.36, "similarity_boost": 0.78, "style": 0.32, "use_speaker_boost": True},
-            }).encode(),
-            method="POST",
-            headers={"content-type": "application/json", "accept": "audio/mpeg", "xi-api-key": os.environ["ELEVENLABS_API_KEY"]},
-        )
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.read()
-    # gratis edge-tts
-    voice = vid if _is_free_id(vid) else FREE_DEFAULT
-    # map curated -> free fallback (female->Gadis, male->Ardi)
-    if not _is_free_id(vid):
-        # keep character hint: female curated -> Gadis, male -> Ardi
-        female_ids = {v["id"] for v in CURATED_ID_VOICES if v["gender"]=="female"}
-        voice = "id-ID-GadisNeural" if vid in female_ids or vid==DEFAULT_VOICE else "id-ID-ArdiNeural"
-        # legacy Rachel -> Gadis
-        if vid == DEFAULT_VOICE:
-            voice = "id-ID-GadisNeural"
-    return _edge_speak_sync(text[:1500], voice)
+    # Max 2 sintesis Edge bersamaan; selebihnya tolak cepat (503) supaya
+    # frontend langsung fallback ke browser speechSynthesis, bukan antre
+    # thread HTTP yang menumpuk tiap jawaban panjang dibacakan.
+    if not _TTS_SEM.acquire(blocking=False):
+        raise RuntimeError("tts busy, fallback browser")
+    try:
+        return _edge_speak_sync(text, voice_id())
+    finally:
+        _TTS_SEM.release()
+
 
 def speak_with_voice(text, vid):
-    """Preview dengan voice tertentu tanpa simpan."""
+    """Preview dengan voice tertentu tanpa menyimpan pilihan."""
+    # Preview is a fixed short sample; no need to chunk it.
     text = (text or "").strip()[:1500]
     if not text:
         raise ValueError("empty text")
-    if _eleven_available() and not _is_free_id(vid):
-        req = urllib.request.Request(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
-            data=json.dumps({"text": text, "model_id": MODEL, "voice_settings": {"stability": 0.36, "similarity_boost": 0.78, "style": 0.32, "use_speaker_boost": True}}).encode(),
-            method="POST",
-            headers={"content-type": "application/json", "accept": "audio/mpeg", "xi-api-key": os.environ["ELEVENLABS_API_KEY"]},
-        )
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.read()
-    voice = vid if _is_free_id(vid) else FREE_DEFAULT
-    if not _is_free_id(vid):
-        female_ids = {v["id"] for v in CURATED_ID_VOICES if v["gender"]=="female"}
-        voice = "id-ID-GadisNeural" if vid in female_ids or vid==DEFAULT_VOICE else "id-ID-ArdiNeural"
-    return _edge_speak_sync(text, voice)
-
-def transcribe(audio, mime="audio/webm"):
-    if not _eleven_available():
-        raise RuntimeError("STT butuh ELEVENLABS_API_KEY (transcribe belum gratis)")
-    if not audio:
-        raise ValueError("empty audio")
-    ext = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "mp4", "audio/mpeg": "mp3", "audio/wav": "wav"}.get(mime.split(";")[0], "webm")
-    boundary = "----ana" + os.urandom(8).hex()
-    b = boundary.encode()
-    body = b"".join([
-        b"--", b, b"\r\n",
-        b'Content-Disposition: form-data; name="model_id"\r\n\r\nscribe_v1\r\n',
-        b"--", b, b"\r\n",
-        b'Content-Disposition: form-data; name="language_code"\r\n\r\nid\r\n',
-        b"--", b, b"\r\n",
-        f'Content-Disposition: form-data; name="file"; filename="turn.{ext}"\r\n'.encode(),
-        f"Content-Type: {mime}\r\n\r\n".encode(),
-        audio, b"\r\n",
-        b"--", b, b"--\r\n",
-    ])
-    req = urllib.request.Request(
-        "https://api.elevenlabs.io/v1/speech-to-text",
-        data=body, method="POST",
-        headers={"content-type": f"multipart/form-data; boundary={boundary}", "xi-api-key": os.environ["ELEVENLABS_API_KEY"]},
-    )
-    with urllib.request.urlopen(req, timeout=45) as r:
-        return (json.loads(r.read()).get("text") or "").strip()
-
-def voices():
-    if not _eleven_available():
-        return []
-    req = urllib.request.Request("https://api.elevenlabs.io/v2/voices", headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"]})
+    if vid not in _ids():
+        raise ValueError("voice_id tidak ada di daftar")
+    # Preview ikut semaphore yang sama: tanpa ini 2 speak + 1 preview
+    # = 3 sintesis bersamaan, antrean thread HTTP kembali.
+    if not _TTS_SEM.acquire(blocking=False):
+        raise RuntimeError("tts busy, fallback browser")
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            body = json.loads(r.read())
-    except Exception:
-        return []
-    return [dict(id=v.get("voice_id"), name=v.get("name"), labels=v.get("labels", {})) for v in body.get("voices", [])]
+        return _edge_speak_sync(text, vid)
+    finally:
+        _TTS_SEM.release()

@@ -62,6 +62,8 @@ export function createTerminal({ api, token, log, hud, isOpen }) {
     PANELS.set(KEY, panel);
     if (window._layoutManager) {
       window._layoutManager.register(KEY);
+      // User eksplisit buka terminal → anggap enable (hapus dari disabled set).
+      window._layoutManager.setPanelEnabled(KEY, true);
       // Terminal panel created after initPanelOptions ran — add it to the
       // Options menu if the menu already exists.
       if (document.getElementById('panelOptionsMenu')) {
@@ -69,7 +71,7 @@ export function createTerminal({ api, token, log, hud, isOpen }) {
         if (list && !list.querySelector('input[data-id="termPanel"]')) {
           const label = document.createElement('label');
           label.className = 'panel-opt';
-          label.innerHTML = `<input type="checkbox" data-id="termPanel" checked> TERMINAL`;
+          label.innerHTML = `<input type="checkbox" data-id="termPanel" ${window._layoutManager?.disabled?.has('termPanel') ? '' : 'checked'}> TERMINAL`;
           list.appendChild(label);
           label.querySelector('input').addEventListener('change', e => {
             window._layoutManager.setPanelEnabled('termPanel', e.target.checked);

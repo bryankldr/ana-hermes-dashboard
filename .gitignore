@@ -13,3 +13,14 @@ dasboard_hud.png
 .DS_Store
 docs/screenshot.png
 Autonomous_AI_Assistant_HUD_Skill/
+# petak cadangan harian — YOY, bloat bila commit tiap hari
+ui/data/snapshots/
+!ui/data/snapshots/manifest.json
+logs/
+
+# runtime lokal — jangan commit
+.ana_session
+.ana_voice
+tiles/
+ui/data/*.pmtiles
+ui/data/*.ndjson

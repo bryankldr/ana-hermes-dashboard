@@ -18,10 +18,13 @@ const RAILS = { left: '.left-rail', right: '.right-rail', center: '#coreSvg', hu
 export function ensurePanel({ id, title = '', body = '', rail = 'left', className = '', register = true }) {
   let el = document.getElementById(id);
   if (el) {
-    // Update body content if provided (for dynamic panels like voicePicker)
     if (body) {
       const bodyEl = el.querySelector('.panel-body');
-      if (bodyEl) bodyEl.innerHTML = body;
+      if (bodyEl) {
+        // SPATIAL MAP punya Leaflet + listener — jangan timpa body yang sudah ada
+        if (id === 'mapPanel' && bodyEl.querySelector('.map-wrap')) return el;
+        bodyEl.innerHTML = body;
+      }
     }
     return el;
   }

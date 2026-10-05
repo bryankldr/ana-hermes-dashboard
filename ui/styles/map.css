@@ -1,0 +1,485 @@
+/* ── SPATIAL MAP — Business Intelligence Dashboard (inside HUD dev) ── */
+/* HUD utama tetap dashboard dev. Panel ini dashboard BI: KPI + filter + insight scoped. */
+#mapPanel { display: flex; flex-direction: column; min-height: 320px; }
+#mapPanel .panel-body { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 6px; }
+
+/* header BI — periode + mode badge */
+.spatial-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 2px; }
+.spatial-head .sh-title { font-family: var(--font-disp); font-size: 10px; letter-spacing: 0.12em; color: var(--text-header); }
+.spatial-head .sh-badges { display: flex; gap: 4px; align-items: center; }
+.sh-badge { font-family: var(--font-mono); font-size: 8px; padding: 2px 6px; border-radius: 999px; border: 1px solid var(--neon-border); color: var(--text-dim); background: rgba(2,15,42,.6); }
+.sh-badge.periode { color: var(--neon); border-color: var(--neon-border-strong); }
+.sh-badge.mode-asisten { color: #39F5A6; border-color: rgba(57,245,166,.35); }
+.sh-badge.mode-coding { color: var(--text-dim); }
+
+/* KPI strip — 4 cards */
+.spatial-kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.spatial-kpi.collapsed { display: none; }
+.kpi { border: 1px solid var(--neon-border); border-radius: 6px; background: rgba(2,15,42,.55); padding: 6px 7px; min-width: 0; }
+.kpi-label { font-family: var(--font-mono); font-size: 10px; font-weight:700; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-value { font-family: var(--font-disp); font-size: 16px; font-weight:800; color: var(--text-main); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-sub { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-value.warn { color: #EF4444; } .kpi-value.ok { color: #22C55E; } .kpi-value.mid { color: #EAB308; }
+
+/* toolbar */
+.spatial-toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.spatial-select, .spatial-mini { background: rgba(8,28,64,.96); border: 1px solid var(--neon-border); border-radius: 8px; color: var(--text-body); font-family: var(--font-mono); font-size: 13px; padding: 7px 10px; outline: none; min-height:30px; appearance: auto; -webkit-appearance: auto; }
+.spatial-select:focus, .spatial-mini:focus { border-color: var(--neon); }
+.spatial-select { flex: 1; min-width: 140px; cursor: pointer; position: relative; z-index: 1; }
+.spatial-mini { min-width: 0; padding: 7px 10px; font-size: 13px; border-radius: 8px; }
+.spatial-btn { flex-shrink: 0; background: rgba(0,220,255,.10); border: 1px solid var(--neon-border); border-radius: 8px; color: var(--neon); padding: 7px 12px; cursor: pointer; font-family: var(--font-mono); font-size: 13px; font-weight:600; }
+.spatial-btn:hover { border-color: var(--neon); background: rgba(0,220,255,.14); }
+.spatial-btn.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
+.spatial-btn.ghost { background: transparent; color: var(--text-dim); }
+
+/* filters — compact intuitive drawer: card groups + grid + pill actions */
+.spatial-filters { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid rgba(45,242,255,.22); border-radius: 12px; background: rgba(4,18,44,.96); box-shadow: 0 12px 28px rgba(0,0,0,.55); }
+.spatial-filters.collapsed { display: none; }
+.spatial-fgroup { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(45,242,255,.12); }
+.spatial-fgroup-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: .10em; color: var(--neon); text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; font-weight:700; }
+.spatial-fgroup-title .spatial-hint { font-size: 11px; letter-spacing:0; text-transform:none; color: var(--text-dim); opacity:.9; font-weight:400; }
+.spatial-row { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 6px; align-items: end; width: 100%; box-sizing: border-box; }
+.spatial-row label { min-width: 0; }
+.spatial-mini { width: 100%; min-width: 0; box-sizing: border-box; }
+.spatial-row label { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-weight:600; letter-spacing:.02em; }
+.spatial-row label .spatial-mini, .spatial-row label select { width: 100%; }
+.spatial-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); opacity: 0.9; }
+.spatial-fgroup + .spatial-fgroup .spatial-row:first-of-type { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 6px; }
+.spatial-fgroup .spatial-row:last-child { grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
+.spatial-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; padding-top: 2px; border-top: 1px dashed rgba(45,242,255,.12); margin-top: 2px; }
+.spatial-chips:empty { display: none; border: none; margin: 0; padding: 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(45,242,255,.22); background: rgba(45,242,255,.12); color: var(--text-body); font-weight:500; }
+.chip b { color: var(--neon); font-weight: 700; }
+.chip i { cursor: pointer; font-style: normal; opacity: .8; padding: 0 2px; font-size:13px; line-height:1; }
+.chip i:hover { opacity: 1; color: var(--red); }
+
+/* ── SPATIAL MAP: ikut LayoutManager seperti panel lain (RESPONSE) ── */
+/* Default wajar saat pertama register (rail 240px). Tanpa width !important agar resize inline style menang. z-index 5 !important agar selalu di bawah panel lain. */
+#mapPanel { min-height: 380px; z-index: 11 !important; }
+/* 11 = di atas rail kosong (10) agar klik lolos, tetap di bawah semua panel konten (12+) */
+#mapPanel .panel-body { padding: 0; gap: 0; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.map-wrap.map-full { position: relative; flex: 1; min-height: 300px; border-radius: 8px; overflow: hidden; border: 1px solid var(--neon-border); background: #03101f; display: block; }
+
+/* flying overlays di atas map */
+.map-fly { position: absolute; left: 8px; right: 8px; z-index: 420; pointer-events: auto; }
+.map-fly .spatial-toolbar, .map-fly .spatial-toolbar * { pointer-events: auto !important; }
+.map-fly .spatial-toolbar { position: relative; z-index: 430; }
+.map-fly .spatial-select, .map-fly .spatial-mini, .map-fly .spatial-btn { pointer-events: auto !important; position: relative; z-index: 431; cursor: pointer; }
+#mapBox { pointer-events: auto; }
+.map-wrap.map-full { pointer-events: auto; }
+/* header panel SPATIAL MAP — judul + BUSINESS INTELLIGENCE + periode/mode (bukan flying di map) */
+#mapPanel .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; letter-spacing:.06em; }
+#mapPanel .panel-title .sh-title { font-family: var(--font-disp); font-size: 10px; letter-spacing: .12em; color: var(--text-dim); opacity: .9; }
+#mapPanel .panel-title .sh-badges { display: flex; gap: 4px; align-items: center; }
+#mapPanel .panel-title .sh-badge { font-family: var(--font-mono); font-size: 10px; padding: 3px 8px; letter-spacing:.04em; border-radius: 999px; border: 1px solid var(--neon-border); color: var(--text-dim); background: rgba(2,15,42,.6); }
+#mapPanel .panel-title .sh-badge.periode { color: var(--neon); border-color: var(--neon-border-strong); }
+#mapPanel .panel-title .sh-badge.mode-asisten { color: #39F5A6; border-color: rgba(57,245,166,.35); }
+#mapPanel .panel-title .sh-badge.mode-coding { color: var(--text-dim); }
+/* toggle toolbar: 1 tombol seukuran tombol layer (30x30), sembunyikan
+   toolbar + filter + pencarian sekaligus. Pola sama seperti layer control. */
+.map-fly-top { position: relative; top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: calc(100% - 88px); overflow: visible; align-items: flex-start; pointer-events: none; }
+.spatial-toggle-btn { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--neon); cursor: pointer; padding: 0; flex: 0 0 auto; }
+.spatial-toggle-btn:hover { background: rgba(0,220,255,.14); border-color: var(--neon); }
+.spatial-toggle-btn.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
+.spatial-toggle-btn svg { display: block; }
+.map-fly-top.tools-collapsed .spatial-toolbar.flying,
+.map-fly-top.tools-collapsed .spatial-filters.flying,
+.map-fly-top.tools-collapsed .map-tools.flying { display: none !important; }
+.map-fly-top > * { pointer-events: auto; }
+.map-fly .spatial-toolbar.flying, .map-fly .spatial-filters.flying, .map-fly .map-tools.flying { width: min(560px, 100%); max-width: 100%; box-sizing: border-box; align-self: flex-start; }
+.map-fly .spatial-toolbar.flying { background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; padding: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.5); gap: 6px; flex-wrap: nowrap; }
+.map-fly .spatial-toolbar.flying .spatial-select { flex: 1 1 150px; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.map-fly .spatial-toolbar.flying .spatial-btn { flex: 0 0 auto; white-space: nowrap; padding: 7px 10px; display: inline-flex; align-items: center; justify-content: center; }
+.map-fly .spatial-toolbar.flying .spatial-btn svg { display: block; }
+.map-fly .spatial-filters.flying { max-height: min(58vh, 480px); overflow: auto; background: rgba(2,15,42,.97); backdrop-filter: blur(12px); border-color: rgba(45,242,255,.32); box-shadow: 0 12px 32px rgba(0,0,0,.6); border-radius: 12px; position: relative; z-index: 432; }
+.map-fly .map-tools.flying { opacity: .96; }
+.map-fly .map-tools.flying input, .map-fly .map-tools.flying button { backdrop-filter: blur(6px); }
+.spatial-kpi.flying { position: absolute; left: 8px; bottom: 8px; right: auto; width: min(420px, calc(34% - 6px)); z-index: 315; margin: 0; backdrop-filter: blur(8px); background: rgba(2,15,42,.84); border: 1px solid rgba(45,242,255,.28); border-radius: 9px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; min-height: 56px; align-content: center; }
+.spatial-kpi.flying.collapsed { display: none; }
+.spatial-kpi.flying .kpi { background: rgba(45,242,255,.09); border-color: rgba(45,242,255,.18); padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; justify-content: center; }
+.spatial-kpi.flying .kpi-label { font-size: 10px; letter-spacing: .08em; font-weight: 700; opacity: .95; }
+.spatial-kpi.flying .kpi-value { font-size: 22px; font-weight: 800; line-height: 1; letter-spacing: -.02em; }
+.spatial-kpi.flying .kpi-sub { font-size: 11px; opacity: .90; line-height: 1.2; font-weight:500; }
+
+/* legacy map box moved into .map-wrap */
+#mapBox img.leaflet-tile { filter: brightness(0.85) saturate(0.7); }
+.map-tools { display: flex; gap: 6px; }
+.map-tools input { flex: 1; min-width: 0; background: rgba(2,15,42,.80); border: 1px solid var(--neon-border); border-radius: 8px; color: var(--text-body); font-family: var(--font-mono); font-size: 13px; padding: 8px 10px; outline: none; }
+.map-tools input:focus { border-color: var(--neon); }
+.map-tools button { flex-shrink: 0; background: rgba(0,220,255,.1); border: 1px solid var(--neon-border); border-radius: 6px; color: var(--neon); padding: 5px 10px; cursor: pointer; }
+.map-tools button:hover { border-color: var(--neon); }
+
+/* insight strip */
+.spatial-insight { border: 1px solid rgba(57,245,166,.20); border-radius: 8px; background: rgba(2,15,42,.55); padding: 8px 10px; font-family: var(--font-mono); font-size: 13px; line-height: 1.45; color: var(--text-body); }
+.spatial-insight:empty { display: none; }
+.spatial-insight .ins-title { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #39F5A6; margin-bottom: 4px; font-weight:700; }
+.spatial-insight.dev { border-color: var(--neon-border); color: var(--text-dim); }
+.spatial-insight.dev .ins-title { color: var(--text-dim); }
+
+/* legend/stat/metric */
+.map-legend { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--text-dim); }
+.map-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
+.map-legend .lg i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(255,255,255,0.15); }
+.map-stat { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+.map-metric { font-family: var(--font-mono); font-size: 12px; color: var(--text-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight:600; }
+
+/* leaflet theming */
+.leaflet-container { font-family: var(--font-mono); }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: rgba(2,15,42,.95); color: var(--neon); border: 1px solid var(--neon-border); }
+/* attribution Leaflet/Esri ada di dalam legend (.lg-attrib), bukan layer terpisah */
+.leaflet-control-attribution { display: none !important; }
+.leaflet-control-layers.flying-fix { background: rgba(2,15,42,.94); border: 1px solid var(--neon-border); color: var(--text-body); font-size: 13px; border-radius: 8px; }
+.leaflet-bar a { background: rgba(2,15,42,.9); color: var(--neon); border-color: var(--neon-border); }
+
+/* mode-aware: coding shows dev detail, asisten shows BI narrative — via data-ana-mode */
+html[data-ana-mode="coding"] .only-asisten { display: none !important; }
+html[data-ana-mode="asisten"] .only-coding { display: none !important; }
+
+/* ── spatial chart (panel di DALAM SPATIAL MAP — ANNA full control) ── */
+.spatial-chart { border: 1px solid var(--neon-border); border-radius: 6px; background: rgba(2,15,42,.55); overflow: hidden; }
+.spatial-chart.hidden { display: none !important; }
+.spatial-chart.visible { display: block; }
+.spatial-chart.flying { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 20px)); max-height: min(72%, 420px); z-index: 400; background: rgba(2,15,42,.92); backdrop-filter: blur(12px); border-color: rgba(45,242,255,.32); box-shadow: 0 12px 32px rgba(0,0,0,.55); border-radius: 10px; overflow: hidden; }
+.spatial-chart.flying .spatial-chart-body { height: 320px; }
+/* grid mode: panel jadi lebih lebar + tinggi supaya >1 chart muat lega */
+.spatial-chart.flying.multi { width: min(980px, calc(100% - 24px)); max-height: min(88%, 660px); }
+.spatial-chart.flying.visible { display: block; }
+.spatial-chart-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--neon-border); background: rgba(45,242,255,.06); }
+.spatial-chart-title { font-family: var(--font-disp); font-size: 13px; letter-spacing: .08em; color: var(--text-header); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight:700; }
+/* ── Teks header jalan (marquee) — hanya kalau teks kepotong ──
+   Class .marquee ditempel JS saat scrollWidth > clientWidth.
+   Inner .mq-track digeser translateX pelan ke kiri; kalau sudah habis
+   (100% teks lewat), kembali ke awal setelah jeda. Transisi lembut via
+   animation-timing ease-in-out di keyframes. Hapus class = teks statis. */
+.spatial-chart-title.marquee { text-overflow: clip; }
+.spatial-chart-title .mq-track { display: inline-block; white-space: nowrap; }
+.spatial-chart-title.marquee .mq-track { will-change: transform;
+  animation: ana-chart-marquee var(--mq-dur, 18s) ease-in-out infinite; }
+@keyframes ana-chart-marquee {
+  0%   { transform: translateX(0); }                       /* jeda awal: baca awal */
+  8%   { transform: translateX(0); }
+  42%  { transform: translateX(var(--mq-dist, -120px)); }  /* jalan kiri, pelan */
+  54%  { transform: translateX(var(--mq-dist, -120px)); }  /* jeda akhir: baca ujung */
+  88%  { transform: translateX(0); }                       /* kembali kanan, durasi SAMA */
+  100% { transform: translateX(0); }                       /* jeda sebelum jalan lagi */
+}
+.spatial-chart-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+/* badge freshness: data bukan realtime, operator wajib lihat ini */
+.spatial-chart-meta.stale { color: #e8a33d; }
+.spatial-chart-close { border: 1px solid var(--neon-border); background: rgba(0,0,0,.25); color: var(--text-dim); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+.spatial-chart-close:hover { color: var(--text-main); border-color: var(--neon); }
+.spatial-chart-body { padding: 8px; height: 220px; }
+.spatial-chart-body canvas { width: 100% !important; height: 100% !important; }
+
+/* ── KPI row (executive briefing) ── */
+.spatial-chart-kpis { display: none; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 1px; background: var(--neon-border); border-bottom: 1px solid var(--neon-border); }
+.spatial-chart-kpis:not(:empty) { display: grid; }
+.spatial-kpi { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; background: rgba(2,15,42,.72); }
+.spatial-kpi-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spatial-kpi-value { font-family: var(--font-disp); font-size: 15px; font-weight: 700; color: var(--neon); line-height: 1.1; white-space: nowrap; }
+.spatial-kpi-value i { font-style: normal; font-size: 9px; color: var(--text-dim); }
+.spatial-kpi-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spatial-kpi[data-tone="good"] .spatial-kpi-value { color: #4ADE80; }
+.spatial-kpi[data-tone="warn"] .spatial-kpi-value { color: #FACC15; }
+.spatial-kpi[data-tone="bad"]  .spatial-kpi-value { color: #FB7185; }
+
+/* ── grid chart: >1 chart dalam satu box ── */
+.spatial-chart-grid { padding: 6px; overflow-y: auto; min-height: 0; }
+.spatial-chart-grid.grid { display: grid; grid-template-columns: repeat(var(--ana-cols, 2), minmax(0, 1fr)); gap: 6px; }
+/* cell: tinggi terkunci per jumlah chart, jadi grid tak pernah "meninggi" */
+.spatial-chart-cell { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid rgba(45,242,255,.14); border-radius: 6px; background: rgba(2,15,42,.5); padding: 4px 4px 6px; overflow: hidden; }
+.spatial-chart-cell-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--text-header); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-bottom: 2px; flex: 0 0 auto; }
+/* wrapper tinggi-tetap: Chart.js responsive mengisi wrapper ini, bukan flex parent.
+   Tanpa wrapper ini canvas = flex item auto-height -> loop resize -> tinggi tak terkendali. */
+.spatial-chart-canvas { position: relative; flex: 1 1 auto; min-height: 0; height: 132px; overflow: hidden; }
+.spatial-chart-canvas canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; }
+.spatial-chart-err { font-family: var(--font-mono); font-size: 10px; color: #FB7185; padding: 12px 6px; text-align: center; }
+
+/* tinggi per mode — tetap, tak ikut canvas */
+.spatial-chart-grid.grid .spatial-chart-canvas { height: 150px; }
+.spatial-chart-grid:not(.grid) .spatial-chart-canvas { height: 260px; }
+@media (max-height: 760px) {
+  .spatial-chart-grid.grid .spatial-chart-canvas { height: 118px; }
+  .spatial-chart-grid:not(.grid) .spatial-chart-canvas { height: 200px; }
+}
+
+/* ── narasi (kalimat ANNA, bukan angka) ── */
+.spatial-chart-narration { display: none; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--text-main); padding: 7px 10px; border-top: 1px solid var(--neon-border); background: rgba(45,242,255,.05); }
+.spatial-chart-narration:not(:empty) { display: block; }
+
+
+
+.map-legend.flying { position: absolute; right: 8px; bottom: 8px; left: auto; width: min(320px, calc(30% - 6px)); z-index: 318; display: flex; flex-wrap: wrap; align-content: center; gap: 6px 10px; padding: 8px 10px; border-radius: 10px; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.22); box-shadow: 0 6px 20px rgba(0,0,0,.45); min-height: 56px; font-size: 12px; }
+.map-legend.flying .lg { gap: 4px; font-size: 12px; font-weight:600; }
+.map-legend.flying .lg i { width: 12px; height: 12px; border-radius:3px; }
+.map-legend.flying .lg-attrib { width: 100%; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(45,242,255,.16); font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; color: var(--text-dim); opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* meta + insight + progress — satu baris rata bawah di kiri-kanan legend */
+.map-meta.flying { position: absolute; right: calc(30% + 12px); bottom: 14px; z-index: 317; display: flex; gap: 6px; align-items: center; padding: 3px 8px; border-radius: 999px; background: rgba(2,15,42,.90); backdrop-filter: blur(8px); border: 1px solid rgba(45,242,255,.18); font-family: var(--font-mono); font-size: 7px; line-height: 1; box-shadow: 0 2px 10px rgba(0,0,0,.3); max-width: 22%; overflow: hidden; white-space: nowrap; }
+.map-meta.flying .map-metric, .map-meta.flying .map-stat { font-size: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.spatial-insight.flying { position: absolute; left: calc(34% + 12px + 168px + 8px); right: calc(30% + 12px + 22% + 12px); bottom: 14px; z-index: 316; max-height: 44px; overflow: auto; background: rgba(2,15,42,.90); backdrop-filter: blur(10px); border: 1px solid rgba(57,245,166,.22); box-shadow: 0 6px 18px rgba(0,0,0,.4); border-radius: 999px; padding: 4px 10px; font-size: 8px; line-height: 1.3; white-space: nowrap; text-overflow: ellipsis; }
+.spatial-insight.flying .ins-title { font-size: 9px; margin-bottom: 2px; display: inline; margin-right: 8px; font-weight:700; }
+.spatial-insight.flying.hidden { display: none !important; }
+.spatial-insight.flying:empty { display: none !important; }
+
+/* progress bar — flying di kiri-bawah map (tidak geser layout) */
+.map-wrap { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#mapBox { position: absolute; inset: 0; width: auto; height: auto; border: none; border-radius: 8px; background: #03101f; z-index: 0; overflow: hidden; }
+.spatial-progress { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--neon-border); border-radius: 6px; background: rgba(2,15,42,.45); }
+.spatial-progress.hidden { display: none; }
+/* progress hidden by default — hanya tampil saat memuat (flying di atas bottom-bar) */
+.spatial-progress.flying { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); width: 220px; max-width: calc(100% - 24px); z-index: 450; backdrop-filter: blur(8px); background: rgba(2,15,42,.92); border-color: rgba(45,242,255,.38); box-shadow: 0 8px 24px rgba(0,0,0,.5); pointer-events: none; padding: 4px 8px; border-radius: 999px; min-height: 28px; }
+.spatial-progress.flying.hidden { display: none !important; }
+.spatial-progress.flying .sp-label { font-size: 7px; max-width: 86px; line-height: 1; }
+.spatial-progress.flying .sp-bar { height: 4px; flex: 1; }
+.sp-bar { flex: 1; height: 6px; border-radius: 999px; background: rgba(45,242,255,.12); overflow: hidden; min-width: 0; }
+.sp-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--neon), #39F5A6); transition: width .45s ease; }
+.sp-label { font-family: var(--font-mono); font-size: 12px; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; font-weight:600; }
+
+.leaflet-top { top: 56px; }
+.leaflet-bottom.leaflet-left { bottom: 72px; }
+.leaflet-top.leaflet-right { top: 8px; }
+/* kanan-atas: skala pojok, lalu layer, lalu zoom di bawah kontrol layer */
+.leaflet-top.leaflet-right .leaflet-control { margin-bottom: 6px; }
+/* zoom + skala serasi tema toolbar */
+#mapPanel .leaflet-bar { border: 1px solid rgba(45,242,255,.28); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+#mapPanel .leaflet-bar a { background: rgba(2,15,42,.88); color: var(--neon); border-bottom: 1px solid rgba(45,242,255,.18); font-family: var(--font-mono); backdrop-filter: blur(10px); }
+#mapPanel .leaflet-bar a:hover { background: rgba(0,220,255,.14); color: var(--neon); }
+#mapPanel .leaflet-control-scale-line { background: none; border: none; border-left: 2px solid var(--text-body); border-right: 2px solid var(--text-body); border-bottom: 2px solid var(--text-body); color: #fff; font-family: var(--font-mono); font-size: 10px; text-shadow: 0 1px 3px rgba(0,0,0,.9); box-shadow: none; }
+/* opsi layer serasi toolbar/filter */
+#mapPanel .leaflet-control-layers { background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--text-body); font-family: var(--font-mono); font-size: 12px; }
+#mapPanel .leaflet-control-layers-toggle { width: 30px; height: 30px; border-radius: 8px; }
+#mapPanel .leaflet-control-layers-expanded { padding: 8px 10px; }
+#mapPanel .leaflet-control-layers label { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
+#mapPanel .leaflet-control-layers-separator { border-color: rgba(45,242,255,.18); }
+.leaflet-control-zoom { margin-top: 4px !important; }
+.zoom-badge { margin-top: 6px; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(45,242,255,.28); background: rgba(2,15,42,.92); backdrop-filter: blur(10px); color: var(--neon); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.45); pointer-events: none; }
+
+@media (max-width: 900px){
+  .map-bottom-bar { flex-wrap: wrap; align-items: stretch; }
+  .map-bottom-bar .spatial-kpi.flying { flex: 1 1 100%; width: auto; }
+  .map-bottom-bar .spatial-insight.flying { flex: 1 1 200px; white-space: normal; max-height: 52px; }
+  .map-bottom-bar .map-meta.flying { flex: 0 0 auto; }
+  .map-bottom-bar .map-legend.flying { flex: 1 1 100%; width: auto; }
+  .spatial-progress.flying { bottom: 92px; width: 200px; }
+}
+@media (max-width: 780px){
+  .spatial-kpi.flying { min-height: 48px; }
+}
+@media (max-width: 560px){
+  .spatial-kpi.flying { grid-template-columns: repeat(2, 1fr); bottom: 56px; }
+}
+
+/* bottom bar — KPI kiri, progress+insight+meta tengah, legend kanan — rata bawah
+
+   Panel bisa selebar 226px. Versi lama memberi anak fixed flex-basis
+   (480px + 300px + 200px = 980px) dalam bar 208px dengan shrink:0 → bar
+   meluber ke kanan DAN memanjang ke atas (377px > peta 307px), jadi bar
+   menutupi peta dan polygon tak pernah terlihat. Semua anak jadi shrinkable
+   + bar wrap; tinggi dibatasi agar bar tak pernah menutupi peta. */
+.map-bottom-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 318; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; align-content: flex-end; pointer-events: none; max-height: 46%; overflow: hidden; }
+.map-bottom-bar > * { pointer-events: auto; min-width: 0; }
+.map-bottom-bar .spatial-kpi.flying { position: static; width: auto; flex: 1 1 190px; min-height: 56px; left: auto; right: auto; bottom: auto; gap: 4px; padding: 4px; }
+
+.map-bottom-bar .spatial-insight,
+.map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 160px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }
+.map-bottom-bar .map-meta.flying { position: static; flex: 1 1 auto; max-width: 100%; white-space: nowrap; min-height: 34px; align-self: center; left: auto; right: auto; bottom: auto; font-size: 11px; padding: 5px 10px; overflow: hidden; text-overflow: ellipsis; }
+.map-bottom-bar .map-legend.flying { position: static; width: auto; flex: 1 1 190px; min-height: 52px; max-height: 58px; left: auto; right: auto; bottom: auto; align-content: center; overflow: hidden; }
+
+/* Panel sempit tak muat BI bar satu baris. Before: 4 KPI + insight + meta +
+   legend wrap jadi 141px dan menutupi 46% peta (664 dari 800 polygon tak
+   terlihat). Bar diperkecil jadi strip tipis di bawah, bukan wrap. Peta
+   adalah isi utama panel — BI diakses lewat toggle, bukan menutupi peta.
+   Dipakai saat #mapPanel < 520px (panel dikecilkan user / viewport kecil). */
+#mapPanel.narrow .map-bottom-bar { flex-wrap: nowrap; max-height: none; gap: 6px; }
+#mapPanel.narrow .map-bottom-bar .spatial-kpi.flying { flex: 1 1 0; min-width: 0; min-height: 40px; padding: 2px; gap: 2px; grid-template-columns: repeat(4, minmax(0,1fr)); }
+#mapPanel.narrow .map-bottom-bar .spatial-kpi.flying .kpi { padding: 3px 4px; }
+#mapPanel.narrow .map-bottom-bar .spatial-kpi.flying .kpi-label { font-size: 8px; }
+#mapPanel.narrow .map-bottom-bar .spatial-kpi.flying .kpi-value { font-size: 15px; }
+#mapPanel.narrow .map-bottom-bar .spatial-kpi.flying .kpi-sub { display: none; }
+#mapPanel.narrow .map-bottom-bar .spatial-insight,
+#mapPanel.narrow .map-bottom-bar .spatial-insight.flying { flex: 1 1 0; max-height: 40px; padding: 4px 8px; font-size: 10px; }
+#mapPanel.narrow .map-bottom-bar .map-meta.flying { flex: 0 0 auto; max-width: 96px; min-height: 26px; font-size: 9px; padding: 3px 6px; }
+#mapPanel.narrow .map-bottom-bar .map-legend.flying { flex: 0 0 108px; min-height: 26px; max-height: 40px; }
+
+@media (max-width: 640px){
+  .spatial-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .spatial-fgroup + .spatial-fgroup .spatial-row:first-of-type { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .spatial-fgroup .spatial-row:last-child { grid-template-columns: 1fr; }
+  .spatial-fgroup .spatial-row:last-child #fApply { justify-self: stretch; }
+}
+@media (max-width: 420px){
+  .spatial-row { grid-template-columns: 1fr; }
+  .spatial-fgroup + .spatial-fgroup .spatial-row:first-of-type { grid-template-columns: 1fr; }
+}
+
+.leaflet-pane { z-index: 200; }
+.leaflet-top, .leaflet-bottom { z-index: 300; }
+
+/* ── P2-4: modal Pengaturan Tiles (rebuild + cron) ── */
+.spatial-tiles-modal.hidden { display: none !important; }
+.spatial-tiles-modal { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); width: min(480px, calc(100% - 20px)); max-height: min(64vh, 440px); overflow: auto; z-index: 440; }
+.spatial-tiles-card { background: rgba(2,15,42,.96); backdrop-filter: blur(12px); border: 1px solid rgba(45,242,255,.32); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.6); padding: 12px; display: flex; flex-direction: column; gap: 10px; font-family: var(--font-mono); font-size: 13px; color: var(--text-body); }
+.spatial-tiles-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; letter-spacing: .06em; color: var(--neon); }
+.spatial-tiles-status { display: flex; flex-direction: column; gap: 4px; }
+.spatial-tiles-status pre { background: rgba(255,255,255,.04); border: 1px solid rgba(45,242,255,.14); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.spatial-tiles-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spatial-tiles-msg { min-height: 18px; font-size: 12px; }
+
+/* handle resize/drag LayoutManager harus di atas overlay flying (max 450) — scope mapPanel saja */
+#mapPanel .layout-handle { z-index: 500; }
+#mapPanel .layout-lock-indicator { z-index: 501; }
+
+/* ── SEMBUNYIKAN (bukan hapus): Meta bar + atribusi legend ──
+   Meta = "N baru · M total · status" di atas map.
+   Atribusi = "Leaflet · Esri, Maxar, Earthstar Geographics" di dalam legend.
+   Toggle: hapus/comment 2 rule ini untuk tampilkan lagi.
+   JS tetap jalan normal (metric.textContent, updateLegend, _legendAttrib
+   tetap update DOM) — hanya tidak tampil. Data/metric tidak hilang. */
+#mapPanel .map-bottom-bar .map-meta.flying,
+#mapPanel.narrow .map-bottom-bar .map-meta.flying { display: none; }
+#mapPanel #mapLegend .lg-attrib { display: none; }
+
+/* ══ LAPORAN BISNIS (spatialReport.js) — dokumen multi halaman siap cetak ══
+   Flying di atas peta, kayak chart panel. Z410: di atas chart (400), di bawah
+   filter (432). Chart.js tak dipakai — canvas tak tercetak rapi di PDF. */
+.spatial-report { border: 1px solid rgba(45,242,255,.32); border-radius: 10px; background: rgba(2,15,42,.93); backdrop-filter: blur(12px); box-shadow: 0 12px 32px rgba(0,0,0,.55); overflow: hidden; }
+.spatial-report.hidden { display: none !important; }
+.spatial-report.flying { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: min(920px, calc(100% - 24px)); height: min(94%, 720px); z-index: 410; display: flex; flex-direction: column; }
+.rpt-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid rgba(45,242,255,.22); background: rgba(45,242,255,.06); flex: 0 0 auto; }
+.rpt-head-title { font-family: var(--font-disp); font-size: 13px; letter-spacing: .08em; color: var(--text-header); font-weight: 700; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rpt-head-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.rpt-btn { border: 1px solid rgba(45,242,255,.28); background: rgba(45,242,255,.10); color: var(--text-header); border-radius: 6px; padding: 5px 12px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; flex: 0 0 auto; }
+.rpt-btn:hover { border-color: var(--neon); background: rgba(45,242,255,.18); }
+.rpt-btn.ghost { background: rgba(0,0,0,.25); color: var(--text-dim); }
+.rpt-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LAPORAN — dokumen A4. Sumber kebenaran: hasil konversi template ke HTML,
+   proposal/stitch_image_to_html_converter/code.html (Struktur + palet + tipografi),
+   dikalibrasi ke A4 memakai ukuran piksel dari render Canva aslinya.
+
+   Kalibrasi: container HTML 820px, content A4 = 167.45mm = 632.88px → skala 0.874.
+   Contoh: h1 HTML text-3xl (30px) × 0.874 = 26.2px = 19.7pt; hasil ukur Canva 19pt.
+   Semua satuan mm supaya 1:1 di Cetak.
+
+   Grid: margin kiri/kanan 21.275mm, content 167.45mm.
+   • header band   20.7mm, h 35.4mm, border-left 2.1mm #3b9ab2
+   • 4 KPI card    w 39.89mm, gap 2.63mm, h 24.7mm (header #577382 + body #DCF3F5)
+   • 2 chart       w 82mm, gap 3.39mm
+   • 2 callout     w 82.11mm, gap 3.39mm, h 46.1mm, bg #E5F6F8
+   • tren chart    w 126.3mm × h 32.9mm
+   ════════════════════════════════════════════════════════════════════════ */
+.rpt-page {
+  --rpt-m: 21.275mm; --rpt-c: 167.45mm; --rpt-g: 2.63mm; --rpt-col: 39.89mm;
+  --slate: #506977; --slate-d: #577382; --aqua: #E5F6F8;
+  --aqua-h: #D8F1F5; --aqua-k: #DCF3F5; --accent: #3b9ab2;
+  --grey: #94A5AD; --ink: #0f172a;
+  box-sizing: border-box;
+  width: 210mm; min-height: 297mm; padding: 20.7mm var(--rpt-m) 16mm;
+  background: #fff; color: var(--ink);
+  display: flex; flex-direction: column; gap: 4mm;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  break-inside: avoid; page-break-inside: avoid;
+}
+.rpt-page *, .rpt-page *::before, .rpt-page *::after { box-sizing: border-box; }
+
+/* ── header: bg #D8F1F5, border-left 2.1mm #3B9AB2 ── */
+.rpt-cover {
+  min-height: 35.4mm; padding: 5.5mm;
+  background: var(--aqua-h);
+  border-left: 1.85mm solid var(--accent); border-radius: 1.4mm;
+  display: flex; flex-direction: column; justify-content: center; gap: 2.4mm;
+}
+.rpt-cover-main { margin: 0; font-size: 19.7pt; font-weight: 800; line-height: 1.25; letter-spacing: -.015em; text-transform: uppercase; color: #0f172a; }
+.rpt-cover-sub { font-size: 11.8pt; font-weight: 700; line-height: 1.3; letter-spacing: -.01em; color: #1e293b; }
+.rpt-cover-meta { font-size: 9.2pt; font-weight: 500; line-height: 1.35; color: #475569; }
+
+/* judul section (RINGKASAN PRODUKSI) — 14pt, uppercase, center, tracking-wider */
+.rpt-h { margin: 0 0 4mm; font-size: 10.5pt; font-weight: 700; line-height: 1.25; letter-spacing: .05em; text-transform: uppercase; text-align: center; color: #0f172a; }
+.rpt-sub { margin: 0; font-size: 9.2pt; line-height: 1.3; text-align: center; color: #475569; }
+
+/* ── KPI: header #577382 + body #DCF3F5, nilai #506977 ── */
+.rpt-kpis { display: grid; grid-template-columns: repeat(4, var(--rpt-col)); gap: 2.63mm; }
+.rpt-kpi { min-height: 24.7mm; background: var(--aqua-k); border-radius: .5mm; display: flex; flex-direction: column; overflow: hidden; }
+.rpt-kpi-label { background: var(--slate-d); color: #fff; text-align: center; font-size: 9.2pt; font-weight: 700; line-height: 1.25; padding: 1.9mm 2mm; }
+.rpt-kpi-value { flex: 1; display: flex; align-items: center; justify-content: center; gap: 1mm; font-size: 11.8pt; font-weight: 600; line-height: 1.2; color: var(--slate); }
+.rpt-kpi-value i { font-size: 10.5pt; font-style: normal; font-weight: 600; color: var(--slate); }
+.rpt-kpi-sub { font-size: 7.9pt; line-height: 1.3; text-align: center; color: #64748b; padding-bottom: 1.4mm; }
+.rpt-kpi[data-tone="good"] .rpt-kpi-value { color: #2F6B4A; }
+.rpt-kpi[data-tone="warn"] .rpt-kpi-value { color: #8A6D16; }
+.rpt-kpi[data-tone="bad"]  .rpt-kpi-value { color: #8A3B42; }
+
+/* ── row: 2 kolom 82mm, gap 3.39mm ── */
+.rpt-row { display: grid; gap: 3.39mm; align-items: start; }
+.rpt-row[data-cols="1"] { grid-template-columns: var(--rpt-c); }
+.rpt-row[data-cols="2"] { grid-template-columns: 82mm 82.11mm; gap: 3.39mm; justify-content: start; }
+.rpt-row-c { min-width: 0; display: flex; flex-direction: column; gap: 3mm; }
+
+/* ── chart: judul 10.5pt center, kolom 82mm × tinggi 41mm ──
+   Kedua chart dalam satu row tinggi SAMA (template: dua canvas h-[220px]).
+   Pie viewBox-nya lebih tinggi (legend bawah) tapi preserveAspectRatio="meet"
+   otomatis letterbox → pie terender ~53.7mm × 41mm, sesuai ukur 54.38mm. */
+.rpt-chart { margin: 0; display: flex; flex-direction: column; gap: 2.4mm; }
+.rpt-chart-t { font-size: 10.5pt; font-weight: 700; line-height: 1.25; letter-spacing: .03em; text-transform: uppercase; text-align: center; color: #0f172a; }
+.rpt-chart .rpt-svg { width: 100%; height: 41mm; }
+.rpt-chart--wide .rpt-svg { width: 126.3mm; height: 32.9mm; }
+.rpt-svg { display: block; background: #fff; }
+.rpt-grid { stroke: #e2e8f0; stroke-width: 1; }
+.rpt-grid-t { stroke: #cbd5e1; stroke-width: 1; }
+.rpt-axis-line { stroke: #cbd5e1; stroke-width: 1; }
+.rpt-axis { font-family: "Plus Jakarta Sans", sans-serif; font-size: 10px; fill: #64748b; }
+.rpt-axis-x { font-size: 9.5px; font-weight: 600; fill: #2c3e50; }
+.rpt-axis-y { font-family: "Plus Jakarta Sans", sans-serif; font-size: 11px; fill: #475569; }
+.rpt-axis-tx { font-family: "Plus Jakarta Sans", sans-serif; font-size: 11px; font-weight: 500; fill: #334155; }
+.rpt-legend { font-family: "Plus Jakarta Sans", sans-serif; font-size: 10px; font-weight: 600; fill: #334155; }
+.rpt-legend-t { font-family: "Plus Jakarta Sans", sans-serif; font-size: 12px; font-weight: 500; fill: #334155; }
+.rpt-legend-p { font-family: "Plus Jakarta Sans", sans-serif; font-size: 11px; font-weight: 600; fill: #2c3e50; }
+
+/* ── callout INSIGHT / STRATEGI: bg #E5F6F8 ── */
+.rpt-panel { min-height: 46.1mm; background: var(--aqua); border-radius: .5mm; padding: 5.1mm 6.1mm; display: flex; flex-direction: column; gap: 3.4mm; }
+.rpt-panel-t { font-size: 9.2pt; font-weight: 700; line-height: 1.25; letter-spacing: .05em; text-transform: uppercase; text-align: center; color: #0f172a; }
+.rpt-list { margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.8mm; list-style: none; }
+.rpt-list li { font-size: 9.2pt; line-height: 1.45; color: #334155; padding-left: 4mm; position: relative; }
+.rpt-list li::before { content: "•"; position: absolute; left: 0; font-weight: 700; color: #1e293b; }
+
+/* ── teks biasa ── */
+.rpt-para { margin: 0; font-size: 9.2pt; line-height: 1.5; color: #0f172a; }
+.rpt-note { background: var(--aqua); padding: 3mm 3.5mm; font-size: 9.2pt; line-height: 1.45; color: #334155; }
+
+/* ── table ── */
+.rpt-tablewrap { overflow-x: auto; }
+.rpt-table { width: 100%; border-collapse: collapse; font-size: 9.2pt; }
+.rpt-table caption { caption-side: top; text-align: left; font-size: 9.2pt; letter-spacing: .05em; color: #0f172a; padding-bottom: 1.6mm; }
+.rpt-table th, .rpt-table td { border: .3mm solid #cbd5e1; padding: 1.2mm 1.8mm; text-align: left; color: #334155; }
+.rpt-table th { background: var(--aqua-k); color: #0f172a; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; }
+.rpt-foot { font-size: 8pt; letter-spacing: .05em; color: #94a5ad; border-top: .3mm solid #cbd5e1; padding-top: 1.4mm; }
+
+/* ── CETAK: hanya halaman laporan. Semua panel lain disembunyikan ──
+   .rpt-printing dipasang sebentar oleh tombol Unduh, jadi panel tak
+   ikut tercetak walau user tekan Ctrl+P langsung.
+   DOM nyata: BODY > #hud > #mapPanel.panel > .panel-body > .map-wrap > .rpt */
+body.rpt-printing #hud > *:not(#mapPanel),
+body.rpt-printing #mapPanel > *:not(.panel-body),
+body.rpt-printing #mapPanel .panel-body > *:not(.map-wrap),
+body.rpt-printing .map-wrap > *:not(#spatialReportWrap) { display: none !important; }
+body.rpt-printing .spatial-report.flying { position: static; transform: none; width: 100%; height: auto; max-height: none; background: #fff; border-color: #ccc; box-shadow: none; backdrop-filter: none; }
+body.rpt-printing .rpt-body { overflow: visible; padding: 0; gap: 0; }
+/* Palet dokumen sudah light-on-white, jadi print HANYA buang frame/shadow —
+   jangan override warna teks, kecuali .rpt-page dibersihkan ke putih polos. */
+body.rpt-printing .rpt-page { border: none; background: #fff; }
+body.rpt-printing .rpt-btn { display: none; }
+@media print {
+  /* A4 tanpa margin — padding dokumen sudah mm-presisi di dalam .rpt-page */
+  @page { size: A4 portrait; margin: 0; }
+  html, body { width: 210mm; background: #fff; }
+  body.rpt-printing #hud > *:not(#mapPanel),
+  body.rpt-printing #mapPanel > *:not(.panel-body),
+  body.rpt-printing #mapPanel .panel-body > *:not(.map-wrap),
+  body.rpt-printing .map-wrap > *:not(#spatialReportWrap) { display: none !important; }
+  body.rpt-printing .spatial-report.flying { position: static; transform: none; width: auto; height: auto; max-height: none; background: #fff; box-shadow: none; border: none; }
+  body.rpt-printing .rpt-body { overflow: visible; padding: 0; gap: 0; }
+  body.rpt-printing .rpt-page { break-after: page; page-break-after: always; }
+  body.rpt-printing .rpt-page:last-child { break-after: auto; page-break-after: auto; }
+  body.rpt-printing .rpt-btn { display: none; }
+}

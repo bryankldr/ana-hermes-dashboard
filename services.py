@@ -91,11 +91,16 @@ def _group_by_age(sessions):
 
 
 def list_sessions(hermes_base, workdir, valid_session, current):
-    """Recent Hermes sessions grouped by age. `current` is the live session id."""
+    """Recent Hermes sessions grouped by age. `current` is the live session id.
+
+    hermes_base datang dari runtime._hermes_base() yang sudah memuat
+    `-p anna` bila PROFILE != default — jadi panel anna tidak pernah
+    campur session profil ana. Jangan panggil `hermes sessions` polos.
+    """
     empty = {"groups": {"today": [], "yesterday": [], "last_week": [], "older": []},
              "current": current}
     try:
-        out = _run(hermes_base + ["sessions", "list"], cwd=workdir, timeout=15)
+        out = _run(hermes_base + ["sessions", "list", "--limit", "50"], cwd=workdir, timeout=15)
         sessions = []
         for line in out.splitlines():
             line = line.strip()
@@ -115,6 +120,62 @@ def list_sessions(hermes_base, workdir, valid_session, current):
         return {"groups": _group_by_age(sessions), "current": current}
     except Exception as e:  # noqa: BLE001
         return {**empty, "error": str(e)[:200]}
+
+
+def session_ids(hermes_base, workdir):
+    """Set ID session yang benar-benar ada di store profil ini.
+
+    Dipakai /api/session untuk menolak ID basi/asing sebelum _session_set:
+    regex valid != session ada (`--resume` ke ID tak dikenal = run gagal).
+    """
+    try:
+        out = _run(hermes_base + ["sessions", "list", "--limit", "50"], cwd=workdir, timeout=15)
+    except Exception:  # noqa: BLE001
+        return None  # store tak bisa dibaca: jangan blokir, caller fallback accept
+    ids = set()
+    for line in out.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 4 and parts[-1] and parts[-1][0].isdigit():
+            ids.add(parts[-1])
+    return ids
+
+
+def session_transcript(hermes_base, workdir, sid, limit=20):
+    """Transkrip user/assistant ringkas untuk render saat switch session.
+
+    `hermes sessions export --format jsonl -` keluar 1 baris JSON dengan key
+    `messages` (bukan JSONL multi-baris). Filter: hanya role user/assistant,
+    content non-kosong, tanpa tool-call. Cap 20 pesan terakhir agar payload
+    kecil. Gagal = dict error, panel tampilkan banner eksplisit.
+    """
+    import json as _json
+    try:
+        r = subprocess.run(
+            hermes_base + ["sessions", "export", "--session-id", sid,
+                           "--format", "jsonl", "-"],
+            cwd=workdir, text=True, capture_output=True, timeout=30)
+        raw = (r.stdout or "").strip()
+        if not raw:
+            return {"messages": [], "error": (r.stderr or "export kosong")[:200]}
+        d = _json.loads(raw.splitlines()[0])
+        msgs = d.get("messages") or []
+        out = []
+        for m in msgs:
+            if not isinstance(m, dict):
+                continue
+            if m.get("role") not in ("user", "assistant"):
+                continue
+            if m.get("tool_calls"):
+                continue
+            text = (m.get("content") or "").strip()
+            if not text:
+                continue
+            if len(text) > 2000:
+                text = text[:2000] + "…"
+            out.append({"role": m["role"], "text": text})
+        return {"messages": out[-limit:], "total": len(out)}
+    except Exception as e:  # noqa: BLE001
+        return {"messages": [], "error": str(e)[:200]}
 
 
 # ── vault + briefing ────────────────────────────────────────

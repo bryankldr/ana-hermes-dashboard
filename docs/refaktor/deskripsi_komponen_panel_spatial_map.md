@@ -1,0 +1,1 @@
+Deskripsi, fungsi dan cara kerja komponen 

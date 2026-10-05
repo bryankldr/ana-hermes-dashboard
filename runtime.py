@@ -73,23 +73,52 @@ def _mono_ms():
 def _hermes_base():
     configured = os.environ.get("HERMES_CMD", "").strip()
     if configured:
-        return shlex.split(configured)
-    exe = shutil.which("hermes")
-    if exe:
-        return [exe]
-    # Last-resort module invocation; start.sh prepends common Python bin dirs.
-    return ["python3", "-m", "hermes_cli.main"]
+        base = shlex.split(configured)
+    else:
+        exe = shutil.which("hermes")
+        if exe:
+            base = [exe]
+        else:
+            # Last-resort module invocation; start.sh prepends common Python bin dirs.
+            base = ["python3", "-m", "hermes_cli.main"]
+    # Profil non-default HARUS di depan subcommand:
+    # `hermes --profile anna chat ...` OK (pre-parse + strip),
+    # `hermes chat ... --profile anna` ERROR (chat tak kenal flag itu).
+    # Jadi satu-satunya sumber flag profil = base ini. Caller dilarang
+    # nambah --profile lagi (dulu build_command nambah 2x → error ini).
+    if PROFILE and PROFILE != "default" and "--profile" not in base and "-p" not in base:
+        base += ["--profile", PROFILE]
+    return base
+
+
+_VERSION_LOCK = threading.Lock()
+_VERSION_CACHE = {"at": 0.0, "ok": False, "detail": ""}
+_VERSION_TTL = 60.0  # detik
+
+_TOOLS_LOCK = threading.Lock()
+_TOOLS_CACHE = {"at": 0.0, "tools": None}
+_TOOLS_TTL = 60.0  # detik; status event tiap run + /api/status tiap 30 dtk
 
 
 def _can_launch_hermes():
+    # Cache 60 dtk: runtime_kind() dipanggil tiap /api/status + tiap run,
+    # spawn `hermes --version` ~0.6-0.9 dtk tiap kali tanpa cache.
+    global _VERSION_CACHE
+    now = time.monotonic()
+    with _VERSION_LOCK:
+        if now - _VERSION_CACHE["at"] < _VERSION_TTL and _VERSION_CACHE["at"] != 0:
+            return _VERSION_CACHE["ok"], _VERSION_CACHE["detail"]
     try:
         base = _hermes_base()
         proc = subprocess.run(base + ["--version"], cwd=WORKDIR, text=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               timeout=12)
-        return proc.returncode == 0, (proc.stdout or proc.stderr).strip()
+        ok, detail = proc.returncode == 0, (proc.stdout or proc.stderr).strip()
     except Exception as e:  # noqa: BLE001
-        return False, str(e)
+        ok, detail = False, str(e)
+    with _VERSION_LOCK:
+        _VERSION_CACHE = {"at": now, "ok": ok, "detail": detail}
+    return ok, detail
 
 
 def runtime_kind():
@@ -113,8 +142,8 @@ def build_command(message, session_id=None, system=None):
     cmd = _hermes_base() + ["chat", "-Q", "-q", prompt, "--source", SOURCE, "--format", "stream-json"]
     if valid_session(session_id):
         cmd += ["--resume", str(session_id)]
-    if PROFILE and PROFILE != "default":
-        cmd += ["--profile", PROFILE]
+    # Flag profil TIDAK ditambah di sini: sudah di depan via _hermes_base().
+    # `chat` tak kenal --profile; taruh di belakang = error unrecognized arguments.
     if MODEL:
         cmd += ["--model", MODEL]
     if TOOLSETS:
@@ -126,7 +155,14 @@ def build_command(message, session_id=None, system=None):
 
 
 def hermes_tools_snapshot(limit=36):
-    """Return a compact list of enabled/visible Hermes toolsets/tools for UI status."""
+    """Return a compact list of enabled/visible Hermes toolsets/tools for UI status.
+
+    Cache 60 dtk: spawn `hermes tools list` ~2 dtk. Dipakai tiap run
+    (status event pertama) + tiap /api/status (30 dtk)."""
+    now = time.monotonic()
+    with _TOOLS_LOCK:
+        if _TOOLS_CACHE["tools"] is not None and now - _TOOLS_CACHE["at"] < _TOOLS_TTL:
+            return list(_TOOLS_CACHE["tools"])[:limit] or list(_TOOLS_CACHE["tools"])
     try:
         base = _hermes_base()
         proc = subprocess.run(base + ["tools", "list"], cwd=WORKDIR, text=True,
@@ -142,7 +178,10 @@ def hermes_tools_snapshot(limit=36):
                 tools.append(clean[:80])
             if len(tools) >= limit:
                 break
-        return tools or [out[:120]] if out else []
+        tools = tools or [out[:120]] if out else []
+        with _TOOLS_LOCK:
+            _TOOLS_CACHE.update(at=time.monotonic(), tools=tools)
+        return tools[:limit] or tools
     except Exception:
         return []
 

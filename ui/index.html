@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="id" data-ana-mode="asisten">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,13 +7,24 @@
   <title>ANA · Autonomous AI HUD</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <!-- LAPORAN: Plus Jakarta Sans = font template dokumen (lihat .rpt-page di map.css).
+       Dipisah dari link HUD di atas karena report butuh weight 400/500/600/700/800. -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/tokens.css">
-  <link rel="stylesheet" href="styles/hud.css">
+  <link rel="stylesheet" href="styles/hud.css?v=20261004g">
   <!-- xterm vendored locally (see ui/vendor/): the terminal is the one feature
        that cannot degrade, and a CDN outage would take the whole HUD down. -->
   <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <!-- ?v= bumped manual tiap ubah CSS/JS: tanpa ini browser pakai cache lama
+       dan perbaikan panel chart tak akan terlihat. -->
+  <link rel="stylesheet" href="styles/map.css?v=20261004d">
   <script src="vendor/xterm.js"></script>
   <script src="vendor/xterm-addon-fit.js"></script>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/protomaps/protomaps-leaflet.min.js"></script>
+  <script src="vendor/chart.js"></script>
 </head>
 <body>
 <div class="hud" id="hud">
@@ -66,24 +77,9 @@
     </div>
   </div>
 
-  <!-- ═══ CENTRAL CORE ═══ -->
+  <!-- ═══ CENTRAL CORE — ANNA AVATAR ═══ -->
   <div class="core" id="core">
-    <svg id="coreSvg" viewBox="0 0 470 370" class="core-svg">
-      <!-- Octagonal frame -->
-      <polygon id="octFrame" points="" fill="none" stroke="rgba(0,232,255,0.25)" stroke-width="1"/>
-      <!-- Concentric circles -->
-      <circle cx="235" cy="185" r="120" fill="none" stroke="rgba(0,232,255,0.15)" stroke-width="1" stroke-dasharray="4 6"/>
-      <circle cx="235" cy="185" r="90" fill="none" stroke="rgba(0,232,255,0.2)" stroke-width="1" stroke-dasharray="2 4"/>
-      <circle cx="235" cy="185" r="60" fill="none" stroke="rgba(0,232,255,0.3)" stroke-width="1"/>
-      <circle cx="235" cy="185" r="30" fill="none" stroke="rgba(0,232,255,0.4)" stroke-width="1"/>
-      <!-- Radial ticks -->
-      <g id="radialTicks"></g>
-      <!-- Orbital particles -->
-      <g id="orbitalParticles"></g>
-      <!-- Core glow -->
-      <circle cx="235" cy="185" r="8" fill="#BFFFFF" class="core-glow"/>
-      <circle cx="235" cy="185" r="4" fill="#FFFFFF" class="core-center"/>
-    </svg>
+    <img id="coreImg" src="/assets/anna_forest.png" alt="ANNA" class="core-img"/>
     <div class="core-label" id="coreLabel">IDLE</div>
   </div>
 
@@ -92,7 +88,7 @@
     <div class="panel" id="intelPanel">
       <div class="panel-title">INTELLIGENCE SURFACE</div>
       <div class="panel-body">
-        <div id="intelTerminal" class="intel-terminal"><div class="intel-line dim">Waiting for agent activity...</div></div>
+        <div id="intelTerminal" class="intel-terminal"><div class="intel-line dim">Menunggu aktivitas agen...</div></div>
       </div>
     </div>
     <div class="panel" id="pipelinePanel">
@@ -116,17 +112,30 @@
   </div>
 
   <!-- ═══ BOTTOM TELEMETRY ═══ -->
+  <!-- Temperatures in Celsius, read from /sys/class/hwmon (k10temp Tctl) and
+       nvidia-smi. The bars below are a scale from 20C to 100C, not a
+       percentage: "94% full" is meaningless for a temperature. -->
   <div class="bottom-telemetry" id="bottomTelemetry">
     <div class="tele-left">
-      <div class="tele-bar"><div class="tele-fill" id="teleCpu"></div></div>
+      <span class="tele-temp-icon" aria-hidden="true"></span>
+      <div class="tele-thermo" role="meter" aria-label="CPU temperature">
+        <div class="tele-thermo-fill" id="teleCpuTemp"></div>
+      </div>
       <span class="tele-label">CPU</span>
+      <b class="tele-temp-val" id="teleCpuTempVal">--</b>
+      <span class="tele-unit">&deg;C</span>
     </div>
     <div class="tele-center" id="equalizerWrap">
       <canvas id="equalizer" width="80" height="24"></canvas>
     </div>
     <div class="tele-right">
-      <div class="tele-bar"><div class="tele-fill" id="teleRam"></div></div>
-      <span class="tele-label">RAM</span>
+      <span class="tele-temp-icon" aria-hidden="true"></span>
+      <div class="tele-thermo" role="meter" aria-label="GPU temperature">
+        <div class="tele-thermo-fill" id="teleGpuTemp"></div>
+      </div>
+      <span class="tele-label">GPU</span>
+      <b class="tele-temp-val" id="teleGpuTempVal">--</b>
+      <span class="tele-unit">&deg;C</span>
     </div>
   </div>
 
@@ -135,11 +144,13 @@
     <div class="response-label">RESPONSE</div>
     <div class="response-text" id="responseText">Siap menerima perintah.</div>
   </div>
-  <div class="chat-bar" id="chatBar">
-    <input type="text" id="chatInput" placeholder="Ketik perintah..." autocomplete="off">
+  <div class="chat-bar" id="chatBar" data-min-h="41" data-min-w="200">
+    <button id="tplBtn" class="only-asisten" title="Template pertanyaan bisnis">▦</button>
+    <textarea id="chatInput" rows="1" placeholder="Ketik perintah... (Enter kirim, Shift+Enter baris baru)" autocomplete="off"></textarea>
     <button id="sendBtn" class="btn-send">➤</button>
     <button id="micBtn" class="btn-mic">🎤</button>
-    <button id="modeBtn" class="btn-mode">CODING</button>
+    <button id="modeBtn" class="btn-mode">ASISTEN</button>
+    <div id="tplPanel" class="tpl-panel only-asisten" hidden></div>
   </div>
 
   <!-- ═══ EVENT LOG ═══ -->
@@ -156,6 +167,6 @@
 
 </div>
 
-<script type="module" src="src/main.js"></script>
+<script type="module" src="src/main.js?v=20261004h"></script>
 </body>
 </html>

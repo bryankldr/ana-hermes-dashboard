@@ -86,32 +86,75 @@ html, body {
 }
 
 /* ═══ TOP DIALS ═══ */
+/* topDials is a LayoutManager panel (registered in main.js), so it gets the
+   same drag/resize/lock treatment as the rest. cursor:grab is what makes the
+   strip look draggable; pointer-events:none on the dials stops the svg from
+   swallowing the gesture, since layout.js binds mousedown on .hud and the
+   dial circles sit right under it. The left:50%/translateX(-50%) centring is
+   dropped by measure() when it free-positions the panel, so it does not fight
+   the drag.
+
+   Dial sizing is fluid on purpose: .dial is flex:1 + aspect-ratio, so the SVG
+   tracks the panel box when the user resizes it. The old fixed width/height:36px
+   meant the panel resized but the dials stayed the same size. */
 .top-dials {
   position: absolute;
   top: 25px; left: 50%;
   transform: translateX(-50%);
   display: flex; gap: 12px;
+  align-items: stretch;
+  padding-bottom: 16px;
   z-index: 15;
+  cursor: grab;
 }
+.top-dials:active { cursor: grabbing; }
+.top-dials .dial { pointer-events: none; }
 
+/* Dial is sized by the flex row, not by a fixed px: flex:1 shares the panel
+   width, and the SVG keeps a circular shape via preserveAspectRatio on its
+   viewBox. aspect-ratio is deliberately absent — with align-items:stretch it
+   gets overridden by the row height, which stretched the SVG into a tall oval.
+   Sizing both axes from the same box is what makes the panel resize actually
+   resize the dials (the old fixed width/height:36px did not). */
 .dial {
-  width: 36px; height: 36px;
+  flex: 1 1 0;
+  min-width: 28px;
+  max-width: 140px;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-
 .dial svg {
-  width: 100%; height: 100%;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
 }
+.dial-arc { transition: d 240ms ease-out; }
+.dial-needle { transition: none; }
 
 .dial-label {
   position: absolute;
   bottom: -14px; left: 50%;
   transform: translateX(-50%);
-  font-size: 11px;
-  color: var(--text-dim);
-  letter-spacing: 0.08em;
+  font-size: 11px; color: var(--text-dim);
+  letter-spacing: 0.1em;
   white-space: nowrap;
+  pointer-events: none;
 }
+.dial-val {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  color: var(--text-header);
+  pointer-events: none;
+}
+/* metrik tak terbaca (GPU absen, offline) — arc disembunyikan, bukan dipalsukan 0 */
+.dial.dial-na .dial-arc { opacity: 0; }
+.dial.dial-na .dial-val { opacity: 0.45; }
 
 /* ── LEFT RAIL ═══ */
 .left-rail {
@@ -136,6 +179,15 @@ html, body {
 }
 
 /* ═══ PANELS ═══ */
+/* display:flex + column: .panel ini diubah tinggi lewat LayoutManager, dan
+   hanya dengan flex column anak .panel-body bisa flex:1 mengisi tinggi itu.
+   Default block membuat panel setinggi isinya dan resize ke bawah jadi
+   tidak terlihat efeknya. min-height:0 melepas dasar auto pada flex item. */
+/* .panel sengaja TIDAK display:flex di sini: dipakai 15 panel lain yang
+   .panel-body-nya bukan flex item (stat-row, pipeline, matrix), dan memberi
+   flex:1 ke .panel-body secara global membuat tinggi terukur 0 saat measure()
+   sehingga semua panel snap ke 38px. Yang perlu flex column cuma #intelPanel,
+   diatur diaturan terpisah. */
 .panel {
   background: rgba(0, 26, 56, 0.7);
   border: 1px solid var(--neon-dim);
@@ -208,64 +260,176 @@ html, body {
   box-shadow: 0 0 12px rgba(0, 220, 255, 0.3);
 }
 
-/* ═══ CENTRAL CORE ═══ */
+/* ═══ CENTRAL CORE — ANNA AVATAR ═══ */
 .core {
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  width: 320px; height: 254px;
+  width: 320px; height: 360px; /* extra height for label */
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.core-svg {
-  width: 100%; height: 100%;
+.core-img {
+  width: 100%;
+  height: 280px; /* leave room for label */
+  object-fit: cover;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4),
+              0 0 0 1px rgba(0, 232, 255, 0.1);
+  transition: transform 0.3s ease, filter 0.3s ease, box-shadow 0.3s ease;
+  transform-origin: center center;
 }
 
 .core-label {
-  position: absolute;
-  bottom: -20px; left: 50%;
-  transform: translateX(-50%);
+  margin-top: 8px;
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 13px;
   color: var(--neon);
-  letter-spacing: 0.2em;
+  letter-spacing: 0.15em;
   text-shadow: 0 0 8px var(--neon);
+  white-space: nowrap;
+  transition: color 0.3s, text-shadow 0.3s;
 }
 
-.core-glow {
-  filter: blur(1px);
-  animation: pulse 3s ease-in-out infinite;
+/* Avatar state animations for image-based avatar */
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.01); }
 }
 
-.core-center {
-  filter: blur(0.5px);
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 0.8; r: 8; }
-  50% { opacity: 1; r: 10; }
+@keyframes speakPulse {
+  0%, 100% { 
+    filter: brightness(1) saturate(1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 232, 255, 0.1);
+  }
+  50% { 
+    filter: brightness(1.1) saturate(1.2) drop-shadow(0 0 8px #00E8FF);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(0, 232, 255, 0.4), 0 0 20px rgba(0, 232, 255, 0.3);
+  }
 }
 
-/* ── Radial Ticks ── */
-#radialTicks line {
-  stroke: var(--neon);
-  stroke-width: 0.5;
-  opacity: 0.4;
+@keyframes listenTilt {
+  0%, 100% { transform: rotateY(0deg) rotateX(0deg); }
+  50% { transform: rotateY(2deg) rotateX(-1deg); }
 }
 
-/* ── Orbital Particles ── */
-#orbitalParticles circle {
-  fill: var(--neon);
-  opacity: 0.6;
+@keyframes thinkGlow {
+  0%, 100% { 
+    filter: brightness(1) hue-rotate(0deg);
+  }
+  50% { 
+    filter: brightness(1.05) hue-rotate(10deg) drop-shadow(0 0 10px #FFD600);
+  }
 }
 
-/* ═══ WIREFRAME SVGs ═══ */
-.wireframe {
-  width: 100%; height: auto;
-  stroke: var(--neon);
-  stroke-width: 0.5;
-  fill: none;
-  opacity: 0.6;
+@keyframes happyBounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02) translateY(-2px); }
+}
+
+@keyframes concernedDim {
+  0%, 100% { filter: brightness(1) saturate(1); }
+  50% { filter: brightness(0.9) saturate(0.8) hue-rotate(-5deg); }
+}
+
+@keyframes errorPulse {
+  0%, 100% { 
+    filter: brightness(1) saturate(1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(248, 113, 113, 0.1);
+  }
+  50% { 
+    filter: brightness(1.1) saturate(1.3) hue-rotate(-15deg) drop-shadow(0 0 10px #F87171);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(248, 113, 113, 0.4), 0 0 20px rgba(248, 113, 113, 0.3);
+  }
+}
+
+/* Idle state - subtle breathing float */
+.core.idle .core-img {
+  animation: breathe 4s ease-in-out infinite, float 6s ease-in-out infinite;
+}
+
+/* Speaking state - cyan glow pulse */
+.core.speaking .core-img {
+  animation: speakPulse 0.4s ease-in-out infinite;
+}
+
+.core.speaking .core-label {
+  color: var(--core-bright);
+  text-shadow: 0 0 12px var(--neon);
+}
+
+/* Listening state - slight 3D tilt */
+.core.listening .core-img {
+  animation: listenTilt 3s ease-in-out infinite;
+}
+
+.core.listening .core-label {
+  color: #00E8FF;
+  text-shadow: 0 0 10px #00E8FF;
+}
+
+/* Thinking state - golden glow pulse */
+.core.thinking .core-img {
+  animation: thinkGlow 2s ease-in-out infinite;
+}
+
+.core.thinking .core-label {
+  color: #FFD600;
+  text-shadow: 0 0 10px #FFD600;
+}
+
+/* Happy state - subtle bounce */
+.core.happy .core-img {
+  animation: happyBounce 2s ease-in-out infinite;
+}
+
+.core.happy .core-label {
+  color: #4ADE80;
+  text-shadow: 0 0 10px #4ADE80;
+}
+
+/* Concerned state - slight dim/color shift */
+.core.concerned .core-img {
+  animation: concernedDim 2s ease-in-out infinite;
+}
+
+.core.concerned .core-label {
+  color: #F87171;
+  text-shadow: 0 0 10px #F87171;
+}
+
+/* Error state - red pulse */
+.core.error .core-img {
+  animation: errorPulse 0.5s ease-in-out infinite;
+}
+
+.core.error .core-label {
+  color: #F87171;
+  text-shadow: 0 0 12px #F87171;
+}
+
+
+@media (max-width: 1200px) {
+  .core { width: 300px; height: 340px; }
+  .core-img { height: 260px; }
+}
+
+@media (max-width: 900px) {
+  .core { width: 260px; height: 300px; }
+  .core-img { height: 230px; }
+}
+
+@media (max-width: 600px) {
+  .core { width: 220px; height: 260px; }
+  .core-img { height: 200px; }
 }
 
 /* ═══ PIPELINE ═══ */
@@ -310,20 +474,50 @@ html, body {
   display: flex; align-items: center; gap: 4px;
 }
 
-.tele-bar {
-  width: 80px; height: 4px;
-  background: rgba(0, 220, 255, 0.1);
-  border-radius: 2px;
+/* Thermometer, not a percentage bar: the fill maps 20C..100C across its width
+   (TEMP_MIN/TEMP_MAX in main.js), because "94% full" means nothing for a
+   temperature. Colour shifts cool -> warm -> hot so a hot die reads without
+   needing the number. */
+.tele-thermo {
+  position: relative;
+  width: 80px; height: 8px;
+  background: rgba(0, 220, 255, 0.08);
+  border: 1px solid rgba(0, 220, 255, 0.18);
+  border-radius: 4px;
   overflow: hidden;
 }
-
-.tele-fill {
+.tele-thermo-fill {
   height: 100%;
   width: 0%;
-  background: var(--neon);
-  border-radius: 2px;
-  transition: width 0.5s;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #00e8ff, #00b4d8);
+  transition: width 0.6s ease-out, background 0.6s ease-out;
 }
+.tele-thermo-fill[data-band="warm"] {
+  background: linear-gradient(90deg, #ffd166, #f4a261);
+}
+.tele-thermo-fill[data-band="hot"] {
+  background: linear-gradient(90deg, #ff8c42, #ef233c);
+  animation: thermo-pulse 1.1s ease-in-out infinite;
+}
+@keyframes thermo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.tele-temp-val {
+  font-size: 12px;
+  color: var(--text-header);
+  font-variant-numeric: tabular-nums;
+  min-width: 26px;
+  text-align: right;
+}
+.tele-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: -3px;
+}
+/* no sensor on this machine: keep the slot, do not fake a reading */
+.tele-thermo.na { opacity: 0.35; }
 
 .tele-label {
   font-size: 12px;
@@ -352,37 +546,83 @@ html, body {
   z-index: 20;
 }
 
+/* height:auto di sini pernah menggagalkan resize: LayoutManager menulis
+   el.style.height inline, dan inline selalu menang atas height:auto — jadi
+   panel terkunci pada tinggi yang diukur saat load dan textarea tak pernah
+   ikut bertambah. Sekarang panel jadi flex column dan textarea yang mengisi
+   tinggi panel (align-items:stretch), sehingga resize panel = resize area teks. */
 #chatBar {
   position: absolute;
   bottom: 8px; left: 50%;
   transform: translateX(-50%);
   width: 400px;
+  min-height: 41px;
   z-index: 20;
   display: flex; gap: 8px;
+  align-items: stretch;
+  /* Container query, bukan JS: tinggi panel dikontrol LayoutManager lewat drag
+     handle, dan resize observer / rAF tidak pernah jalan di tab hidden (sudah
+     dibuktikan di panel options). Container query murni CSS, selalu sinkron. */
+  container-type: size;
+  container-name: chatbar;
 }
 
-#chatBar input {
+#chatBar textarea {
   flex: 1;
+  min-width: 0;
+  height: 100%;
+  /* max-height sengaja dihapus: cap 160px itulah yang membuat panel tinggi
+     tapi baris tak bertambah — textarea mentok di 160 lalu sisa panel kosong.
+     min-height:0 supaya textarea benar-benar mengikuti tinggi panel (41px
+     default = 1 baris), bukan dipaksa minimal 38px sendiri. */
+  min-height: 0;
+  overflow-y: auto;
+  /* Gutter selalu direservasi: kalau scrollbar baru muncul saat panel
+     meninggi, lebar textarea ikut berkurang 15px dan teks reflow — panel
+     terlihat "bergeser" saat di-resize. Gutter stabil menghilangkan itu. */
+  scrollbar-gutter: stable;
+  resize: none;
+  white-space: pre-wrap;
+  word-break: break-word;
   background: rgba(0, 26, 56, 0.8);
   border: 1px solid var(--neon-dim);
   border-radius: 3px;
-  padding: 10px 14px;
+  /* padding vertikal 8px, bukan 10px: 22.4px (line-height) + 16px + 2px border
+     = 40.4px, muat di panel default 41px sebagai tepat 1 baris. Dengan 10px
+     total 44.4px > 41px, isi jadi terpotong walau overflow disembunyikan. */
+  padding: 8px 14px;
   color: var(--text-body);
   font-family: var(--font-mono);
   font-size: 16px;
+  line-height: 1.4;
   outline: none;
 }
 
-#chatBar input:focus {
+/* Mode 1 baris: panel di-resize ke tinggi minimum (~52px = 1 baris + padding).
+   overflow disembunyikan supaya isi panjang tidak menggulir di ruang 1 baris,
+   user cuma lihat baris pertama. Di atas ambang itu scroll nyala lagi.
+   52px dari pengukuran: isinya 22.4px (line-height) + 16px padding + 2px
+   border = 40.4px untuk 1 baris; 52px masih di bawah 1.5 baris (33.6px isi)
+   tapi sudah cukup untuk baris ke-2 mulai tampil penuh. */
+@container chatbar (max-height: 52px) {
+  #chatBar textarea {
+    overflow-y: hidden;
+  }
+}
+
+#chatBar textarea:focus {
   border-color: var(--neon);
   box-shadow: 0 0 8px var(--neon-dim);
 }
 
 #chatBar button {
+  flex-shrink: 0;
+  align-self: flex-end;
   background: rgba(0, 220, 255, 0.1);
   border: 1px solid var(--neon-dim);
   border-radius: 3px;
-  padding: 10px 16px;
+  /* 8px, sama dengan textarea, supaya tinggi tombol = 1 baris teks */
+  padding: 8px 16px;
   color: var(--neon);
   font-family: var(--font-mono);
   font-size: 16px;
@@ -395,16 +635,81 @@ html, body {
   box-shadow: 0 0 8px var(--neon-dim);
 }
 
+/* ── Template pertanyaan: tombol ▦ + panel expand, hanya mode asisten ──
+   Visibilitas mode diatur class .only-asisten (map.css: coding sembunyikan).
+   Panel absolute terhadap #chatBar (position:absolute) jadi ikut chat bar. */
+#tplPanel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(460px, 92vw);
+  max-height: min(52vh, 360px);
+  overflow-y: auto;
+  background: rgba(2, 15, 42, 0.96);
+  border: 1px solid var(--neon-border);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  padding: 8px;
+  z-index: 30;
+}
+#tplPanel[hidden] { display: none; }
+.tpl-group {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--neon);
+  padding: 8px 4px 4px;
+}
+.tpl-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-body);
+  background: rgba(5, 27, 58, 0.6);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 2px 0;
+  cursor: pointer;
+  white-space: normal;
+}
+.tpl-item:hover {
+  border-color: var(--neon-border);
+  box-shadow: 0 0 8px var(--neon-dim);
+  color: var(--text-main);
+}
+
 /* Legacy .interaction kept for compat */
 .interaction { display: none; }
 
+/* min-height:0 WAJIB di rantai ini. Tanpa itu, flex item (.response-text)
+   menolak menyusut di bawah tinggi kontennya: panel diperbesar, tapi teks tetap
+   setinggi isinya lalu .response-card overflow:hidden memotong sisanya —
+//   persis gejala "batas text hanya sampai maksimalnya". min-height:0 melepas
+   dasar auto itu supaya flex:1 benar-benar mengikuti tinggi panel. */
 .response-card {
   background: rgba(0, 26, 56, 0.7);
   border: 1px solid var(--neon-dim);
   border-radius: 4px;
   padding: 14px 18px;
-  min-height: 160px;
   backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#response {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .response-label {
@@ -416,11 +721,15 @@ html, body {
 }
 
 .response-text {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
   font-size: 16px;
   color: var(--text-body);
   line-height: 1.5;
-  max-height: 220px;
   overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ═══ SPEAKING INDICATOR ═══ */
@@ -701,7 +1010,7 @@ html, body {
 
 .top-controls .mute-clear-bar { margin-top: 0; }
 
-.mute-btn, .clear-btn {
+.mute-btn, .clear-btn, .restart-btn {
   padding: 2px 8px;
   background: rgba(0, 220, 255, 0.06);
   border: 1px solid rgba(0, 220, 255, 0.15);
@@ -713,11 +1022,13 @@ html, body {
   transition: all 0.2s;
 }
 
-.mute-btn:hover, .clear-btn:hover {
+.mute-btn:hover, .clear-btn:hover, .restart-btn:hover {
   background: rgba(0, 220, 255, 0.15);
   border-color: var(--neon);
   color: var(--neon);
 }
+
+.restart-btn:disabled { opacity: 0.6; cursor: wait; }
 
 .mute-btn.off {
   background: rgba(255, 100, 100, 0.1);
@@ -781,8 +1092,24 @@ html, body {
 }
 
 /* ═══ INTELLIGENCE TERMINAL — Chat + Tool Trace ═══ */
+/* intelPanel dikontrol tinggi lewat LayoutManager seperti panel lain. height
+   tetap di .intel-terminal (280px) dulu membuat panel membesar tapi terminal
+   tetap 280 dan sisa ruang kosong. height:100% + flex:1 membuat ikut. */
+#intelPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
+}
+#intelPanel > .panel-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .intel-terminal {
-  height: 280px;
+  height: 100%;
+  min-height: 0;
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: 14px;
@@ -802,6 +1129,7 @@ html, body {
 }
 
 .intel-line.dim { color: var(--text-dim); }
+.intel-line.thinking { color: var(--text-dim); font-style: italic; }
 .intel-line.tool { color: var(--neon); }
 .intel-line.ok { color: #4ade80; }
 .intel-line.error { color: #f87171; }
@@ -936,6 +1264,21 @@ html, body {
 .layout-handle.handle-s { bottom: -3px; left: 6px; right: 6px; height: 6px; cursor: s-resize; }
 .layout-handle.handle-e { top: 6px; bottom: 6px; right: -3px; width: 6px; cursor: e-resize; }
 .layout-handle.handle-w { top: 6px; bottom: 6px; left: -3px; width: 6px; cursor: w-resize; }
+
+/* Tablet: title bar + handle nonaktifkan scroll-gesture browser agar drag /
+   resize jalan; body panel tetap bisa scroll. Handle diperbesar untuk jari. */
+.layout-unlocked [data-layout-id] .panel-title { touch-action: none; }
+.layout-unlocked [data-layout-id] .layout-handle { touch-action: none; }
+@media (pointer: coarse) {
+  .layout-unlocked [data-layout-id] .layout-handle.handle-nw { top:-10px; left:-10px; width:22px; height:22px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-ne { top:-10px; right:-10px; width:22px; height:22px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-sw { bottom:-10px; left:-10px; width:22px; height:22px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-se { bottom:-10px; right:-10px; width:22px; height:22px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-n { top:-8px; left:10px; right:10px; height:16px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-s { bottom:-8px; left:10px; right:10px; height:16px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-e { top:10px; bottom:10px; right:-8px; width:16px; }
+  .layout-unlocked [data-layout-id] .layout-handle.handle-w { top:10px; bottom:10px; left:-8px; width:16px; }
+}
 
 .layout-unlocked [data-layout-id] .layout-lock-indicator {
   display: none;

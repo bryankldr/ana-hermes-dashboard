@@ -52,8 +52,42 @@ export class ApiClient {
     return res.json();
   }
 
+  // restart server sendiri (proses exec ulang server.py)
+  async restart() {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 5000);
+    try {
+      const res = await fetch('/api/restart', { method: 'POST', headers: this.headers(), body: '{}', signal: ctl.signal });
+      return res.json();
+    } catch (e) {
+      // server mati duluan sebelum respon = restart jalan. Caller bedakan
+      // via polling /api/status.
+      return { ok: true, restarting: true, _assumed: true };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   async getMissions() {
     const res = await fetch('/api/missions', { headers: this.headers() });
+    return res.json();
+  }
+
+  // spatial map bridge (Fase 5)
+  async mapState() {
+    const res = await fetch('/api/map/state', { headers: this.headers() });
+    return res.json();
+  }
+  async mapCommand(op, args = {}) {
+    const res = await fetch('/api/map/command', {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ op, args }),
+    });
+    return res.json();
+  }
+  async mapResult(id) {
+    const res = await fetch('/api/map/result?id=' + encodeURIComponent(id), { headers: this.headers() });
     return res.json();
   }
 

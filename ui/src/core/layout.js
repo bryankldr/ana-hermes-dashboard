@@ -24,24 +24,30 @@ export class LayoutManager {
     this.injectHandles();
     this.bind();
     this.applyLock();
-    this.loadConfig();
+    // loadConfig async: save() yang terjadi sebelum GET selesai akan menimpa
+    // layout.json dengan disabled:[] kosong. save() menunda via _pendingSave.
+    this._loaded = false;
+    this._pendingSave = false;
+    this.ready = this.loadConfig();
   }
 
   // Layout.json bisa berasal dari viewport lebih besar (monitor ganti, panel
-  // di-drag saat layar lebar). Terapkan hanya yang masih muat; yang lain
-  // dibiarkan pada positioning default hasil measure() — tidak ada cara user
-  // menarik panel yang sudah jatuh di luar layar.
+  // di-drag saat layar lebar). Viewport lebih kecil (tablet): clamp ke dalam
+  // layar, bukan tolak — posisi relatif dipertahankan, panel tetap terjangkau.
   applyCfg(el, cfg) {
     if (!el || !cfg) return false;
+    if (!cfg.x && !cfg.y && !cfg.w && !cfg.h) return false;
     const pr = this.hud.getBoundingClientRect();
     const num = (v, d = 0) => parseFloat(String(v ?? '').replace('px', '')) || d;
-    const x = num(cfg.x), y = num(cfg.y);
-    const w = num(cfg.w, el.offsetWidth), h = num(cfg.h, el.offsetHeight);
-    if (x + w > pr.width + 1 || y + h > pr.height + 1) return false;
-    if (cfg.x) el.style.left = cfg.x;
-    if (cfg.y) el.style.top = cfg.y;
-    if (cfg.w) el.style.width = cfg.w;
-    if (cfg.h) el.style.height = cfg.h;
+    let w = num(cfg.w, el.offsetWidth), h = num(cfg.h, el.offsetHeight);
+    w = Math.min(w || el.offsetWidth, Math.max(80, pr.width - 8));
+    h = Math.min(h || el.offsetHeight, Math.max(60, pr.height - 8));
+    const x = Math.min(Math.max(num(cfg.x), 0), Math.max(0, pr.width - w));
+    const y = Math.min(Math.max(num(cfg.y), 0), Math.max(0, pr.height - h));
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
     el.dataset.free = '1';
     return true;
   }
@@ -58,9 +64,13 @@ export class LayoutManager {
       for (const [id, cfg] of Object.entries(this.config.layouts)) {
         this.applyCfg(this.items[id], cfg);
       }
+      // setProperty('display', 'none', 'important'): beberapa panel punya
+      // display !important di CSS (mis. .event-log{display:flex!important}) yang
+      // menimpa inline style, jadi checkbox OFF tidak berefek. Prioritas inline
+      // yang sama menang karena style sheet kalah dari inline !important.
       for (const id of this.disabled) {
         const el = this.items[id];
-        if (el) el.style.display = 'none';
+        if (el) el.style.setProperty('display', 'none', 'important');
       }
       this.applyLock();
       const btn = document.getElementById('layoutLockBtn');
@@ -68,10 +78,24 @@ export class LayoutManager {
         btn.innerHTML = `<span class="toggle-icon">${this.locked ? '🔒' : '✎'}</span> ${this.locked ? 'Lock' : 'Unlock'}`;
         btn.classList.toggle('active', !this.locked);
       }
+      // Panel dinamis yang register() setelah loadConfig (mapPanel dkk)
+      // tidak kebagian applyCfg/disabled. Terapkan ulang ke semua items.
+      for (const [rid, el] of Object.entries(this.items)) {
+        const cfg = this.config.layouts?.[rid];
+        if (cfg) this.applyCfg(el, cfg);
+        if (this.disabled.has(rid)) el.style.setProperty('display', 'none', 'important');
+      }
     } catch (_) {}
+    finally {
+      this._loaded = true;
+      if (this._pendingSave) { this._pendingSave = false; this.save(); }
+    }
   }
 
   save() {
+    // Config belum selesai di-GET: _pendingSave agar panel dinamis
+    // (register setelah load) tidak menimpa layout.json dengan disabled kosong.
+    if (!this._loaded) { this._pendingSave = true; return; }
     const layouts = {};
     for (const [id, el] of Object.entries(this.items)) {
       layouts[id] = {
@@ -90,7 +114,12 @@ export class LayoutManager {
   setPanelEnabled(id, enabled) {
     const el = this.items[id];
     if (!el) return;
-    el.style.display = enabled ? '' : 'none';
+    if (enabled) el.style.removeProperty('display');
+    else el.style.setProperty('display', 'none', 'important');
+    // #codeViewer visibility-nya dikendalikan class, bukan inline style:
+    // .code-viewer{display:none} di hud.css, showCodeDiff() membukanya lewat
+    // .visible. Tanpa ini, meng-ON dari menu tidak akan menampilkannya.
+    if (el.classList.contains('code-viewer')) el.classList.toggle('visible', enabled);
     if (enabled) this.disabled.delete(id); else this.disabled.add(id);
     this.save();
   }
@@ -102,10 +131,28 @@ export class LayoutManager {
     return this.locked;
   }
 
+  // Minimum size per panel. Default 60px ada untuk panel biasa; chat bar butuh
+  // 41px supaya tinggi minimumnya benar-benar 1 baris (60px = 2 baris penuh).
+  // Override per panel lewat atribut data-min-h di HTML/CSS.
+  _minH(el) {
+    const v = parseFloat(el.dataset.minH);
+    return Number.isFinite(v) && v > 0 ? v : this.minH;
+  }
+  _minW(el) {
+    const v = parseFloat(el.dataset.minW);
+    return Number.isFinite(v) && v > 0 ? v : this.minW;
+  }
+
   register(id) {
     const el = document.getElementById(id);
-    if (!el || this.items[id]) return;
-    this.ids.push(id);
+    if (!el) return;
+    // Panel dibuat ulang (terminal close→open): ref lama sudah detached,
+    // ikat ulang ke elemen baru. Panel yang masih menempel: skip.
+    if (this.items[id]) {
+      if (this.items[id].isConnected) return;
+      delete this.items[id];
+    }
+    if (!this.ids.includes(id)) this.ids.push(id);
     const r = el.getBoundingClientRect();
     const pr = this.hud.getBoundingClientRect();
     // Width is still correct here: ensurePanel() appended the panel to its
@@ -131,12 +178,7 @@ export class LayoutManager {
     el.style.margin = '0';
     el.style.flex = 'none';
     el.dataset.free = '1';
-    // A freed panel becomes a sibling of the rails under .hud, but the rails
-    // carry z-index:10 and the panel had none, so the rail painted over the
-    // whole panel. Every drag handle and every control under it was unclickable
-    // and the smaller the panel got, the more of it the rail covered. A z-index
-    // on the panel puts it back on top; the base stays low so nothing jumps
-    // above the core or the top controls.
+    // z-index naik seperti panel lain agar drag/resize sama (RESPONSE)
     el.style.zIndex = String(this.freeZ++);
     this.items[id] = el;
     for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
@@ -150,7 +192,9 @@ export class LayoutManager {
     ind.textContent = '✎';
     el.appendChild(ind);
     // apply saved config if exists
-    this.applyCfg(el, this.config.layouts?.[id]);
+    const saved = this.config.layouts?.[id];
+    if (saved) this.applyCfg(el, saved);
+    if (this.disabled.has(id)) el.style.setProperty('display', 'none', 'important');
   }
 
   // Where the next dynamic panel in this rail should start: just below the
@@ -274,20 +318,27 @@ export class LayoutManager {
   }
 
   bind() {
-    let mode = null, el = null, dir = null, sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
+    let mode = null, el = null, dir = null, pid = null;
+    let sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
     const onDown = e => {
       if (this.locked) return;
+      if (mode) return; // satu gesture aktif — abaikan jari kedua
       const t = e.target;
+      // Touch: drag hanya dari title bar / handle, supaya scroll body panel
+      // dan gesture peta (Leaflet) tidak dibajak. Mouse: perilaku lama.
+      const isTouch = e.pointerType === 'touch';
       if (t.classList?.contains('layout-handle')) {
         mode = 'resize'; el = t.closest('[data-layout-id]'); dir = t.dataset.dir;
       } else {
         el = t.closest('[data-layout-id]');
         if (!el) return;
+        if (isTouch && !t.closest('.panel-title')) return;
         if (t.closest('button, input, select, textarea, a, canvas, .intel-terminal, .response-text, .event-entries')) return;
         mode = 'drag'; dir = null;
       }
       if (!el) return;
       e.preventDefault();
+      pid = e.pointerId;
       el.classList.add('dragging');
       sx = e.clientX; sy = e.clientY;
       ox = parseFloat(el.style.left) || 0;
@@ -295,7 +346,7 @@ export class LayoutManager {
       ow = el.offsetWidth; oh = el.offsetHeight;
     };
     const onMove = e => {
-      if (!mode || !el) return;
+      if (!mode || !el || (pid !== null && e.pointerId !== pid)) return;
       const dx = e.clientX - sx, dy = e.clientY - sy;
       if (mode === 'drag') {
         el.style.left = this.snap(ox + dx) + 'px';
@@ -303,25 +354,32 @@ export class LayoutManager {
         return;
       }
       let w = ow, h = oh, x = ox, y = oy;
-      if (dir.includes('e')) w = Math.max(this.minW, ow + dx);
-      if (dir.includes('s')) h = Math.max(this.minH, oh + dy);
-      if (dir.includes('w')) { w = Math.max(this.minW, ow - dx); x = ox + (ow - w); }
-      if (dir.includes('n')) { h = Math.max(this.minH, oh - dy); y = oy + (oh - h); }
+      const minW = this._minW(el), minH = this._minH(el);
+      if (dir.includes('e')) w = Math.max(minW, ow + dx);
+      if (dir.includes('s')) h = Math.max(minH, oh + dy);
+      if (dir.includes('w')) { w = Math.max(minW, ow - dx); x = ox + (ow - w); }
+      if (dir.includes('n')) { h = Math.max(minH, oh - dy); y = oy + (oh - h); }
       el.style.width = w + 'px';
       el.style.height = h + 'px';
       el.style.left = this.snap(x) + 'px';
       el.style.top = this.snap(y) + 'px';
     };
-    const onUp = () => {
+    const onUp = e => {
       if (!mode || !el) return;
-      el.classList.remove('dragging');
-      mode = null; el = null;
+      if (pid !== null && e.pointerId !== undefined && e.pointerId !== pid) return;
+      // reclamp() harus dipanggil SEBELUM el di-null-kan. Urutan yang
+      // terbalik membuat reclam() selalu menerima null, jadi batas viewport
+      // tidak pernah dipakai setelah drag berakhir.
       this.reclamp(el);
+      el.classList.remove('dragging');
+      mode = null; el = null; pid = null;
       this.save();
     };
-    this.hud.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    // Pointer Events: satu jalur untuk mouse + touch (tablet).
+    this.hud.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }
 
   reset() {

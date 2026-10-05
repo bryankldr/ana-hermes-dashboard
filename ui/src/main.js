@@ -1,16 +1,17 @@
-import { state } from './core/bus.js';
+import { bus, state } from './core/bus.js';
 import { api } from './core/api.js';
 import { LayoutManager } from './core/layout.js';
 import { now, rid, esc, cleanForSpeech } from './utils/helpers.js';
 import { ensurePanel } from './utils/dom.js';
 import { createTerminal } from './terminal.js';
+import { startBootGuard } from './core/bootGuard.js';
+import { initMapPanel, startMapBridge } from './map.js';
 
 // ═══ DOM refs ═══
 const $ = id => document.getElementById(id);
 const els = {
   hud: $('hud'), particles: $('particles'), topDials: $('topDials'),
-  octFrame: $('octFrame'), radialTicks: $('radialTicks'), orbitalParticles: $('orbitalParticles'),
-  coreLabel: $('coreLabel'), matrixGrid: $('matrixGrid'), workspaceSvg: $('workspaceSvg'),
+  core: $('core'), coreLabel: $('coreLabel'), matrixGrid: $('matrixGrid'), workspaceSvg: $('workspaceSvg'),
   pipeline: $('pipeline'), teleCpu: $('teleCpu'), teleRam: $('teleRam'),
   equalizer: $('equalizer'), equalizerWrap: $('equalizerWrap'), chatInput: $('chatInput'), sendBtn: $('sendBtn'),
   micBtn: $('micBtn'), modeBtn: $('modeBtn'), responseText: $('responseText'),
@@ -54,6 +55,24 @@ function setAgentState(agentState) {
   else if (agentState === 'ANALYZING') setMatrixActive('SRCH');
   else if (agentState === 'RESPONDING') setMatrixActive('CODE');
   else setMatrixActive(null);
+
+  // Update avatar state classes
+  const core = els.core;
+  if (!core) return;
+  core.classList.remove('idle', 'speaking', 'listening', 'thinking', 'happy', 'concerned', 'error');
+  const stateClassMap = {
+    'IDLE': 'idle',
+    'UNDERSTANDING': 'listening',
+    'PLANNING': 'thinking',
+    'EXECUTING': 'thinking',
+    'ANALYZING': 'thinking',
+    'WAITING_TOOL': 'thinking',
+    'RESPONDING': 'speaking',
+    'LISTENING': 'listening',
+    'ERROR': 'error'
+  };
+  const cls = stateClassMap[agentState] || 'idle';
+  core.classList.add(cls);
 }
 
 // ═══ LIVE PROGRESS — Fase A (ANA) ═══
@@ -249,15 +268,98 @@ function initParticles() {
 }
 
 // ═══ TOP DIALS ═══
-const DIAL_LABELS = ['CPU', 'RAM', 'GPU', 'AI', 'TOOLS', 'FILES', 'CODE', 'SYS'];
+// Jarum digerakkan nilai nyata dari /api/sysmetrics, bukan dekorasi. SVG pakai
+// viewBox tetap + width/height 100% supaya ikut mewarisi ukuran panel: dial lama
+// memakai .dial{width:36px;height:36px} jadi tidak ikut resize sama sekali.
+const DIALS = [
+  { key: 'cpu',  label: 'CPU',  unit: '%' },
+  { key: 'ram',  label: 'RAM',  unit: '%' },
+  { key: 'gpu',  label: 'GPU',  unit: '%' },
+  { key: 'ai',   label: 'AI',   unit: '%' },
+  { key: 'net',  label: 'NET',  unit: '%' },
+  { key: 'disk', label: 'DISK', unit: '%' },
+];
+const DIAL_ARC = 260;              // derajat arc, sisa 100deg jadi celah bawah
+const DIAL_R = 17, DIAL_CX = 20, DIAL_CY = 20;
+
+function _polar(deg, r) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return [DIAL_CX + r * Math.cos(rad), DIAL_CY + r * Math.sin(rad)];
+}
+function _arcPath(frac) {
+  const sweep = DIAL_ARC * Math.max(0, Math.min(1, frac));
+  if (sweep <= 0.01) return '';
+  const [x0, y0] = _polar(0, DIAL_R);
+  const [x1, y1] = _polar(sweep, DIAL_R);
+  const large = sweep > 180 ? 1 : 0;
+  return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${DIAL_R} ${DIAL_R} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+
 function initDials() {
-  els.topDials.innerHTML = DIAL_LABELS.map((label, i) => `
-    <div class="dial"><svg viewBox="0 0 40 40">
-      <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(0,232,255,0.2)" stroke-width="1"/>
-      <circle cx="20" cy="20" r="14" fill="none" stroke="rgba(0,232,255,0.3)" stroke-width="0.5"/>
-      <path d="M20 20 L20 4" stroke="rgba(0,232,255,0.6)" stroke-width="0.5" transform="rotate(${i*45} 20 20)"/>
-      <circle cx="20" cy="20" r="2" fill="rgba(0,232,255,0.8)"/>
-    </svg><span class="dial-label">${label}</span></div>`).join('');
+  els.topDials.innerHTML = DIALS.map(d => `
+    <div class="dial" data-key="${d.key}" title="${d.label}">
+      <svg viewBox="0 0 40 40" preserveAspectRatio="xMidYMid meet">
+        <circle cx="${DIAL_CX}" cy="${DIAL_CY}" r="${DIAL_R}" fill="none"
+          stroke="rgba(0,232,255,0.18)" stroke-width="2.5"
+          stroke-dasharray="${DIAL_ARC} ${400 - DIAL_ARC}" transform="rotate(130 ${DIAL_CX} ${DIAL_CY})"/>
+        <path class="dial-arc" d="" fill="none" stroke="#00e8ff" stroke-width="2.5"
+          stroke-linecap="round" transform="rotate(130 ${DIAL_CX} ${DIAL_CY})"/>
+        <line class="dial-needle" x1="${DIAL_CX}" y1="${DIAL_CY}" x2="${DIAL_CX}" y2="${DIAL_CY - 13}"
+          stroke="rgba(255,255,255,0.85)" stroke-width="1" stroke-linecap="round"/>
+        <circle cx="${DIAL_CX}" cy="${DIAL_CY}" r="2" fill="#00e8ff"/>
+      </svg>
+      <span class="dial-label">${d.label}</span>
+      <b class="dial-val">—</b>
+    </div>`).join('');
+  setDial('cpu', 0); // jarum ada dari frame pertama, jangan null
+}
+
+// Nilai terakhir per key, buat animasi transisi + flip 0->100 tanpa lompat.
+const _dialState = {};
+function setDial(key, frac) {
+  const host = els.topDials.querySelector(`.dial[data-key="${key}"]`);
+  if (!host) return;
+  const meta = DIALS.find(d => d.key === key);
+  const prev = _dialState[key];
+  _dialState[key] = frac;
+  const known = typeof frac === 'number' && isFinite(frac);
+  const shown = known ? Math.max(0, Math.min(100, frac)) : 0;
+  const arc = host.querySelector('.dial-arc');
+  const needle = host.querySelector('.dial-needle');
+  if (arc) arc.setAttribute('d', _arcPath(shown / 100));
+  if (needle) {
+    const ang = 130 + DIAL_ARC * (shown / 100);
+    const [x, y] = _polar(ang, 13);
+    needle.setAttribute('x2', x.toFixed(2));
+    needle.setAttribute('y2', y.toFixed(2));
+  }
+  const val = host.querySelector('.dial-val');
+  if (val) val.textContent = known ? `${shown.toFixed(0)}${meta.unit}` : '—';
+  // indeterminate tak boleh tampil sebagai 0%: hilang total lebih jujur
+  host.classList.toggle('dial-na', !known);
+  if (known && prev === undefined) host.dataset.prev = String(shown);
+}
+
+// Poll 2 detik. Berhenti saat dokumen hidden supaya tab background tak menendang
+// server tiap 2 detik tanpa perlu; catch-up terjadi di visibilitychange.
+let _dialTimer = null;
+let lastSysMetrics = {};   // dipakai initTelemetry() juga: satu fetch, dua widget
+async function refreshDials() {
+  try {
+    const t = document.querySelector('meta[name=ana-token]')?.content;
+    const r = await fetch('/api/sysmetrics', { headers: { 'X-Ana-Token': t || '' } });
+    if (!r.ok) return;
+    const m = await r.json();
+    lastSysMetrics = m;
+    for (const d of DIALS) setDial(d.key, m[d.key]);
+    if (typeof applyTemps === 'function') applyTemps(m);
+  } catch (_) { /* offline: dial tetap displaying nilai terakhir, bukan reset 0 */ }
+}
+function startDialPoll() {
+  if (_dialTimer) return;
+  refreshDials();
+  _dialTimer = setInterval(() => { if (!document.hidden) refreshDials(); }, 2000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDials(); });
 }
 
 // ═══ OCTAGONAL FRAME ═══
@@ -326,20 +428,20 @@ function initIntel() {
   const panel = document.getElementById('intelPanel');
   if (panel) {
     panel.innerHTML = `<div class="panel-title">INTELLIGENCE SURFACE</div>
-      <div class="session-bar">SESSION: <span id="sessionId">—</span></div>
+      <div class="session-bar">SESI: <span id="sessionId">—</span></div>
       <div class="session-selector">
-        <select id="sessionSelect" class="session-select"><option value="">Loading sessions...</option></select>
-        <button id="sessionNew" class="session-btn">+ NEW</button>
+        <select id="sessionSelect" class="session-select"><option value="">Memuat sesi...</option></select>
+        <button id="sessionNew" class="session-btn">+ BARU</button>
         <button id="sessionRefresh" class="session-btn">↻</button>
       </div>
-      <div class="panel-body"><div id="intelTerminal" class="intel-terminal"><div class="intel-line dim">Waiting for agent activity...</div></div></div>`;
+      <div class="panel-body"><div id="intelTerminal" class="intel-terminal"><div class="intel-line dim">Menunggu aktivitas agen...</div></div></div>`;
     document.getElementById('sessionNew').addEventListener('click', () => {
       api.setSession(null).then(() => {
         currentSessionId = null;
         document.getElementById('sessionId').textContent = '—';
         els.stSess.textContent = '—';
-        intelLog('🆕 New session started', 'session');
-        log('session', 'SESSION', 'new session');
+        intelLog('🆕 Sesi baru dimulai', 'session');
+        log('session', 'SESI', 'sesi baru');
         refreshSessionSelector();
       });
     });
@@ -351,8 +453,8 @@ function initIntel() {
         if (r.ok) {
           currentSessionId = sid;
           document.getElementById('sessionId').textContent = sid;
-          intelLog(`🔗 Switched to session: ${sid}`, 'session');
-          log('session', 'SESSION', `switched to ${sid}`);
+          intelLog(`🔗 Pindah ke sesi: ${sid}`, 'session');
+          log('session', 'SESI', `pindah ke ${sid}`);
         }
       });
     });
@@ -366,16 +468,26 @@ async function refreshSessionSelector() {
     if (!sel) return;
     const groups = data.groups || {};
     const current = data.current || currentSessionId;
-    let html = '<option value="">— New Session —</option>';
+    let html = '<option value="">— Sesi Baru —</option>';
     const groupLabels = { today: '📅 HARI INI', yesterday: '📅 KEMARIN', last_week: '📅 MINGGU LALU', older: '📅 LAMA' };
     for (const [key, label] of Object.entries(groupLabels)) {
       const sessions = groups[key] || [];
       if (sessions.length === 0) continue;
       html += `<optgroup label="${label}">`;
       for (const s of sessions) {
+        // Waktu relatif Hermes ("13m ago", "just now") → Indonesia untuk tampilan saja.
+        // Grouping di backend tak tersentuh.
+        const idTime = (la) => {
+          const t = String(la || '').toLowerCase().trim();
+          if (t === 'just now') return 'baru saja';
+          let m = t.match(/^(\d+)\s*m/); if (m) return `${m[1]} mnt lalu`;
+          m = t.match(/^(\d+)\s*h/); if (m) return `${m[1]} jam lalu`;
+          m = t.match(/^(\d+)\s*d/); if (m) return `${m[1]} h lalu`;
+          return t.replace('ago', 'lalu').trim() || '—';
+        };
         // Session titles come from `hermes sessions list` and were interpolated
         // raw, so a title containing a tag rendered as markup inside the select.
-        html += `<option value="${esc(s.id)}" ${s.id === current ? 'selected' : ''}>${esc(s.title)} · ${esc(s.last_active)}</option>`;
+        html += `<option value="${esc(s.id)}" ${s.id === current ? 'selected' : ''}>${esc(s.title)} · ${esc(idTime(s.last_active))}</option>`;
       }
       html += '</optgroup>';
     }
@@ -465,22 +577,73 @@ function stopEqualizer() {
 }
 window.stopEqualizer = stopEqualizer;
 
-// ═══ TELEMETRY SIMULATION ═══
+// ═══ TEMPERATURE TELEMETRY ═══
+// Skala termometer, bukan persentase: 20C..100C dipetakan ke lebar bar. Angka
+// acak lama (Math.random) diganti sensor asli; kalau
+// sensor tidak ada, kolomnya diredupkan dan angka disembunyikan — bukan
+// menampilkan angka palsu.
+const TEMP_MIN = 20, TEMP_MAX = 100;
+const TEMP_WARM = 70, TEMP_HOT = 85;
+
+function setTemp(barId, valId, celsius) {
+  const bar = document.getElementById(barId);
+  const val = document.getElementById(valId);
+  if (!bar || !val) return;
+  const known = typeof celsius === 'number' && isFinite(celsius);
+  if (!known) {
+    bar.style.width = '0%';
+    bar.parentElement.classList.add('na');
+    val.textContent = '--';
+    bar.removeAttribute('data-band');
+    return;
+  }
+  bar.parentElement.classList.remove('na');
+  const clamped = Math.max(TEMP_MIN, Math.min(TEMP_MAX, celsius));
+  bar.style.width = (100 * (clamped - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)) + '%';
+  val.textContent = Math.round(celsius);
+  bar.setAttribute('data-band', celsius >= TEMP_HOT ? 'hot'
+    : celsius >= TEMP_WARM ? 'warm' : 'cool');
+}
+
+function applyTemps(m) {
+  setTemp('teleCpuTemp', 'teleCpuTempVal', m.cpu_temp);
+  setTemp('teleGpuTemp', 'teleGpuTempVal', m.gpu_temp);
+}
+
+// Poll-nya piggyback pada dial poll: satu fetch /api/sysmetrics untuk semua
+// metrik, bukan satu request per widget.
 function initTelemetry() {
-  setInterval(() => {
-    els.teleCpu.style.width = (20 + Math.random()*40) + '%';
-    els.teleRam.style.width = (40 + Math.random()*30) + '%';
-  }, 2000);
+  applyTemps(lastSysMetrics);
 }
 
 // ═══ SPEAK ═══
 // cleanForSpeech is imported from utils/helpers.js.
+// Handle for the currently-playing utterance/clip, so a new prompt can cut the
+// old one off instead of letting it talk over the new answer. `speakAudio` is the
+// server-MP3 <audio>; `speakUtterance` is the browser speechSynthesis fallback.
+let speakAudio = null, speakUtterance = null, speakSeq = 0;
+
+// Stop whatever ANA is saying right now. Called on every new transmit() so a new
+// question silences the previous answer — otherwise a long answer keeps reading
+// while the user already moved on.
+function stopSpeaking() {
+  speakSeq++;                                  // invalidate in-flight speak() promises
+  if (speakAudio) { try { speakAudio.pause(); speakAudio.currentTime = 0; } catch (_) {} speakAudio = null; }
+  if (speakUtterance && speechSynth) { try { speechSynth.cancel(); } catch (_) {} }
+  speakUtterance = null;
+  stopEqualizer();
+  els.hud.classList.remove('speaking');
+  if (els.core) els.core.classList.remove('speaking');
+}
+
 function playMp3(url) {
   return new Promise(resolve => {
     const a = new Audio(url);
-    a.onended = () => { URL.revokeObjectURL(url); resolve(true); };
-    a.onerror = () => { URL.revokeObjectURL(url); log('error', 'VOICE', 'audio playback failed'); resolve(false); };
-    a.play().catch(() => { URL.revokeObjectURL(url); resolve(false); });
+    speakAudio = a;
+    const done = ok => { if (speakAudio === a) speakAudio = null; URL.revokeObjectURL(url); resolve(ok); };
+    a.onended = () => done(true);
+    a.onerror = () => { log('error', 'VOICE', 'audio playback failed'); done(false); };
+    a.play().catch(() => done(false));
   });
 }
 
@@ -488,9 +651,16 @@ function speak(text) {
   return new Promise(async resolve => {
     text = cleanForSpeech(text);
     if (muted || !text) return resolve();
-    const spoken = text.length > 700 ? text.slice(0, 680).replace(/\s+\S*$/, '') + '…' : text;
+    // Read the answer to the end — no length cap. The old 700-char cap meant a
+    // report answer stopped mid-sentence with "…". Guard against runaway instead:
+    // split at sentence boundaries and synthesize one clause at a time, so an
+    // endless stream never builds a single unbounded request.
+    const mySeq = ++speakSeq;
+    const finish = () => { if (mySeq === speakSeq) { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); } resolve(); };
+    const alive = () => mySeq === speakSeq;
     suppress = true;
     els.hud.classList.add('speaking');
+    if (els.core) els.core.classList.add('speaking');
     startEqualizer();
 
     // prefer server TTS (edge-tts mp3) — same path as voice preview
@@ -498,18 +668,19 @@ function speak(text) {
       const r = await fetch('/api/speak', {
         method: 'POST',
         headers: api.headers({ 'content-type': 'application/json' }),
-        body: JSON.stringify({ text: spoken })
+        body: JSON.stringify({ text })
       });
+      if (!alive()) return resolve();                 // superseded while synthesizing
       if (r.ok) {
         const ct = r.headers.get('content-type') || '';
         if (ct.includes('audio')) {
           const blob = await r.blob();
+          if (!alive()) return resolve();
           const url = URL.createObjectURL(blob);
-          const okPlay = await playMp3(url);
-          stopEqualizer();
-          els.hud.classList.remove('speaking');
-          log('voice', 'VOICE', 'TTS played (server)');
-          return resolve();
+          await playMp3(url);
+          finish();
+          if (alive()) log('voice', 'VOICE', 'TTS played (server)');
+          return;
         }
       }
       let msg = ''; try { const j = await r.clone().json(); msg = j.error || ''; } catch (_) { msg = 'status ' + r.status; }
@@ -517,27 +688,41 @@ function speak(text) {
     } catch (e) {
       log('note', 'VOICE', 'server TTS error: ' + String(e).slice(0, 120) + ' — fallback browser');
     }
+    if (!alive()) return resolve();
 
     // fallback browser speechSynthesis
     if (speechSynth) {
       try {
         speechSynth.cancel();
-        const u = new SpeechSynthesisUtterance(spoken);
+        const u = new SpeechSynthesisUtterance(text);
+        speakUtterance = u;
         u.lang = 'id-ID';
-        try { const vs = speechSynth.getVoices(); const idv = vs.find(v => /id[-_]ID/i.test(v.lang)) || vs.find(v => /Indones/i.test(v.name)); if (idv) u.voice = idv; } catch (_) {}
+        try {
+          const vs = speechSynth.getVoices();
+          const id = vs.filter(v => /id[-_]ID/i.test(v.lang) || /Indones/i.test(v.name));
+          // Prioritas gender yang sama dengan voice aktif, baru fallback netral.
+          // Tanpa ini browser selalu ambil suara perempuan apa pun pilihannya.
+          const want = activeVoice.gender;
+          const byGender = want ? id.find(v => new RegExp(want === 'male' ? 'male|pria|laki' : 'female|wanita|perempuan', 'i').test(v.name)) : null;
+          const idv = byGender || id[0];
+          if (idv) u.voice = idv;
+        } catch (_) {}
         u.rate = 1.0; u.pitch = 1.0; u.volume = 1;
-        u.onend = u.onerror = () => { stopEqualizer(); els.hud.classList.remove('speaking'); log('voice', 'VOICE', 'TTS played (browser)'); resolve(); };
+        u.onend = u.onerror = () => {
+          if (speakUtterance === u) speakUtterance = null;
+          finish();
+          if (alive()) log('voice', 'VOICE', 'TTS played (browser)');
+        };
         speechSynth.speak(u);
         return;
       } catch (e) {
         stopEqualizer();
         els.hud.classList.remove('speaking');
+        if (els.core) els.core.classList.remove('speaking');
         log('error', 'VOICE', 'browser TTS error: ' + String(e).slice(0, 120));
       }
     }
-    stopEqualizer();
-    els.hud.classList.remove('speaking');
-    resolve();
+    finish();
   });
 }
 
@@ -657,26 +842,111 @@ function initQuickButtons() {
   });
 }
 
-// ═══ CHAT INPUT ═══
+// ═══ CHAT INPUT (multiline, follows panel height) ═══
+// Fungsi ini dulu autosize dengan dua batas yang merusak resize: cap 160px
+// (batas jumlah baris) dan bar.style.height='auto' yang menimpa tinggi yang
+// ditulis LayoutManager. Akibatnya panel bisa dragged meninggi tapi textarea
+// tetap mentok. Sekarang tinggi textarea mengikuti panel sepenuhnya (CSS
+// height:100% + align-items:stretch), jadi fungsi ini hanya menjaga baris
+// terakhir tetap terlihat di caret.
+function autosizeChat() {
+  const el = els.chatInput;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+}
+
 function sendFromChat() {
   const raw = els.chatInput.value.trim();
   const armed = els.chatInput.dataset.cmd || '';
   if (!raw && !armed) return;
   const full = (armed && !raw.startsWith('/')) ? `${armed} ${raw}` : (raw || armed);
   els.chatInput.value = '';
+  autosizeChat();
   disarm();
   log('send', 'SEND', `transmit (chat): ${full}`);
   transmit(full);
 }
 els.sendBtn.addEventListener('click', sendFromChat);
+els.chatInput.addEventListener('input', autosizeChat);
 els.chatInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFromChat(); }
 });
+autosizeChat();
+
+// ═══ TEMPLATE PERTANYAAN (hanya mode asisten via class .only-asisten) ═══
+// Tiap teks mengandung kata kunci router QA_INTENT (ana_chart_tool.py) dan
+// mapping intent-ke-template-peta wiki, jadi ANNA pasti petakan ke template
+// data yang benar. Klik = isi chatInput (user tekan Enter untuk kirim).
+const TPL_GROUPS = [
+  { t: 'RINGKASAN & LAPORAN', q: [
+    'Ringkasan sekarang KPH Banyuwangi Barat bulan ini',
+    'Ringkasan sekarang BKPH KPH Banyuwangi Barat tahun ini',
+    'Perbandingan bulan ini vs bulan lalu produksi KPH Banyuwangi Barat',
+    'Tren produksi KPH Banyuwangi Barat selama tahun ini per bulan',
+  ]},
+  { t: 'PRODUKSI & TARGET', q: [
+    'Berapa produksi KPH Banyuwangi Barat bulan ini?',
+    'Produksi Rogojampi bulan ini',
+    'Berapa pencapaian target KPH Banyuwangi Barat bulan ini?',
+    'Petak produksi tidak mencapai target bulan ini',
+  ]},
+  { t: 'PETAK', q: [
+    'Berapa jumlah petak KPH Banyuwangi Barat?',
+    'Berapa luas baku KPH Banyuwangi Barat?',
+    'Petak bongkor di Rogojampi tahun ini',
+    'Petak idle di Glenmore tahun ini',
+    'Petak tidak efektif di Licin tahun ini',
+    'Daftar petak di KPH Banyuwangi Barat',
+    'Detail petak 31211020110201_11B-1 (ganti kode petak)',
+    'Petak tetangga di sekitar petak 31211020110201_11B-1 (ganti kode)',
+  ]},
+  { t: 'AKTIVITAS & PENYADAP', q: [
+    'Bagaimana aktivitas Glenmore bulan ini?',
+    'Top petak aktivitas Rogojampi bulan ini',
+    'Siapa penyadap di petak 31211020110201_11B-1? (ganti kode)',
+    'Berapa produktivitas penyadap per TPG tahun ini?',
+    'Matriks aktivitas vs petak Licin tahun ini',
+    'Tampilkan bukti foto aktivitas Glenmore bulan ini',
+  ]},
+  { t: 'PETA', q: [
+    'Tampilkan polygon petak Licin di peta tahun ini',
+    'Tampilkan polygon petak Rogojampi di peta tahun ini',
+    'Tampilkan petak KPH Banyuwangi Barat di peta tahun ini',
+    'Tampilkan petak DIVRE Jawa Timur di peta tahun ini',
+    'Tampilkan aktivitas Glenmore bulan ini di peta',
+    'Tampilkan pencapaian RKAP bulan ini di peta',
+    'Ringkasan KPH seluruh DIVRE tahun ini tampilkan di peta',
+  ]},
+  { t: 'DATA', q: [
+    'Apakah data hari ini sudah masuk?',
+    'Kapan terakhir update data?',
+  ]},
+];
+(function initTpl(){
+  const btn = document.getElementById('tplBtn'), panel = document.getElementById('tplPanel');
+  if (!btn || !panel) return;
+  for (const g of TPL_GROUPS) {
+    const h = document.createElement('div');
+    h.className = 'tpl-group'; h.textContent = g.t; panel.appendChild(h);
+    for (const q of g.q) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'tpl-item'; b.textContent = q; b.title = q;
+      b.addEventListener('click', () => { els.chatInput.value = q; autosizeChat(); els.chatInput.focus(); });
+      panel.appendChild(b);
+    }
+  }
+  btn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  els.sendBtn.addEventListener('click', () => { panel.hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
+})();
 
 // ═══ TRANSMIT ═══
 async function transmit(message, options = {}) {
   if (!message.trim()) return;
   if (running) { log('note', 'BUSY', `still working — "${message.slice(0, 40)}" not sent. Wait, or press Esc to cancel.`); return; }
+  // A new question silences the previous answer. ANA now reads every answer to
+  // the end, so without this a long report keeps talking over the new question.
+  stopSpeaking();
   running = true; answer = ''; firstDelta = false; speakThisRun = options.speak !== false;
   convoMsgs = [];
   const fresh = /^\/new\b/.test(message.trim());
@@ -727,6 +997,11 @@ function handle(ev) {
         currentSessionId = ev.session_id;
         const sid = document.getElementById('sessionId');
         if (sid) sid.textContent = ev.session_id;
+        // Persist tiap event session (bukan hanya setSession manual) agar
+        // complete antar-tab + boot restore selalu baca id terbaru.
+        try {
+          localStorage.setItem('ana_session', JSON.stringify({ id: ev.session_id, meta: null, ts: Date.now() }));
+        } catch (_) {}
       }
       break;
     case 'status':
@@ -774,6 +1049,12 @@ function handle(ev) {
       progressDone(false);
       break;
     case 'note': log('note', 'NOTE', ev.message || ''); break;
+    // thinking: kawaii spinner prose and provider wait notices. Never part of
+    // `answer` — it goes to the progress trace and the core label only, so
+    // speak() never reads ANA's own narration aloud.
+    case 'thinking':
+      if (ev.text) { progressStep(ev.text); intelLog(ev.text, 'thinking'); setAgentState('PLANNING'); }
+      break;
   }
 }
 function renderAnswer(finaldone) {
@@ -785,6 +1066,9 @@ function applyMode(m) {
   state.mode = (m === 'asisten' ? 'asisten' : 'coding');
   els.modeBtn.textContent = state.mode.toUpperCase();
   log('note', 'MODE', state.mode === 'asisten' ? 'Mode asisten — jawaban ringkas tanpa markdown/code' : 'Mode coding — jawaban lengkap dengan markdown/code');
+  try { bus.emit('MODE_CHANGED', state.mode); } catch (_) {}
+  try { document.documentElement.setAttribute('data-ana-mode', state.mode); } catch (_) {}
+  try { window.dispatchEvent(new CustomEvent('ana:mode', { detail: state.mode })); } catch (_) {}
 }
 async function setMode(m) {
   try {
@@ -796,12 +1080,19 @@ els.modeBtn.addEventListener('click', () => setMode(state.mode === 'coding' ? 'a
 
 // ═══ VOICE PICKER ═══
 let voicesCache = [];
+// Voice aktif (id + gender). Dipakai fallback browser speechSynthesis supaya
+// pilihan di panel VOICE CONFIG dihormati juga di jalur cadangan — dulu fallback
+// cuma cari /id[-_]ID/ yang selalu kena suara perempuan, jadi user memilih Ardi
+// tetap mendengar Gadis.
+let activeVoice = { id: '', gender: '' };
 async function loadVoices() {
   try {
     const r = await fetch('/api/voices', { headers: api.headers() });
     const d = await r.json(); voicesCache = d.voices || [];
     const cur = d.current || '';
-    const all = d.has_eleven ? [{ id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (EN, multilingual)', gender: 'female', desc: 'Calm British' }, ...voicesCache] : [...voicesCache];
+    const all = [...voicesCache];
+    const curObj = all.find(v => v.id === cur);
+    activeVoice = { id: cur, name: (curObj && curObj.agent_name) || '', gender: (curObj && curObj.gender) || '' };
     const vp = ensurePanel({
       id: 'voicePicker', title: 'VOICE CONFIG', rail: 'right',
       body: `<select id="voiceSelect" class="voice-select"></select>
@@ -816,17 +1107,30 @@ async function loadVoices() {
     }
     const sel = vp.querySelector('#voiceSelect');
     if (sel) {
-      sel.innerHTML = all.map(v => `<option value="${v.id}" ${v.id === cur ? 'selected' : ''}>${v.name} - ${v.desc.slice(0, 40)}</option>`).join('');
-      const curObj = all.find(v => v.id === cur) || all[0];
+      // Label memakai agent_name (nama yang diucapkan), bukan nama voice, dan
+      // data-agent-name disimpan untuk preview. "Gadis" dan "Ardi" itu nama
+      // mesin TTS, bukan identitas yang introduce diri — menampilkan keduanya
+      // bikin user mengira sedang memilih nama, bukan timbre.
+      sel.innerHTML = all.map(v => {
+        const agent = v.agent_name || 'ANNA';
+        const timbre = v.gender === 'male' ? 'suara laki-laki' : v.gender === 'female' ? 'suara perempuan' : '';
+        return `<option value="${v.id}" data-agent-name="${esc(agent)}" ${v.id === cur ? 'selected' : ''}>${esc(agent)} - ${esc(timbre)} ${esc(v.desc.slice(0, 34))}</option>`;
+      }).join('');
+      const dv = all.find(v => v.id === sel.value) || curObj || all[0];
       const desc = vp.querySelector('#voiceDesc');
-      if (desc && curObj) desc.textContent = curObj.desc + ' | ' + (curObj.gender || '') + ' | ' + curObj.id.slice(0, 8) + '..';
+      if (desc && dv) desc.textContent = 'Nama: ' + (dv.agent_name || 'ANNA') + ' | ' + dv.desc + ' | ' + dv.id.slice(0, 12) + '..';
     }
   } catch (e) { const d = document.getElementById('voiceDesc'); if (d) d.textContent = 'Gagal memuat daftar suara'; }
 }
 async function previewVoice() {
   const sel = document.getElementById('voiceSelect'); if (!sel) return;
-  const name = sel.options[sel.selectedIndex]?.textContent?.split(' - ')[0] || sel.value.slice(0, 8);
-  const text = 'Halo Pak, saya ' + name + '. Ini preview suara Indonesia ANA.';
+  const opts = [...sel.options].find(o => o.value === sel.value);
+  const name = (opts?.dataset.agentName || opts?.textContent?.split(' - ')[0] || sel.value.slice(0, 8)).trim();
+  // Preview memperkenalkan diri dengan nama yang cocok dengan voice aktif
+  // (Gadis -> ANNA, Ardi -> MAX), bukan dengan nama voice itu sendiri. Kalau
+  // bunyinya "saya Ardi", user mengira nama agen berubah jadi Ardi. Aturan nama
+  // yang sama ada di server.persona(), jadi preview dan jawaban konsisten.
+  const text = 'Halo Pak, saya ' + name + '. Ini pratinjau suara bahasa Indonesia.';
   try {
     const r = await fetch('/api/voice-preview', { method: 'POST', headers: api.headers({ 'content-type': 'application/json' }), body: JSON.stringify({ voice_id: sel.value, text }) });
     if (r.ok) {
@@ -835,14 +1139,15 @@ async function previewVoice() {
         const blob = await r.blob(); const url = URL.createObjectURL(blob);
         startEqualizer();
         els.hud.classList.add('speaking');
+        if (els.core) els.core.classList.add('speaking');
         const a = new Audio(url);
-        a.onended = () => { URL.revokeObjectURL(url); stopEqualizer(); els.hud.classList.remove('speaking'); };
+        a.onended = () => { URL.revokeObjectURL(url); stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); };
         await a.play();
         log('voice', 'VOICE', 'preview ' + name); return;
       }
     }
     let msg = ''; try { const j = await r.clone().json(); msg = j.error || ''; } catch (_) { msg = 'status ' + r.status; }
-    if (msg) log('note', 'VOICE', 'ElevenLabs: ' + msg.slice(0, 120) + ' — fallback browser');
+    if (msg) log('note', 'VOICE', 'Edge TTS: ' + msg.slice(0, 120) + ' — fallback browser');
     if (!speechSynth) { log('error', 'VOICE', 'browser TTS tidak tersedia'); return; }
     speechSynth.cancel();
     const u = new SpeechSynthesisUtterance(text); u.lang = 'id-ID';
@@ -850,8 +1155,9 @@ async function previewVoice() {
     u.rate = 1.0; u.pitch = 1.0;
     startEqualizer();
     els.hud.classList.add('speaking');
-    u.onend = () => { stopEqualizer(); els.hud.classList.remove('speaking'); log('voice', 'VOICE', 'preview browser ' + name); };
-    u.onerror = e => { stopEqualizer(); els.hud.classList.remove('speaking'); log('error', 'VOICE', 'browser TTS error ' + (e.error || '')); };
+    if (els.core) els.core.classList.add('speaking');
+    u.onend = () => { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); log('voice', 'VOICE', 'preview browser ' + name); };
+    u.onerror = e => { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); log('error', 'VOICE', 'browser TTS error ' + (e.error || '')); };
     speechSynth.speak(u);
   } catch (e) { stopEqualizer(); els.hud.classList.remove('speaking'); log('error', 'VOICE', String(e).slice(0, 150)); }
 }
@@ -958,14 +1264,50 @@ async function refreshBriefing() {
 els.micBtn.addEventListener('click', micToggle);
 function initMuteClear() {
   const bar = document.createElement('div'); bar.className = 'mute-clear-bar';
-  bar.innerHTML = `<button id="muteBtn" class="mute-btn">🔊 Voice On</button><button id="clearBtn" class="clear-btn">Clear</button>`;
+  bar.innerHTML = `<button id="muteBtn" class="mute-btn">🔊 Voice On</button><button id="restartBtn" class="restart-btn" title="Restart server (mis. setelah update kode)">↻ Restart</button><button id="clearBtn" class="clear-btn">Clear</button>`;
   document.getElementById('topControls').appendChild(bar);
   bar.querySelector('#muteBtn').addEventListener('click', () => {
     muted = !muted;
     const b = bar.querySelector('#muteBtn');
     b.textContent = muted ? '🔇 Voice Off' : '🔊 Voice On';
     b.classList.toggle('off', muted); b.classList.toggle('on', !muted);
-    if (muted && player) player.pause();
+    if (muted) stopSpeaking();
+  });
+  bar.querySelector('#restartBtn').addEventListener('click', async () => {
+    const b = bar.querySelector('#restartBtn');
+    if (!confirm('Restart server ANA? Sesi chat aktif ikut reset. Lanjut?')) return;
+    b.disabled = true; b.textContent = '↻ Restarting…';
+    log('note', 'RESTART', 'permintaan restart dikirim, server exec ulang…');
+    try {
+      const r = await api.restart();
+      if (!r || !r.ok) {
+        // Server lama (sebelum patch ini) belum punya /api/restart.
+        b.disabled = false; b.textContent = '↻ Restart';
+        log('error', 'RESTART', 'server ini terlalu lama untuk restart via tombol — restart manual sekali terakhir dari terminal, setelah itu tombol berfungsi.');
+        return;
+      }
+    } catch (_) {}
+    // Poll sampai server baru jawab /api/status (maks ~30 dtk), lalu reload.
+    const t0 = Date.now();
+    const tick = async () => {
+      try {
+        const s = await api.getStatus();
+        // Respon apa pun (termasuk 401: token baru setelah exec) = server baru sudah online.
+        // Reload ambil token segar dari meta tag index.html.
+        if (s && (s.model || s.runtime || s.error)) {
+          log('complete', 'RESTART', 'server baru online — reload UI…');
+          setTimeout(() => location.reload(), 800);
+          return;
+        }
+      } catch (_) {}
+      if (Date.now() - t0 > 30000) {
+        b.disabled = false; b.textContent = '↻ Restart';
+        log('error', 'RESTART', 'server belum online setelah 30 dtk — cek terminal');
+        return;
+      }
+      setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 2500);
   });
   bar.querySelector('#clearBtn').addEventListener('click', () => {
     answer = '';
@@ -1008,22 +1350,20 @@ function initPanelOptions(layout) {
       <div class="panel-options-head">PANELS</div>
       <div class="panel-options-list" id="panelOptionsList"></div>
     </div>`;
-  topControls.appendChild(wrap);
+  // id-resolved, bukan variabel lokal init(): topControls di init()_scope
+  // tak terlihat dari sini. getElementById selalu benar.
+  document.getElementById('topControls').appendChild(wrap);
 
   const menu = wrap.querySelector('#panelOptionsMenu');
   const list = wrap.querySelector('#panelOptionsList');
 
-  // Only content panels that have .panel class and can be shown/hidden.
-  // Structural panels (eventLog, codeViewer, response, chatBar, core,
-  // topControls, bottomTelemetry) are tracked by LayoutManager for
-  // persist but cannot be toggled as they have no intrinsic dimensions.
-  const contentPanelIds = [
-    'agentPanel', 'statusMatrix', 'workspacePanel', 'intelPanel',
-    'pipelinePanel', 'toolsPanel', 'sysTelemetry', 'cmdPanel',
-    'voicePicker', 'briefingPanel', 'projectList', 'missionKanban',
-    'vaultPanel', 'avdPanel', 'termPanel',
-  ];
-  const ids = contentPanelIds.filter(id => document.getElementById(id));
+  // Sumber kebenaran = LayoutManager yang sudah menarik semua panel ke .hud.
+  // Whitelist manual sebelumnya (contentPanelIds) cepat basi: panel baru yang
+  // didaftarkan ensurePanel() tidak pernah muncul di menu. Pengecualian hanya
+  // topControls, karena menu ini menempel padanya.
+  const NOT_TOGGLABLE = new Set(['topControls']);
+  const ids = (layout?.ids || []).filter(id =>
+    !NOT_TOGGLABLE.has(id) && document.getElementById(id));
   const titles = {
     agentPanel: 'AGENT STATUS', statusMatrix: 'SYSTEM MATRIX',
     workspacePanel: 'WORKSPACE', intelPanel: 'INTELLIGENCE SURFACE',
@@ -1032,6 +1372,11 @@ function initPanelOptions(layout) {
     voicePicker: 'VOICE CONFIG', briefingPanel: 'PROACTIVE BRIEFING',
     projectList: 'ACTIVE REPOSITORIES', missionKanban: 'MISSION KANBAN',
     vaultPanel: 'VAULT STATUS', avdPanel: 'ANDROID AVD', termPanel: 'TERMINAL',
+    mapPanel: 'SPATIAL MAP',
+    eventLog: 'EVENT STREAM', codeViewer: 'CODE VIEWER',
+    topDials: 'SYSTEM DIALS',
+    response: 'RESPONSE', chatBar: 'CHAT', core: 'CORE',
+    bottomTelemetry: 'BOTTOM TELEMETRY',
   };
 
   for (const id of ids) {
@@ -1068,8 +1413,8 @@ function initPanelOptions(layout) {
 
 // ═══ INIT ═══
 async function init() {
-  initParticles(); initDials(); initOctFrame(); initRadialTicks(); initOrbitalParticles();
-  initMatrix(); initWorkspace(); initIntel(); initTelemetry();
+  initParticles(); initDials();
+  initMatrix(); initWorkspace(); initIntel(); initTelemetry(); startDialPoll();
   initCommandMatrix(); initQuickButtons(); initMuteClear();
   initToolsChips(); initSystemTelemetry();
   loadStatus(); setInterval(loadStatus, 30000);
@@ -1085,7 +1430,7 @@ async function init() {
           const sidEl = document.getElementById('sessionId');
           if (sidEl) sidEl.textContent = id;
           els.stSess.textContent = id.slice(0, 8);
-          intelLog(`🔗 Restored session: ${id}`, 'session');
+          intelLog(`🔗 Sesi dipulihkan: ${id}`, 'session');
         }
       }
     } catch (_) {}
@@ -1102,7 +1447,7 @@ async function init() {
             const sidEl = document.getElementById('sessionId');
             if (sidEl) sidEl.textContent = id;
             els.stSess.textContent = id.slice(0, 8);
-            intelLog(`🔗 Session synced from another tab: ${id}`, 'session');
+            intelLog(`🔗 Sesi disinkron dari tab lain: ${id}`, 'session');
             refreshSessionSelector();
           }
         } else {
@@ -1112,7 +1457,7 @@ async function init() {
             const sidEl = document.getElementById('sessionId');
             if (sidEl) sidEl.textContent = '—';
             els.stSess.textContent = '—';
-            intelLog('🔗 Session cleared from another tab', 'session');
+            intelLog('🔗 Sesi dihapus dari tab lain', 'session');
             refreshSessionSelector();
           }
         }
@@ -1126,9 +1471,20 @@ async function init() {
     'intelPanel','pipelinePanel',
     'eventLog','codeViewer','toolsPanel','sysTelemetry',
     'cmdPanel','response','chatBar','core','topControls',
-    'bottomTelemetry'
+    'topDials','bottomTelemetry'
   ].filter(id => document.getElementById(id)));
   window._layoutManager = layout;
+  // Tunggu GET /api/layout selesai DULU sebelum panel dinamis dibuat:
+  // tanpa ini register()/save() panel dinamis (mapPanel, voicePicker, ...)
+  // berpacu dengan loadConfig dan menimpa layout.json dengan disabled:[].
+  await layout.ready;
+  // Map panel harus ada di DOM sebelum initPanelOptions bangun menu —
+  // whitelist filter by getElementById, panel belum ada = tidak masuk list.
+  try { initMapPanel({ log }); } catch (_) {}
+  // Bridge ANA ↔ peta: poll /api/map/queue, eksekusi via adapter (Fase 5).
+  try { startMapBridge({ token: ANA_TOKEN, log }); } catch (_) {}
+  // Token basi (server restart) → auto-reload via BOOT_ID poll, tanpa baca token.
+  try { startBootGuard(); } catch (_) {}
   // Dynamically created panels register themselves inside ensurePanel(), so
   // these only have to fire — no .then(register) bookkeeping to keep in sync.
   // Await them so initPanelOptions sees every panel in the DOM.
@@ -1185,8 +1541,11 @@ async function init() {
     };
     topControls.appendChild(resetBtn);
   }
-  // optBtn is created inside the topControls block; defer until next frame.
-  requestAnimationFrame(() => initPanelOptions(layout));
+  // optBtn dibuat di blok topControls di atas, jadi di frame yang sama sudah ada
+  // di DOM — tidak perlu menunggu frame berikutnya. rAF sengaja dihindari: tab
+  // yang tidak terlihat (background tab, SESI idle) tidak pernah menjalankan rAF,
+  // jadi menu Options tidak akan pernah dibangun sampai tab di-render ulang.
+  initPanelOptions(layout);
   log('status', 'INIT', 'ANA FUI HUD terintegrasi penuh.');
   setAgentState('IDLE');
   // Boot

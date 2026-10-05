@@ -17,7 +17,10 @@ export class EventBus {
 export const bus = new EventBus();
 
 export const state = {
-  mode: 'coding',
+  // Default 'asisten', bukan 'coding': sebelum /api/mode selesai, tombol sempat
+  // menampilkan mode yang salah. Default klien harus sama dengan default server
+  // (_load_mode di server.py) supaya tidak ada kedipan CODING -> ASISTEN.
+  mode: 'asisten',
   session: null,
   running: false,
   activeCode: '// Waiting for agent code execution...\n// Live terminal code stream will display here.',
