@@ -987,6 +987,18 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return False
+        # Domain tunnel/proxy resmi (Cloudflare -> localhost) selalu diterima
+        # terlepas dari BIND_HOST — request memang tiba via listener lokal.
+        # Proteksi utama tetap X-Ana-Token; origin check hanya layer tambahan.
+        try:
+            o = urlparse(origin)
+            if o.scheme == "https" and not o.port:
+                extra = {h.strip().lower() for h in os.environ.get("ANA_ALLOWED_HOSTS", "").split(",") if h.strip()}
+                host = (o.hostname or "").lower()
+                if host and host in extra:
+                    return True
+        except (ValueError, TypeError):
+            pass
         # Localhost-only mode: strict.
         if BIND_HOST == "127.0.0.1":
             return origin in {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
