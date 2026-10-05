@@ -137,14 +137,7 @@ def _simoge_mod(name):
     import importlib
     if _SIMOGE_SCRIPTS not in sys.path:
         sys.path.insert(0, _SIMOGE_SCRIPTS)
-    try:
-        return importlib.import_module(name)
-    except ModuleNotFoundError:
-        _dlog(f"_simoge_mod({name}) GAGAL dir={_SIMOGE_SCRIPTS} "
-              f"exists={os.path.isdir(_SIMOGE_SCRIPTS)} "
-              f"files={sorted(os.listdir(_SIMOGE_SCRIPTS)) if os.path.isdir(_SIMOGE_SCRIPTS) else None} "
-              f"path0={sys.path[:3]}")
-        raise
+    return importlib.import_module(name)
 
 
 def _simoge_templates():
