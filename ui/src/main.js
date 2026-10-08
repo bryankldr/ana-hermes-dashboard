@@ -25,11 +25,13 @@ const ANA_TOKEN = document.querySelector('meta[name="ana-token"]')?.content || '
 
 // ═══ STATE ═══
 let running = false, answer = '', firstDelta = false, speakThisRun = true;
-let runningMsg = '', pendingParts = [], runGen = 0;   // interupsi suara saat thinking: cancel + gabung
+let runningMsg = '', pendingParts = [], runGen = 0, mergeLock = false;   // mergeLock: satu interupsi siapkan run gabungan, sisanya numpang
 let speakDone = Promise.resolve(), activeController = null;
 let muted = false, player = null;
 let convo = false, suppress = false;
 let recognition = null;
+let recogGen = 0, bargeAt = 0;   // recogGen: restart basi dibatalkan generasi baru; bargeAt: echo gate
+let instStart = 0, userLoudAt = 0, ttsStartAt = 0;   // echo guard: overlap TTS vs user nyela
 let micStream = null, recorder = null, chunks = [], actx = null, analyser = null, vdata = null;
 let vad = null, spoke = false, loudAt = 0, turnStart = 0, bargeN = 0;
 let floorSum = 0, floorN = 0, threshold = 0.02, peak = 0, calibrating = true;
@@ -41,6 +43,10 @@ let progSteps = [], progStart = 0, progTimer = null, progHideTimer = null;
 let codeDiffBuf = '';
 // In-flight guard for the 7s AVD poll; one server-side poll can take 18s.
 let avdPending = false;
+// Generation guard: turn_id from server, reject stale events
+let currentTurnId = 0;
+// Recognition live guard — prevent double start
+let recogLive = false;
 
 // ═══ HELPERS ═══
 // now/rid/esc/cleanForSpeech live in utils/helpers.js (imported above).
@@ -882,19 +888,14 @@ async function startVadMonitor() {
         if (rms > threshold * 2) bargeN++; else bargeN = 0;
         if (bargeN >= 3) {
           bargeN = 0;
+          bargeAt = Date.now();
           stopSpeaking();
-          // JANGAN start recognition di sini: rantai onend→transmit→restart
-          // masih pending (transmit await speakDone) dan akan restart mic
-          // sendiri ~350ms pasca-barge-in. Start ganda = dua recognition
-          // bersamaan → Chrome bunuh keduanya → STT macet permanen.
-          // Kata interupsi ikut hilang hanya bila mic mati total — di sini mic
-          // tetap jalan (suppress dihapus, guard single-instance di
-          // startBrowserRecognition cegah STT macet) → restart paksa agar
-          // potongan langsung ditangkap sebagai turn baru.
+          // Mic sudah hidup selama TTS (tak ada suppress) — JANGAN restart
+          // recognition di sini. Restart = abort instance yang sedang
+          // menangkap potongan user, plus rantai onend→restart basi ikut
+          // restart lagi → kata interupsi mati dua kali → STT bungkam.
+          // Cukup potong TTS; recognition live teruskan potongan.
           suppress = false;
-          if (convo) {
-            try { startBrowserRecognition(); } catch (_) {}
-          }
           log('voice', 'VOICE', 'barge-in — TTS dipotong, dengar potongan');
         }
       } else bargeN = 0;
@@ -984,31 +985,47 @@ function micToggle() {
 }
 function stopConvo() {
   convo = false; suppress = false;
-  if (recognition) { try { recognition.onend = null; recognition.stop(); } catch (_) {} recognition = null; }
+  recogLive = false; recogGen++;
+  if (recognition) { try { recognition.onend = null; recognition.onerror = null; recognition.abort(); } catch (_) {} try { recognition.stop(); } catch (_) {} recognition = null; }
   if (vad) { clearInterval(vad); vad = null; }
   if (recorder && recorder.state === 'recording') { recorder._cancel = true; try { recorder.stop(); } catch (_) {} }
   recorder = null;
   if (player) { try { player.pause(); } catch (_) {} }
-  stopSpeaking();   // bunuh TTS juga — tanpanya audio nyangkut pasca-close
+  // JANGAN stopSpeaking() otomatis di sini: bisa meninggalkan TTS sedang diputar
+  // dan mic permission sudah dibuang. Biarkan caller (barge-in atau manual) decide.
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (actx) { actx.close().catch(() => {}); actx = null; analyser = null; }
+  if (actx) { try { actx.close(); } catch (_) {} actx = null; analyser = null; }
   els.hud.classList.remove('speaking');
   els.micBtn.classList.remove('on'); els.micBtn.textContent = '🎤';
   log('voice', 'VOICE', 'conversation closed');
   setAgentState('IDLE');
 }
+function scheduleRecogRestart(ms) {
+  // Restart basi (dari onend lama / barge lama) dibatalkan generasi baru.
+  // Tanpa ini timeout 250/350ms menebang recognition yang sedang nangkap
+  // omongan user → kata hilang → STT bungkam.
+  const g = recogGen;
+  setTimeout(() => {
+    if (g !== recogGen || !convo) return;
+    if (recogLive) return;
+    startBrowserRecognition();
+  }, ms);
+}
 function startBrowserRecognition() {
   if (!convo || !SpeechRecognition) return;
-  // Single-instance: stop lama sebelum start baru. Tanpa ini dua recognition
-  // jalan bareng → Chrome bunuh keduanya → STT macet permanen. Guard ini yang
-  // bikin restart paksa dari barge-in aman.
-  if (recognition) { try { recognition.onend = null; recognition.abort(); } catch (_) {} recognition = null; }
+  if (recogLive) return;   // sedang nangkap suara — jangan tebang
+  if (recognition) {
+    try { recognition.onend = null; recognition.onerror = null; recognition.abort(); } catch (_) {}
+    try { recognition.stop(); } catch (_) {}
+    recognition = null;
+  }
   recognition = new SpeechRecognition();
   recognition.lang = 'id-ID'; recognition.interimResults = true; recognition.continuous = false;
   let finalText = '';
   
   // Speech start - approximate when user starts speaking
-  recognition.onaudiostart = () => {
+  recognition.onstart = recognition.onaudiostart = () => {
+    recogLive = true;
     if (window.voiceMetrics) window.voiceMetrics.onSpeechStart();
   };
   
@@ -1037,14 +1054,22 @@ function startBrowserRecognition() {
   // the onend restart.
   const FATAL = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported']);
   recognition.onerror = e => {
-    log('error', 'VOICE', `browser speech: ${e.error || 'error'}`);
-    if (FATAL.has(e.error)) stopConvo();
+    const err = e.error || '';
+    if (err === 'aborted') { recogLive = false; return; }
+    if (err === 'no-speech') { log('voice', 'VOICE', 'no-speech — dengar lagi'); return; }
+    log('error', 'VOICE', `browser speech: ${err || 'error'}`);
+    if (FATAL.has(err)) stopConvo();
   };
   recognition.onend = async () => {
+    recogLive = false;
     const text = finalText.trim();
     if (!convo) return;
-    if (!text) {
-      if (convo) setTimeout(startBrowserRecognition, 250);
+    // Echo gate: TTS baru dipotong <1.5s lalu + hasil kosong/pendek =
+    // sisa suara ANNA di mic, bukan omongan user → buang, jangan transmit.
+    if (!text || (Date.now() - bargeAt < 1500 && text.split(/\s+/).length <= 2)) {
+      if (!text) log('voice', 'VOICE', 'STT kosong — dengar lagi');
+      else log('voice', 'VOICE', `echo sisa TTS dibuang: "${text}"`);
+      if (convo) scheduleRecogRestart(250);
       return;
     }
     log('voice', 'VOICE', `browser transcribed: "${text}"`);
@@ -1052,7 +1077,7 @@ function startBrowserRecognition() {
     log('send', 'SEND', `auto-sent voice: ${text}`);
     await transmit(text, { voiceInterrupt: true });
     suppress = false;
-    if (convo) setTimeout(startBrowserRecognition, 350);
+    if (convo) scheduleRecogRestart(350);
   };
   setAgentState('LISTENING');
   try { recognition.start(); } catch (e) { log('error', 'VOICE', 'speech recognition failed to start'); }
@@ -1323,6 +1348,13 @@ async function transmit(message, options = {}) {
 }
 
 function handle(ev) {
+  // Generation guard: drop events from stale turns
+  if (ev.turn_id !== undefined && ev.turn_id !== currentTurnId) {
+    log('voice', 'VOICE', `drop stale turn ${ev.turn_id} (current ${currentTurnId})`);
+    return;
+  }
+  // Update current turn id from status/first event
+  if (ev.turn_id !== undefined) currentTurnId = ev.turn_id;
   switch (ev.t) {
     case 'session':
       if (ev.session_id) {

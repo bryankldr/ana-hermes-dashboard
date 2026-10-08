@@ -132,14 +132,20 @@ class HermesGatewayClient:
     
     def __init__(
         self,
-        gateway_url: str = "ws://localhost:37521/api/ws",
+        gateway_url: str | None = None,
         unix_socket_path: str | None = None,
         profile: str = "anna",
         auth_token: str | None = None,
         on_event: Optional[Callable[[str, dict], Any]] = None,
         on_session_change: Optional[Callable[[GatewaySession], Any]] = None,
     ):
-        self.gateway_url = gateway_url
+        _resolved = (gateway_url or os.environ.get("ANA_GATEWAY_URL", "").strip())
+        if not _resolved:
+            raise RuntimeError(
+                "gateway_url required: set ANA_GATEWAY_URL or pass gateway_url. "
+                "Run via ./start.sh or export ANA_GATEWAY_URL=ws://127.0.0.1:<SPORT>/api/ws"
+            )
+        self.gateway_url: str = _resolved
         if unix_socket_path is None:
             _home = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
             unix_socket_path = os.path.join(_home, "gateway.sock")
@@ -589,22 +595,77 @@ class HermesGatewayClient:
         """Submit user prompt and stream events via async generator.
 
         Yields gateway events as they arrive (message.delta, tool_use, tool_result, etc.)
+        Scoped via _event_handlers to avoid clobbering self.on_event (race if reused).
+        Filters by session_id and ignores non-stream noise (sessions.changed, etc.).
         """
-        # Use a queue to collect events from the callback
         queue: asyncio.Queue = asyncio.Queue()
-        original_handler = self.on_event
+        # Whitelist: only stream-relevant methods enter the queue
+        _STREAM_METHODS = {
+            "message.delta", "message.complete", "delta", "text",
+            "thinking.delta", "reasoning.delta",
+            "tool.start", "tool.complete",
+            "session.info", "session.usage", "session.resume_progress",
+            "error",
+        }
+        _IGNORE_METHODS = {"sessions.changed", "platforms.changed", "message.start", "session.title", "reasoning.available", "gateway.ready"}
 
-        def event_collector(method: str, params: dict):
-            try:
-                event_data = {"type": method, **params}
-                logger.debug(f"submit_prompt_stream collected event: {event_data}")
-                queue.put_nowait(event_data)
-            except Exception as e:
-                logger.error(f"event_collector error: {e}")
+        def _should_queue(method: str, params: dict) -> bool:
+            if method in _IGNORE_METHODS:
+                return False
+            if method not in _STREAM_METHODS:
+                # Unknown but not ignored — allow (future-proof), but log
+                pass
+            # Filter by session_id when present — prevents cross-session bleed
+            sid = params.get("session_id") or (params.get("payload") or {}).get("session_id") if isinstance(params.get("payload"), dict) else None
+            if sid and sid != session_id:
+                return False
+            return True
 
-        # Temporarily replace handler
-        self.on_event = event_collector
+        # Scoped collector added to _event_handlers (not replacing self.on_event)
+        def _make_collector(m: str):
+            def _h(payload: dict):
+                if not _should_queue(m, payload):
+                    return
+                try:
+                    queue.put_nowait({"type": m, **payload})
+                except Exception as e:
+                    logger.error(f"event_collector queue error: {e}")
+            return _h
 
+        # Register per-method collectors + a fallback via on_event wrapping
+        collectors: list[tuple[str, callable]] = []
+        for meth in _STREAM_METHODS:
+            h = _make_collector(meth)
+            self.on(meth, h)
+            collectors.append((meth, h))
+
+        # Also wrap on_event so any method we missed still flows through queue (filtered)
+        orig_on_event = self.on_event
+        def _wrapped_on_event(method: str, params: dict):
+            # First: queue (filtered)
+            if _should_queue(method, params):
+                try:
+                    queue.put_nowait({"type": method, **params})
+                except Exception:
+                    pass
+            # Then: chain to original handler if any
+            if orig_on_event is not None:
+                try:
+                    res = orig_on_event(method, params)  # type: ignore[call-arg,operator]
+                    if asyncio.iscoroutine(res):
+                        asyncio.create_task(res)  # type: ignore[arg-type]
+                except Exception as e:
+                    logger.error(f"orig on_event error: {e}")
+        self.on_event = _wrapped_on_event  # type: ignore[assignment]
+
+        def _remove_collectors():
+            for meth, h in collectors:
+                lst = self._event_handlers.get(meth, [])
+                if h in lst:
+                    lst.remove(h)
+            self.on_event = orig_on_event  # type: ignore[assignment]
+
+        req_id: str | None = None
         try:
             # Start the prompt submission
             params = {
@@ -632,9 +693,13 @@ class HermesGatewayClient:
 
             await self.ws.send(json.dumps(request))
 
-            # Yield events until we get message.complete or error
+            # Yield events until we get message.complete or error — 120s per-event (LLM/tool may take long)
             while True:
-                event = await asyncio.wait_for(queue.get(), timeout=60.0)
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=120.0)
+                except asyncio.TimeoutError:
+                    logger.warning("submit_prompt_stream queue timeout 120s — no event for session %s", session_id)
+                    raise GatewayError(-1, "stream timeout: no gateway event for 120s")
                 yield event
 
                 # Check for completion
@@ -643,17 +708,21 @@ class HermesGatewayClient:
                 elif event.get("type") == "error":
                     break
 
-            # Wait for the response
-            await asyncio.wait_for(future, timeout=60.0)
-
+            # Wait for the response (short, server already sent complete)
+            try:
+                await asyncio.wait_for(future, timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("prompt.submit future timeout — proceeding anyway")
         finally:
-            # Restore original handler
-            self.on_event = original_handler
+            # Restore original handler + remove scoped collectors
+            _remove_collectors()
+            if req_id is not None:
+                self._pending.pop(req_id, None)
 
     async def submit_prompt_background(self, session_id: str, text: str) -> dict:
-                    """Run background side agent (prompt.background)."""
-                    params = {"session_id": session_id, "profile": self.profile, "text": text}
-                    return await self._send_request("prompt.background", params)
+        """Run background side agent (prompt.background)."""
+        params = {"session_id": session_id, "profile": self.profile, "text": text}
+        return await self._send_request("prompt.background", params)
     
     async def submit_btw(self, session_id: str, text: str) -> dict:
         """Side question over snapshot (prompt.btw)."""

@@ -75,6 +75,63 @@ def reset_session():
     _CURRENT_SESSION_ID = None
 
 
+def _discover_gateway_url() -> str | None:
+    """Discover Hermes Gateway WS URL — single source of truth.
+
+    Priority:
+      1. ANA_GATEWAY_URL env (set by start.sh discovery or manual export)
+      2. Live `hermes serve --port 0` via ss + curl __HERMES_SESSION_TOKEN__
+      3. None (caller raises actionable error, no silent fallback to :37521)
+
+    Port 37521 was a static fallback that never matches the actual
+    `hermes serve --port 0` ephemeral port (e.g. 35405) and caused
+    `[Errno 111] ('127.0.0.1', 37521)` when server.py ran without start.sh.
+    """
+    env_url = os.environ.get("ANA_GATEWAY_URL", "").strip()
+    if env_url:
+        return env_url
+    # Try to discover from live hermes process (same logic as start.sh:108-122)
+    try:
+        import subprocess
+        import re as _re
+        ss = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=3)
+        # Find hermes pid and sport
+        m_pid = _re.search(r'"hermes".*?pid=(\d+)', ss.stdout)
+        if m_pid:
+            pid = m_pid.group(1)
+            m_port = _re.search(rf"pid={pid}.*?127\.0\.0\.1:(\d+)", ss.stdout)
+            # fallback: any 127.0.0.1:port on that pid line
+            if not m_port:
+                for line in ss.stdout.splitlines():
+                    if f"pid={pid}" in line:
+                        mm = _re.search(r"127\.0\.0\.1:(\d+)", line)
+                        if mm:
+                            m_port = mm
+                            break
+            if m_port:
+                sport = m_port.group(1)
+                # Fetch token from http://127.0.0.1:$SPORT/
+                try:
+                    import urllib.request
+                    with urllib.request.urlopen(f"http://127.0.0.1:{sport}/", timeout=3) as resp:
+                        html = resp.read().decode("utf-8", errors="ignore")
+                        m_tok = _re.search(r'__HERMES_SESSION_TOKEN__="([^"]+)"', html)
+                        if m_tok:
+                            tok = m_tok.group(1)
+                            os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
+                            os.environ["ANA_GATEWAY_TOKEN"] = tok
+                            return os.environ["ANA_GATEWAY_URL"]
+                        # token not in page but port exists — still return URL
+                        os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
+                        return os.environ["ANA_GATEWAY_URL"]
+                except Exception:
+                    # port exists but http fetch failed — still try URL (token may be set separately)
+                    os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
+                    return os.environ["ANA_GATEWAY_URL"]
+    except Exception:
+        pass
+    return None
+
 def _get_gateway() -> HermesGatewayClient:
     """Get or create the singleton gateway client."""
     global _GATEWAY_CLIENT, _GATEWAY_THREAD, _GATEWAY_LOOP, _GATEWAY_CONNECTED, _GATEWAY_CONNECT_ERROR
@@ -83,8 +140,16 @@ def _get_gateway() -> HermesGatewayClient:
         if _GATEWAY_CLIENT is not None and _GATEWAY_CLIENT.connected:
             return _GATEWAY_CLIENT
         
-        # Create new gateway
-        gateway_url = os.environ.get("ANA_GATEWAY_URL", "ws://localhost:37521/api/ws")
+        # Create new gateway — discovered, never silent 37521 fallback
+        gateway_url = _discover_gateway_url()
+        if not gateway_url:
+            raise RuntimeError(
+                "ANA_GATEWAY_URL not set and Hermes Gateway not discoverable. "
+                "Run via ./start.sh (auto-discovers `hermes serve --port 0`) or "
+                "export ANA_GATEWAY_URL=ws://127.0.0.1:<SPORT>/api/ws and "
+                "ANA_GATEWAY_TOKEN=$(curl -s http://127.0.0.1:<SPORT>/ | grep -o '__HERMES_SESSION_TOKEN__=\"[^\"]*\"')."
+                " Check `ss -ltnp | grep hermes` and `ps aux | grep \"serve --port\"`."
+            )
         profile = os.environ.get("HERMES_PROFILE", os.environ.get("ANA_PROFILE", "anna")).strip() or "anna"
         auth_token = os.environ.get("ANA_GATEWAY_TOKEN", "").strip() or None
         
@@ -160,38 +225,48 @@ def _run_async_stream(coro_func, *args, **kwargs):
     """Run an async generator in the gateway's event loop, yielding results."""
     if _GATEWAY_LOOP is None:
         raise RuntimeError("Gateway event loop not running")
-    
-    queue: List[Dict] = []
-    lock = threading.Lock()
+    import queue as _queue
+    q: _queue.Queue = _queue.Queue()
     done = threading.Event()
-    error = [None]
-    
+    error: list[Exception | None] = [None]
+
     async def _runner():
         try:
             async for event in coro_func(*args, **kwargs):
-                with lock:
-                    queue.append(event)
+                q.put(event)
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             error[0] = e
         finally:
             done.set()
-    
+
     future = asyncio.run_coroutine_threadsafe(_runner(), _GATEWAY_LOOP)
-    
-    while not done.is_set() or queue:
-        event = None
-        with lock:
-            if queue:
-                event = queue.pop(0)
-        if event is not None:
-            yield event
-        else:
-            if done.is_set():
-                break
-            time.sleep(0.01)
-    
-    if error[0]:
-        raise error[0]
+    try:
+        while True:
+            try:
+                event = q.get(timeout=0.1)
+                yield event
+            except _queue.Empty:
+                if done.is_set() and q.empty():
+                    break
+                # Barge-in fast path: if cancel flagged, nudge runner and keep draining
+                if _CANCEL_EVENT.is_set():
+                    try:
+                        future.cancel()
+                    except Exception:
+                        pass
+                    if done.is_set() and q.empty():
+                        break
+                continue
+    finally:
+        if not done.is_set():
+            try:
+                future.cancel()
+            except Exception:
+                pass
+        if error[0]:
+            raise error[0]
 
 
 def runtime_kind():
@@ -322,10 +397,20 @@ def _map_gateway_event(event: dict, started: float, first: bool) -> list:
 
 
 def _run_hermes_locked(message, session_id=None, system=None):
-    """Internal locked run - yields events compatible with runtime.py."""
+    """Internal locked run - yields events compatible with runtime.py.
+
+    P0 §19-20: turn_id/response_id + generation guard agar token/suara
+    dari generasi yang sudah di-cancel tidak bocor ke turn baru.
+    """
+    global _CURRENT_SESSION_ID
     started = time.monotonic()
-    
-    # Initial status event
+
+    # Get new turn ID for this generation
+    turn_id = _new_turn_id()
+    response_id = f"{turn_id}-r1"
+    _set_response_id(response_id)
+
+    # Initial status event — client pakai turn_id untuk drop stale events
     yield dict(
         t="status",
         model="Hermes default",
@@ -334,10 +419,10 @@ def _run_hermes_locked(message, session_id=None, system=None):
         permission=os.environ.get("ANA_PERMISSION", "normal").strip().lower(),
         profile=os.environ.get("HERMES_PROFILE", os.environ.get("ANA_PROFILE", "anna")).strip() or "anna",
         runtime="hermes",
-        session_id=session_id
+        session_id=session_id,
+        turn_id=turn_id,
+        response_id=response_id
     )
-    
-    global _CURRENT_SESSION_ID
     
     # Use provided session_id or current session
     current_session_id = session_id or _CURRENT_SESSION_ID
@@ -368,11 +453,15 @@ def _run_hermes_locked(message, session_id=None, system=None):
         
         # Use the async generator for streaming
         async def stream_run():
-            async for event in client.submit_prompt_stream(current_session_id, prompt_text):
+            async for event in client.submit_prompt_stream(current_session_id, prompt_text, interrupted=True):
                 yield event
         
         # Collect events from the async generator
         for event in _run_async_stream(stream_run):
+            # Check if this turn was cancelled
+            if _check_cancelled(turn_id):
+                return
+            
             mapped = _map_gateway_event(event, started, first)
             for ev in mapped:
                 if ev.get("t") == "session":
@@ -381,40 +470,22 @@ def _run_hermes_locked(message, session_id=None, system=None):
                     text_seen = True
                 if ev.get("t") == "complete":
                     complete_yielded = True
+                # Add turn_id to all events
+                ev["turn_id"] = turn_id
                 yield ev
             first = False
-            
-    except Exception as e:
-        if not complete_yielded:
-            yield dict(t="error", message=str(e)[:300])
-        return
-        
-        # Handle final result if we didn't get complete event
-        if not complete_yielded:
-            sid = result.get("session_id")
-            if valid_session(sid):
-                yield dict(t="session", session_id=sid)
-            toks = result.get("tokens", {})
-            yield dict(
-                t="usage",
-                input_tokens=toks.get("input", 0),
-                output_tokens=toks.get("output", 0),
-                total_tokens=toks.get("total", 0)
-            )
-            yield dict(t="complete", session_id=sid, ms=int((time.monotonic() - started) * 1000))
-        
-        # Update session id
-        if emitted_session:
-            _CURRENT_SESSION_ID = emitted_session
-        elif result.get("session_id"):
-            _CURRENT_SESSION_ID = result.get("session_id")
             
     except (BrokenPipeError, ConnectionResetError):
         # Client disconnected - silently ignore
         pass
     except Exception as e:
-        # This shouldn't be reached since we handle errors in the loop
-        yield dict(t="error", message=str(e)[:300])
+        if not complete_yielded:
+            yield dict(t="error", message=str(e)[:300], turn_id=turn_id)
+        return
+    finally:
+        # Persist session id from this turn so next run reuses it instead of creating new
+        if emitted_session and valid_session(emitted_session):
+            _CURRENT_SESSION_ID = emitted_session
 
 
 def run_hermes(message, session_id=None, system=None):
@@ -438,11 +509,77 @@ def run(message, session_id=None, system=None):
         yield dict(t="error", message=f"could not start Hermes via Gateway: {e}")
 
 
+# Current turn/generation tracking for cancellation
+_CURRENT_TURN_ID = 0
+_CURRENT_RESPONSE_ID = None
+_CURRENT_TTS_ID = None
+_CANCEL_EVENT = threading.Event()
+
+
 def cancel_active():
-    """Cancel the currently running request (best effort)."""
-    # Gateway doesn't have a direct cancel yet; we could implement via approval.respond
-    # For now, this is a no-op
-    return False
+    """Cancel the currently running request (best effort) — P0 barge-in.
+
+    Sesuai improve_STT_TTS_VAD.md §19-20: setiap turn punya turn_id/response_id,
+    generasi lama harus dibuang, LLM+TTS lama di-cancel, queue audio di-flush.
+    Implementasi: bump _CURRENT_TURN_ID + set _CANCEL_EVENT agar token basi
+    di-drop via _check_cancelled, lalu coba interupsi gateway secara nyata
+    (session.interrupt) + deny approval bila ada tool yang nunggu approval.
+    """
+    global _CURRENT_TURN_ID, _CURRENT_RESPONSE_ID, _CURRENT_TTS_ID
+    _CANCEL_EVENT.set()
+    _CURRENT_TURN_ID += 1
+    _CURRENT_RESPONSE_ID = None
+    _CURRENT_TTS_ID = None
+    # Real interrupt: session.interrupt di gateway (bukan cuma approval deny).
+    # Dua jalur dipanggil bersamaan — mana yang didukung gateway akan membatalkan
+    # generasi yang sedang berpikir/tool-execution; yang tidak didukung diabaikan.
+    try:
+        if _GATEWAY_CLIENT and _GATEWAY_LOOP and _CURRENT_SESSION_ID:
+            # session.interrupt — hentikan prompt yang sedang jalan
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _GATEWAY_CLIENT.interrupt_session(_CURRENT_SESSION_ID),
+                    _GATEWAY_LOOP
+                )
+            except Exception:
+                pass
+            # approval.respond deny — bila Hermes sedang nunggu approval tool
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    _GATEWAY_CLIENT.respond_approval(_CURRENT_SESSION_ID, "deny", all=True),
+                    _GATEWAY_LOOP
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return True
+
+
+def _new_turn_id():
+    global _CURRENT_TURN_ID
+    _CURRENT_TURN_ID += 1
+    _CANCEL_EVENT.clear()
+    return _CURRENT_TURN_ID
+
+
+def _get_current_turn_id():
+    return _CURRENT_TURN_ID
+
+
+def _set_response_id(rid):
+    global _CURRENT_RESPONSE_ID
+    _CURRENT_RESPONSE_ID = rid
+
+
+def _set_tts_id(tid):
+    global _CURRENT_TTS_ID
+    _CURRENT_TTS_ID = tid
+
+
+def _check_cancelled(turn_id):
+    """Return True if this turn has been superseded."""
+    return turn_id != _CURRENT_TURN_ID or _CANCEL_EVENT.is_set()
 
 
 def shutdown():

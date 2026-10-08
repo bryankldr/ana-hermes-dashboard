@@ -346,7 +346,7 @@ ui/src/main.js: send()  [chat input → transmit]
       commands.handle()  → /mode /map /fresh routing (skip jika chat biasa)
       runtime_gateway.run(message, sid, system)
         prompt_text = system + "\n\n## Current user request\n"+msg+"\n\nAnswer..."  → 5810c ~1452t
-        → HermesGatewayClient ws://localhost:37521/api/ws  profile=anna
+        → HermesGatewayClient $ANA_GATEWAY_URL (ws://127.0.0.1:$SPORT/api/ws, token __HERMES_SESSION_TOKEN__ via start.sh discovery / runtime_gateway._discover_gateway_url — no hardcoded :37521)
             Hermes auto-load: SOUL.md(5782c) + SKILL simoge-business core(31k) + tools(38 template)
         → model → tool calls → Business Data Engine → NDJSON t="delta/thinking/tool/usage/complete"
   → main.js handle(ev) → els.response (RESPONSE panel) + localStorage session + TTS
