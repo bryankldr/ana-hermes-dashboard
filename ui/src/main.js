@@ -798,6 +798,62 @@ async function startVadMonitor() {
     }
   }, 100);
 }
+// STT server-side fallback (tanpa SpeechRecognition): VAD gate -> rekam
+// turn via MediaRecorder -> POST /api/stt -> transmit teks.
+// ponytail: streaming chunked 320ms saat WebSocket audio ada.
+async function startServerSttLoop() {
+  convo = true; suppress = false;
+  els.micBtn.classList.add('on'); els.micBtn.textContent = '● Live';
+  log('voice', 'VOICE', 'server STT loop open · listening');
+  setAgentState('LISTENING');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { log('error', 'VOICE', 'mic blocked — voice off'); convo = false; els.micBtn.classList.remove('on'); els.micBtn.textContent = '🎤'; return; }
+  if (!convo) { stream.getTracks().forEach(t => t.stop()); return; }
+  micStream = stream;
+  startVadMonitor();
+  const ANA_TOK = document.querySelector('meta[name="ana-token"]')?.content || '';
+  const tick = () => {
+    if (!convo) return;
+    if (!window.MediaRecorder) { log('error', 'VOICE', 'MediaRecorder missing'); stopConvo(); return; }
+    const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '' });
+    recorder = rec; chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      recorder = null;
+      if (rec._cancel || !convo) { if (convo) setTimeout(tick, 200); return; }
+      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      chunks = [];
+      if (blob.size < 2000) { if (convo) setTimeout(tick, 200); return; } // turn kosong
+      try {
+        const buf = await blob.arrayBuffer();
+        // resample ke PCM16 16kHz mono via OfflineAudioContext (stdlib browser)
+        const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+        const actxTmp = new (window.AudioContext || window.webkitAudioContext)();
+        const abuf = await actxTmp.decodeAudioData(buf.slice(0));
+        const dur = abuf.duration, sr = 16000, n = Math.min(Math.floor(dur * sr), sr * 30);
+        const off = new AC(1, Math.max(n, 1), sr);
+        const srcb = off.createBufferSource(); srcb.buffer = abuf; srcb.connect(off.destination); srcb.start();
+        const rendered = await off.startRendering();
+        const pcm = rendered.getChannelData(0).slice(0, n);
+        const out = new Int16Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) out[i] = Math.max(-32768, Math.min(32767, pcm[i] * 32768));
+        actxTmp.close().catch(() => {});
+        const t0 = performance.now();
+        const sid = (window.voiceMetrics && window.voiceMetrics.getSessionId && window.voiceMetrics.getSessionId()) || 'default';
+        const r = await fetch('/api/stt?lang=id', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Ana-Token': ANA_TOK }, body: out });
+        const j = await r.json().catch(() => ({}));
+        if (window.voiceMetrics) window.voiceMetrics.onSpeechEnd(true, j.confidence || 0);
+        const text = (j.text || '').trim();
+        if (text) { log('voice', 'VOICE', `server STT (${((performance.now() - t0) / 1000).toFixed(1)}s): "${text}"`); els.chatInput.value = ''; await transmit(text); }
+      } catch (e) { log('error', 'VOICE', 'server STT failed — retry'); }
+      if (convo) setTimeout(tick, 250);
+    };
+    rec.start();
+    setTimeout(() => { try { if (rec.state === 'recording') rec.stop(); } catch (_) {} }, 8000); // cap turn 8s
+  };
+  tick();
+}
 function micToggle() {
   if (convo) { stopConvo(); return; }
   if (SpeechRecognition) {
@@ -808,7 +864,9 @@ function micToggle() {
     startBrowserRecognition();
     startVadMonitor(); return;
   }
-  log('error', 'VOICE', 'no speech recognition available');
+  // Fallback: VAD + rekam turn -> POST /api/stt (server faster-whisper).
+  // Tanpa SpeechRecognition (Firefox dkk) voice tetap jalan, latensi +~0.5s.
+  startServerSttLoop();
 }
 function stopConvo() {
   convo = false; suppress = false;

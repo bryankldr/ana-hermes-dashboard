@@ -61,6 +61,7 @@ import terminal as ana_terminal  # noqa: E402
 import voice            # noqa: E402
 import sysmetrics       # noqa: E402
 import voice_metrics    # noqa: E402
+import voice_stt        # noqa: E402
 
 # SIMOGE business API -- the `simoge-business` skill in Hermes owns all SQL.
 # The server resolves its scripts dir lazily and calls the skill's own entry
@@ -1693,10 +1694,13 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
-        try:
-            raw = self._read(MAX_JSON_BODY)
-        except (TypeError, ValueError):
-            return self._json({"error": "request body too large"}, 413)
+        if p == "/api/stt":
+            raw = b""  # handler baca body biner sendiri (pre-read bikin stream habis)
+        else:
+            try:
+                raw = self._read(MAX_JSON_BODY)
+            except (TypeError, ValueError):
+                return self._json({"error": "request body too large"}, 413)
         # Parse once, for every JSON endpoint. Valid JSON that is not an object
         # (a bare string, number or list) used to reach `.get()` outside the
         # try below, so the handler thread died and the client saw a closed
@@ -1921,6 +1925,31 @@ class Handler(BaseHTTPRequestHandler):
             session_id = (body.get("session_id") or "default").strip()
             ok = voice_metrics.metrics.record_tts_first_chunk(session_id)
             return self._json({"ok": ok})
+
+        if p == "/api/stt":
+            # STT server-side: raw PCM16 mono 16kHz atau WAV di body.
+            # Query ?lang=id (default id). Kembalikan {text, language, ...}.
+            if not voice_stt.available():
+                return self._json({"error": "stt unavailable (faster-whisper missing)"}, 503)
+            ctype_stt = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
+            if ctype_stt not in {"audio/wav", "audio/x-wav", "application/octet-stream"}:
+                return self._json({"error": "audio/wav or application/octet-stream required"}, 415)
+            try:
+                audio = self._read(2 * 1024 * 1024)  # ~30s PCM16 16kHz mono
+            except (TypeError, ValueError):
+                return self._json({"error": "audio too large (max ~30s)"}, 413)
+            if not audio:
+                return self._json({"error": "empty audio"}, 400)
+            lang = (urlparse(self.path).query.split("lang=")[-1].split("&")[0] or "id")[:5] if "lang=" in urlparse(self.path).query else "id"
+            try:
+                t0 = time.time()
+                out = voice_stt.transcribe(audio, language=lang)
+                sid_stt = (body.get("session_id") or "default").strip() if isinstance(body, dict) else "default"
+                voice_metrics.metrics.ensure_session(sid_stt)
+                voice_metrics.metrics.record_stt(sid_stt, t0 * 1000, time.time() * 1000, out.get("confidence", 0), True)
+                return self._json(out)
+            except Exception as e:
+                return self._json({"error": str(e)[:200]}, 500)
 
         # ── terminal endpoints ──────────────────────────────
         if p == "/api/terminal":
@@ -2240,6 +2269,14 @@ class Handler(BaseHTTPRequestHandler):
                 # Only remember a session that actually COMPLETED. Storing it from
                 # `status` (which fires at init) means one broken run poisons every
                 # run after it with --resume <half-born session>.
+                if ev.get("t") == "usage":
+                    tok = ev.get("total_tokens") or ev.get("output_tokens") or 0
+                    try:
+                        tok = int(tok)
+                    except (TypeError, ValueError):
+                        tok = 0
+                    if tok:
+                        voice_metrics.metrics.record_llm_end(session_id, tok)
                 if ev.get("t") == "complete" and runtime.valid_session(sid):
                     _session_set(sid)
                     _session_bump_count()
