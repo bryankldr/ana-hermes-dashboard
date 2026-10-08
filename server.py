@@ -278,10 +278,13 @@ def _build_packet(template, params, result):
             act_kg = sum(float(r.get("actual_kg") or 0) for r in rows)
             tgt_kg = sum(float(r.get("target_kg") or 0) for r in rows)
             ach = (act_kg / tgt_kg * 100) if tgt_kg else 0
+            # ponytail: breakdown per wilayah (<=10 rows) untuk chart langsung tanpa rows penuh
+            breakdown = [{"kode": r.get("kode_wilayah"), "nama": r.get("nama_wilayah"), "n_petak": int(r.get("n_petak") or 0), "actual_ton": round(float(r.get("actual_kg") or 0)/1000,2), "target_ton": round(float(r.get("target_kg") or 0)/1000,2), "achievement_pct": round(float(r.get("achievement_pct") or 0),2)} for r in rows[:10]]
             packet["kpi"] = {
                 "actual_ton": round(act_kg / 1000, 2),
                 "target_ton": round(tgt_kg / 1000, 2),
                 "achievement_pct": round(ach, 2),
+                "breakdown": breakdown,
             }
             packet["evidence"] = [{
                 "statement": f"Produksi {packet['kpi']['actual_ton']:.2f} ton dari target {packet['kpi']['target_ton']:.2f} ton ({packet['kpi']['achievement_pct']:.2f}%)",
@@ -292,11 +295,13 @@ def _build_packet(template, params, result):
             tot_b = sum(int(r.get("jumlah_petak") or 0) for r in rows)
             tot_ha = sum(float(r.get("total_luas") or 0) for r in rows)
             top_wil = max(rows, key=lambda r: int(r.get("jumlah_petak") or 0)) if rows else {}
+            breakdown = [{"kode": r.get("kode_wilayah"), "nama": r.get("nama_wilayah"), "jumlah_petak": int(r.get("jumlah_petak") or 0), "total_luas": round(float(r.get("total_luas") or 0),2)} for r in rows[:10]]
             packet["kpi"] = {
                 "total_bongkor_petak": tot_b,
                 "total_bongkor_ha": round(tot_ha, 1),
                 "top_wilayah": str(top_wil.get("nama_wilayah") or top_wil.get("kode_bkph") or "-"),
                 "top_petak": int(top_wil.get("jumlah_petak") or 0),
+                "breakdown": breakdown,
             }
             packet["evidence"] = [{
                 "statement": f"{tot_b} petak bongkor, {tot_ha:.1f} ha, tersebar. Terbanyak: {packet['kpi']['top_wilayah']} ({packet['kpi']['top_petak']} petak)",
@@ -307,11 +312,13 @@ def _build_packet(template, params, result):
             gb = params.get("grup_by", "penyadap")
             total = sum(int(r.get("count") or 0) for r in rows)
             top = rows[0] if rows else {}
+            breakdown = [{"label": r.get("label"), "count": int(r.get("count") or 0)} for r in rows[:10]]
             packet["kpi"] = {
                 "total_aktivitas": total,
                 "grup_by": gb,
                 "top_label": str(top.get("label") or "-"),
                 "top_count": int(top.get("count") or 0),
+                "breakdown": breakdown,
             }
             packet["evidence"] = [{
                 "statement": f"Total {total} aktivitas per {gb}. Teratas: {packet['kpi']['top_label']} ({packet['kpi']['top_count']})",

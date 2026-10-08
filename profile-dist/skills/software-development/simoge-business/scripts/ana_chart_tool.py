@@ -376,32 +376,45 @@ def show_for_intent(intent, **kw):
 
 
 def show_for_intent_packet(pkt: dict, **kw):
-    """Render chart/KPI dari Business Data Packet (P1.4/P2.1).
+    """Render chart/KPI dari Business Data Packet — tanpa rows, plus auto-chart bila breakdown ada.
 
-    pkt = call_simoge_packet(template, params) -> {intent,kpi,evidence,period,scope}
-    Hemat token: tanpa rows, model jawab dari pkt['kpi']/pkt['evidence'] saja.
-    Mapping intent->visual via INTENT_MAP; KPI-only intent -> show_dashboard kpis.
-    Kw override title/meta bila perlu.
+    pkt = call_simoge_packet(template, params) -> {intent,kpi{breakdown},evidence,period,scope}
+    Hemat token: model jawab dari pkt['kpi']/evidence; chart auto dari breakdown bila tersedia.
+    Kw labels/datasets override auto; tanpa itu -> auto-chart (produksi/bongkor/aktivitas) atau KPI card.
     """
     if not isinstance(pkt, dict) or "kpi" not in pkt:
         return {"ok": False, "error": "pkt invalid: need {kpi, intent} from call_simoge_packet"}
     intent = str(pkt.get("intent") or kw.get("intent") or "").strip().lower()
     kpi = pkt.get("kpi") or {}
-    # route: KPI-only (region warna, etc) -> dashboard card tanpa chart
-    # threshold: jika kpi punya total_petak/luas dan intent petak_count -> bullet/pie tergantung kw
-    # generic: show_for_intent dengan kpi-derived labels/datasets bila caller belum supply
-    # Paling hemat: caller sudah tahu visual; kita forward ke show_for_intent bila labels/datasets ada di kw,
-    # kalau tidak, buat KPI card dari kpi/evidence.
     period = pkt.get("period") or {}
     scope = pkt.get("scope") or {}
-    title = kw.get("title") or f"{intent} {scope.get('text','')} {period.get('tahun','')}".strip()
+    title = kw.get("title") or f"{pkt.get('intent','')} {scope.get('text','')} {period.get('tahun','')}".strip()
     evidence = pkt.get("evidence") or []
-    # jika kw sudah punya labels/datasets -> chart path
+    bd = kpi.get("breakdown")
+    # kw labels/datasets eksplisit -> forward
     if kw.get("labels") or kw.get("datasets"):
-        return show_for_intent(intent, title=title, **kw)
-    # fallback KPI card (no chart) — hemat, tetap tampil
+        return show_for_intent(kw.get("intent") or intent, title=title, **{k: v for k, v in kw.items() if k not in ("intent",)})
+    # auto-chart dari breakdown bila ada
+    if isinstance(bd, list) and bd:
+        it = (pkt.get("intent") or "").strip()
+        if it == "produksi_per_wilayah":
+            labels = [b.get("nama") or str(b.get("kode") or "") for b in bd]
+            return show_spatial_chart(type="h_bar", title=title or "Produksi per wilayah",
+                                      labels=labels,
+                                      datasets=[{"label": "actual (ton)", "data": [b.get("actual_ton") or 0 for b in bd]}, {"label": "target (ton)", "data": [b.get("target_ton") or 0 for b in bd]}],
+                                      meta={"intent": intent, "packet": True, **(kw.get("meta") or {})})
+        if it == "bongkor_per_wilayah":
+            labels = [b.get("nama") or str(b.get("kode") or "") for b in bd]
+            return show_spatial_chart(type="h_bar", title=title or "Bongkor per wilayah",
+                                      labels=labels, datasets=[{"label": "petak bongkor", "data": [b.get("jumlah_petak") or 0 for b in bd]}],
+                                      meta={"intent": intent, "packet": True, **(kw.get("meta") or {})})
+        if it == "aktivitas_agregat":
+            labels = [b.get("label") or "" for b in bd]
+            return show_spatial_chart(type="h_bar", title=title or f"Aktivitas per {kpi.get('grup_by','')}",
+                                      labels=labels, datasets=[{"label": "count", "data": [b.get("count") or 0 for b in bd]}],
+                                      meta={"intent": intent, "packet": True, **(kw.get("meta") or {})})
+    # fallback KPI card
     narration = kw.get("narration") or (evidence[0].get("statement") if evidence else str(kpi)[:300])
-    # pick primary value: total_petak / actual_ton / rows / first numeric
     _val = kpi.get("total_petak")
     if _val is None: _val = kpi.get("actual_ton")
     if _val is None: _val = kpi.get("rows")
@@ -410,7 +423,7 @@ def show_for_intent_packet(pkt: dict, **kw):
             if _kk in kpi and isinstance(kpi[_kk], (int,float)):
                 _val = kpi[_kk]; break
     if _val is None: _val = len(kpi) if kpi else "-"
-    return show_dashboard(title=title, kpis=[{"label": intent, "value": str(_val), "unit": "", "detail": narration[:300]}],
+    return show_dashboard(title=title, kpis=[{"label": intent or pkt.get("intent",""), "value": str(_val), "unit": "", "detail": narration[:300]}],
                           narration=narration, evidence=evidence, meta={"intent": intent, "packet": True, **(kw.get("meta") or {})})
 
 def _bullet(actual, target, title, unit="ton", meta=None):
