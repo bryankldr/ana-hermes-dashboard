@@ -168,17 +168,25 @@ def set_chart(payload: dict):
     if charts_in is None:
         if explicit:
             return _hide(meta)
-        return True, None                      # tak ada opinion sama sekali
-    if isinstance(charts_in, dict):
+        has_content = bool(payload.get("kpis") or payload.get("title") or payload.get("narration") or payload.get("evidence"))
+        if not has_content:
+            return True, None                      # tak ada opinion sama sekali
+        norm = []  # ponytail: KPI-only — upgrade to chart+KPI when template adds breakdown
+    elif isinstance(charts_in, dict):
         charts_in = [charts_in]
-    if charts_in == []:
-        return True, None          # daftar kosong = "tak ada chart baru", bukan hide
-    if not isinstance(charts_in, list):
+        if not isinstance(charts_in, list):
+            return False, "charts harus list"
+        norm = [c for c in (_norm_chart(c) for c in charts_in[:MAX_CHARTS]) if c]
+        if not norm:
+            return False, "datasets kosong"
+    elif charts_in == []:
+        norm = []  # explicit empty = KPI-only
+    elif not isinstance(charts_in, list):
         return False, "charts harus list"
-
-    norm = [c for c in (_norm_chart(c) for c in charts_in[:MAX_CHARTS]) if c]
-    if not norm:
-        return False, "datasets kosong"
+    else:
+        norm = [c for c in (_norm_chart(c) for c in charts_in[:MAX_CHARTS]) if c]
+        if not norm:
+            return False, "datasets kosong"
 
     kpis = [k for k in (_norm_kpi(x) for x in (payload.get("kpis") or [])[:MAX_KPIS]) if k]
     evidence = []
@@ -199,7 +207,7 @@ def set_chart(payload: dict):
             title=str(payload.get("title") or "")[:120],
             kpis=kpis,
             charts=norm,
-            chart=norm[0],                      # alias: frontend/poll lama tak pecah
+            chart=(norm[0] if norm else None),  # KPI-only: no chart
             narration=str(payload.get("narration") or "")[:1200],
             evidence=evidence,
             meta=dict(meta or {}),

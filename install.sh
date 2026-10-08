@@ -1,41 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 cd "$(dirname "$0")"
-
-if ! command -v python3 >/dev/null 2>&1; then
-  printf 'Python 3 is required but was not found.\n' >&2
-  exit 1
+# one-click: hermes >=0.21.5, profil anna, deps python, .env
+need="0.21.5"
+if command -v hermes >/dev/null 2>&1; then
+  ver=$(hermes --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  if [ -n "$ver" ] && [ "$(printf '%s\n%s' "$need" "$ver" | sort -V | head -1)" != "$need" ]; then
+    echo "ANA: hermes $ver < $need, update dulu" >&2; exit 1
+  fi
+else
+  echo "ANA: hermes tak ketemu. pasang: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" >&2; exit 1
 fi
-
-if [ ! -f .env ]; then
-  cp .env.example .env
-  printf 'Created private .env from .env.example.\n'
+if [ ! -f .env ]; then cp .env.example .env; echo "ANA: .env dibuat dari example, isi SIMOGE_DB_PASSWORD dulu bila kosong"; fi
+# deps python (interpreter hermes dulu, fallback python3)
+PY=$(echo ~/.hermes/tools/python-*/bin/python3 | head -1); [ -x "$PY" ] || PY=python3
+"$PY" -c "import websockets, edge_tts, pymysql, pandas" 2>/dev/null || "$PY" -m pip install --user websockets edge_tts pymysql pandas
+# profil anna dari profile-dist (user data aman, owned ditimpa)
+if ! hermes profile list 2>/dev/null | grep -qE '^anna([[:space:]]|$)'; then
+  hermes profile install ./profile-dist -y || hermes profile install "$PWD/profile-dist" -y
+else
+  echo "ANA: profil anna ada, lewati install (pakai: hermes profile update anna bila perlu)"
 fi
-
-# Read only the HERMES_CMD setting needed for this prerequisite check. The
-# Python server loads the rest of .env itself; this script never evaluates it.
-configured_hermes="${HERMES_CMD:-}"
-if [ -z "$configured_hermes" ]; then
-  while IFS='=' read -r key value; do
-    if [ "${key#\#}" = "$key" ] && [ "$key" = "HERMES_CMD" ]; then
-      configured_hermes="${value%\"}"; configured_hermes="${configured_hermes#\"}"
-      configured_hermes="${configured_hermes%\'}"; configured_hermes="${configured_hermes#\'}"
-      break
-    fi
-  done < .env
-fi
-
-if ! command -v hermes >/dev/null 2>&1 && [ -z "$configured_hermes" ]; then
-  cat >&2 <<'EOF'
-Hermes Agent is required but was not found.
-Install it from https://hermes-agent.nousresearch.com/docs/ or set HERMES_CMD in .env.
-EOF
-  exit 1
-fi
-
 chmod +x start.sh install.sh
-
-printf '\nANA is ready. Launching with the configured Hermes profile.\n'
-printf "Dashboard: http://127.0.0.1:${ANA_PORT:-8730}\n\n"
+echo "ANA: siap. jalan: ./start.sh (port ${ANA_PORT:-8730})"
 exec ./start.sh

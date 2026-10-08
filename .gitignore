@@ -24,3 +24,7 @@ logs/
 tiles/
 ui/data/*.pmtiles
 ui/data/*.ndjson
+.env.bak.anna
+*.code-workspace
+real-arsitektur/
+real_arsitektur.md

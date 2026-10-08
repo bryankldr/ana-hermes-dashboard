@@ -1,0 +1,30 @@
+name: anna
+version: 0.1.0
+description: ANNA BI operator profile for ana-hermes-dashboard (simoge-business + hud)
+hermes_requires: ">=0.21.5"
+author: bryankldr
+license: MIT
+env_requires:
+  - name: SIMOGE_DB_HOST
+    description: SIMOGE MySQL host
+    required: false
+    default: 127.0.0.1
+  - name: SIMOGE_DB_PORT
+    description: SIMOGE MySQL port
+    required: false
+    default: "3306"
+  - name: SIMOGE_DB_USER
+    description: SIMOGE MySQL user
+    required: false
+    default: root
+  - name: SIMOGE_DB_PASSWORD
+    description: SIMOGE MySQL password
+    required: true
+    default: ""
+  - name: SIMOGE_DB_NAME
+    description: SIMOGE MySQL database
+    required: false
+    default: kph_bwb_sandbox2
+distribution_owned:
+  - SOUL.md
+  - skills

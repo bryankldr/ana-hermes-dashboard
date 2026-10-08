@@ -1,0 +1,23 @@
+# Ruff config untuk skrip skill simoge-business.
+# Konsumen: ruff CLI dan ekstensi VS Code (settings ini di search ke atas
+# dari file skrip, jadi profil per-skill).
+#
+# Codes di bawah sengaja di-ignore atau di-nonaktifkan:
+#
+# DTZ011 date.today()  — CURRENT_YEAR memang default kalender lokal.
+#                        Memakai datetime.now(timezone.utc) justru salah
+#                        untuk "tahun RTT" yang mengikuti zona operasional.
+# C408  dict()          — DB = dict(host=..., port=...) lebih enak dibaca
+#                        daripada dict literal 6 baris.
+# S110 / BLE001  try-except-pass di koersi parameter kw — disengaja:
+#        kw berasal dari JSON skill, jadi nilai Flexible bisa apa saja;
+#        gagal parse = pakai default, bukan error ke user. Logging tidak
+#        dilakukan karena path ini dipanggil tiap menit oleh polling panel.
+
+[lint]
+ignore = [
+    "DTZ011",
+    "C408",
+    "S110",
+    "BLE001",
+]

@@ -1048,6 +1048,7 @@ function handle(ev) {
       else renderAnswer(true);
       progressDone(false);
       break;
+    case 'mode': if (ev.mode) { applyMode(ev.mode); log('note','MODE', `mode → ${ev.mode}${ev.auto?' (auto-restore)':''}`);} break;
     case 'note': log('note', 'NOTE', ev.message || ''); break;
     // thinking: kawaii spinner prose and provider wait notices. Never part of
     // `answer` — it goes to the progress trace and the core label only, so
@@ -1555,6 +1556,8 @@ async function init() {
       loadStatus();
       log('status', 'BOOT', `gateway online · ${s.runtime} core · profile=${s.profile || 'default'} · permission=${s.permission}`);
       try { const mj = await fetch('/api/mode', { headers: api.headers() }).then(r => r.json()); if (mj.mode) applyMode(mj.mode); } catch (_) {}
+  // poll mode every 3s so ana_mode_tool.set_mode() reflects even mid-run
+  setInterval(async()=>{ try{ const r=await fetch('/api/mode',{headers:api.headers()}); const j=await r.json(); if(j.mode && j.mode!==state.mode) applyMode(j.mode);}catch(_){} }, 3000);
       log('voice', 'VOICE', `channel ready — ${s.stt || 'browser'} / ${s.tts || 'browser'}`);
     } catch (e) { log('error', 'STATUS', 'server unreachable'); }
   })();

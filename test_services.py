@@ -72,7 +72,7 @@ os.environ["OBSIDIAN_VAULT_PATH"] = ""
 check("unset vault -> empty briefing", services.load_briefing()["briefing"], "")
 check("unset vault -> reason", services.load_briefing()["source"],
       "OBSIDIAN_VAULT_PATH not set")
-os.environ["OBSIDIAN_VAULT_PATH"] = "/home/bryankldr/anna_brain/Anna's brain"
+os.environ.setdefault("OBSIDIAN_VAULT_PATH", os.path.expanduser("~/anna_brain/Anna's brain"))
 
 # ── vault_status ────────────────────────────────────────────
 print("vault_status")

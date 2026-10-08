@@ -64,6 +64,17 @@ _CURRENT_SESSION_ID: Optional[str] = None
 _SESSION_CREATED_EVENT = threading.Event()
 
 
+def reset_session():
+    """Drop cached gateway session so next run creates a fresh one.
+
+    Root cause P0-A: server._clear_session() only clears SESSION id/meta,
+    but _CURRENT_SESSION_ID persists -> fresh:true reuse old session.
+    No gateway close needed; next run create_session() fresh.
+    """
+    global _CURRENT_SESSION_ID
+    _CURRENT_SESSION_ID = None
+
+
 def _get_gateway() -> HermesGatewayClient:
     """Get or create the singleton gateway client."""
     global _GATEWAY_CLIENT, _GATEWAY_THREAD, _GATEWAY_LOOP, _GATEWAY_CONNECTED, _GATEWAY_CONNECT_ERROR

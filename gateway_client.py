@@ -11,6 +11,7 @@ Contract: tui_gateway/contracts/registry.py (all methods/events declared)
 
 import asyncio
 import json
+import os
 import uuid
 import logging
 from typing import Any, Callable, Awaitable, Optional, Dict, List
@@ -132,13 +133,16 @@ class HermesGatewayClient:
     def __init__(
         self,
         gateway_url: str = "ws://localhost:37521/api/ws",
-        unix_socket_path: str = "/home/bryankldr/.hermes/gateway.sock",
+        unix_socket_path: str | None = None,
         profile: str = "anna",
         auth_token: str | None = None,
         on_event: Optional[Callable[[str, dict], Any]] = None,
         on_session_change: Optional[Callable[[GatewaySession], Any]] = None,
     ):
         self.gateway_url = gateway_url
+        if unix_socket_path is None:
+            _home = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
+            unix_socket_path = os.path.join(_home, "gateway.sock")
         self.unix_socket_path = unix_socket_path
         self.profile = profile
         self.auth_token = auth_token

@@ -21,6 +21,7 @@ import time
 import traceback
 import webbrowser
 import socket
+import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -41,7 +42,13 @@ if _env.exists():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, _, v = line.partition("=")
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            # ponytail: WIKI_PATH/ANA_JOURNAL_PATH must follow .env (hermes snap exports stale ana_journal path)
+            if k in ("WIKI_PATH", "ANA_JOURNAL_PATH", "OBSIDIAN_VAULT_PATH", "HERMES_PROFILE", "ANA_PROFILE", "ANA_SIMOGE_SCRIPTS", "HERMES_HOME"):
+                os.environ[k] = v
+            else:
+                os.environ.setdefault(k, v)
 
 import commands         # noqa: E402
 import runtime_gateway as runtime         # noqa: E402
@@ -57,8 +64,20 @@ import sysmetrics       # noqa: E402
 # SIMOGE business API -- the `simoge-business` skill in Hermes owns all SQL.
 # The server resolves its scripts dir lazily and calls the skill's own entry
 # points; it holds no queries of its own. No sys.path mutation at import time.
-_SIMOGE_SCRIPTS = os.path.join(
-    os.path.expanduser("~/.hermes/profiles/anna/skills/software-development/simoge-business/scripts")
+# Portable: HERMES_HOME/HERMES_PROFILE win, ANA_SIMOGE_SCRIPTS overrides all.
+_HERMES_HOME_DIR = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
+_SIMOGE_PROFILE = (
+    os.environ.get("HERMES_PROFILE", os.environ.get("ANA_PROFILE", "anna")).strip()
+    or "anna"
+)
+_SIMOGE_SCRIPTS = os.environ.get(
+    "ANA_SIMOGE_SCRIPTS",
+    os.path.join(
+        _HERMES_HOME_DIR,
+        "profiles",
+        _SIMOGE_PROFILE,
+        "skills/software-development/simoge-business/scripts",
+    ),
 )
 
 
@@ -161,6 +180,251 @@ def _simoge_query(template, params):
     call_simoge_tool = _simoge_mod("ana_simoge_tool").call_simoge_tool
     result = call_simoge_tool(template, params)
     return json.loads(json.dumps(result, default=_coerce))
+
+
+# == P1 Business Context Packet ==============================================
+# Transform DB rows -> {intent, period, scope, kpi, evidence} for Anna.
+# Model receives packet; raw rows only included when explicitly requested.
+
+def _get_wilayah_consts():
+    """Get wilayah constants from simoge_db module."""
+    try:
+        mod = _simoge_mod("simoge_db")
+        return mod._WILAYAH_COLS, mod._WILAYAH_NAMES
+    except Exception:
+        # Fallback constants
+        cols = ("kode_divre", "kode_kph", "kode_bkph", "kode_rph", "kode_tpg")
+        names = {"kode_divre": "divre", "kode_kph": "kph", "kode_bkph": "bkph",
+                 "kode_rph": "rph", "kode_tpg": "nama_tpg"}
+        return cols, names
+
+
+_WILAYAH_COLS, _WILAYAH_NAMES = _get_wilayah_consts()
+
+
+def _build_packet(template, params, result):
+    """Build Business Context Packet from template result."""
+    rows = result.get("rows") or []
+    row_count = result.get("row_count", len(rows))
+    explanation = result.get("explanation") or ""
+    
+    # Extract period/scope from params
+    tahun = params.get("tahun", datetime.date.today().year)
+    bulan = params.get("bulan", datetime.date.today().month)
+    periode = params.get("periode", 0)
+    level = params.get("level", "kode_bkph")
+    
+    # Scope label
+    scope_label = _WILAYAH_NAMES.get(level, level)
+    kode_wilayah = params.get(level) if level in _WILAYAH_COLS else None
+    
+    # Period text
+    per_txt = "bulan penuh" if int(periode) == 0 else f"P{int(periode)}"
+    bln_nama = ["Januari","Februari","Maret","April","Mei","Juni",
+                "Juli","Agustus","September","Oktober","November","Desember"]
+    scope_str = f"{scope_label} {bln_nama[bulan-1]} {tahun} - {per_txt}"
+    if kode_wilayah:
+        scope_str = f"{kode_wilayah} {scope_str}"
+    
+    # Map template -> intent + kpi extractor
+    packet = {
+        "intent": template,
+        "period": {"tahun": int(tahun), "bulan": int(bulan), "periode": int(periode)},
+        "scope": {"level": level, "label": scope_label, "kode": kode_wilayah, "text": scope_str},
+        "kpi": {},
+        "evidence": [],
+        "row_count": row_count,
+    }
+    
+    if not rows:
+        packet["evidence"] = [{"statement": f"Tidak ada data untuk {scope_str}",
+                               "source": template, "value": None}]
+        return packet
+    
+    # Template-specific KPI aggregation (no raw rows to model)
+    try:
+        if template == "petak_count":
+            r = rows[0]
+            packet["kpi"] = {
+                "total_petak": int(r.get("jumlah_petak", 0)),
+                "total_luas_baku_ha": float(r.get("total_luas_baku", 0) or 0),
+            }
+            packet["evidence"] = [{
+                "statement": f"{packet['kpi']['total_petak']} petak, luas {packet['kpi']['total_luas_baku_ha']:.2f} ha",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "petak_area":
+            r = rows[0]
+            packet["kpi"] = {
+                "luas_baku_total_ha": float(r.get("luas_baku_total", 0) or 0),
+                "luas_andil_total_ha": float(r.get("luas_andil_total", 0) or 0),
+                "rasio_andil_pct": float(r.get("rasio_andil_pct", 0) or 0),
+            }
+            packet["evidence"] = [{
+                "statement": f"Luas baku {packet['kpi']['luas_baku_total_ha']:.2f} ha, andil {packet['kpi']['luas_andil_total_ha']:.2f} ha ({packet['kpi']['rasio_andil_pct']:.1f}%)",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "status_petak_per_wilayah":
+            tot = {k: sum(float(r.get(k) or 0) for r in rows) for k in ("total_petak","aktif","idle","bongkor","luas_bongkor")}
+            packet["kpi"] = {k: int(v) if k != "luas_bongkor" else float(v) for k,v in tot.items()}
+            packet["evidence"] = [{
+                "statement": f"PETAK {tot['total_petak']} · AKTIF {tot['aktif']} · IDLE {tot['idle']} · BONGKOR {tot['bongkor']} ({tot['luas_bongkor']:.1f} ha)",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "produksi_per_wilayah":
+            act_kg = sum(float(r.get("actual_kg") or 0) for r in rows)
+            tgt_kg = sum(float(r.get("target_kg") or 0) for r in rows)
+            ach = (act_kg / tgt_kg * 100) if tgt_kg else 0
+            packet["kpi"] = {
+                "actual_ton": round(act_kg / 1000, 2),
+                "target_ton": round(tgt_kg / 1000, 2),
+                "achievement_pct": round(ach, 2),
+            }
+            packet["evidence"] = [{
+                "statement": f"Produksi {packet['kpi']['actual_ton']:.2f} ton dari target {packet['kpi']['target_ton']:.2f} ton ({packet['kpi']['achievement_pct']:.2f}%)",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "bongkor_per_wilayah":
+            tot_b = sum(int(r.get("jumlah_petak") or 0) for r in rows)
+            tot_ha = sum(float(r.get("total_luas") or 0) for r in rows)
+            top_wil = max(rows, key=lambda r: int(r.get("jumlah_petak") or 0)) if rows else {}
+            packet["kpi"] = {
+                "total_bongkor_petak": tot_b,
+                "total_bongkor_ha": round(tot_ha, 1),
+                "top_wilayah": str(top_wil.get("nama_wilayah") or top_wil.get("kode_bkph") or "-"),
+                "top_petak": int(top_wil.get("jumlah_petak") or 0),
+            }
+            packet["evidence"] = [{
+                "statement": f"{tot_b} petak bongkor, {tot_ha:.1f} ha, tersebar. Terbanyak: {packet['kpi']['top_wilayah']} ({packet['kpi']['top_petak']} petak)",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "aktivitas_agregat":
+            gb = params.get("grup_by", "penyadap")
+            total = sum(int(r.get("count") or 0) for r in rows)
+            top = rows[0] if rows else {}
+            packet["kpi"] = {
+                "total_aktivitas": total,
+                "grup_by": gb,
+                "top_label": str(top.get("label") or "-"),
+                "top_count": int(top.get("count") or 0),
+            }
+            packet["evidence"] = [{
+                "statement": f"Total {total} aktivitas per {gb}. Teratas: {packet['kpi']['top_label']} ({packet['kpi']['top_count']})",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "aktivitas_top_petak":
+            top = rows[0] if rows else {}
+            packet["kpi"] = {
+                "n_petak": len(rows),
+                "total_aktivitas": sum(int(r.get("jumlah_aktivitas") or 0) for r in rows),
+                "top_nomor_petak": str(top.get("nomor_petak") or "-"),
+                "top_aktivitas": int(top.get("jumlah_aktivitas") or 0),
+            }
+            packet["evidence"] = [{
+                "statement": f"Paling aktif: petak {packet['kpi']['top_nomor_petak']} ({packet['kpi']['top_aktivitas']} aktivitas)",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "petak_effectiveness":
+            cats = {}
+            for r in rows:
+                k = r.get("kategori", "unknown")
+                cats[k] = cats.get(k, 0) + 1
+            packet["kpi"] = {"kategori": cats, "total": row_count}
+            packet["evidence"] = [{
+                "statement": f"Efektivitas {row_count} petak: " + ", ".join(f"{k}={v}" for k,v in sorted(cats.items())),
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "petak_bongkor":
+            luas = sum(float(r.get("luas_baku") or 0) for r in rows)
+            packet["kpi"] = {"total_bongkor_petak": row_count, "total_luas_ha": round(luas, 1)}
+            packet["evidence"] = [{
+                "statement": f"{row_count} petak bongkor, luas total {luas:.1f} ha",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "idle_petak":
+            stats = {}
+            for r in rows:
+                s = r.get("status", "unknown")
+                stats[s] = stats.get(s, 0) + 1
+            packet["kpi"] = {"status": stats, "total": row_count}
+            packet["evidence"] = [{
+                "statement": f"{row_count} petak idle: " + ", ".join(f"{k}={v}" for k,v in sorted(stats.items())),
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "petak_by_kph":
+            packet["kpi"] = {"wilayah": [{"kode": r.get("kode"), "nama": r.get("nama_wilayah"), "petak": int(r.get("jumlah_petak") or 0), "luas": float(r.get("luas_baku") or 0)} for r in rows[:10]]}
+            packet["evidence"] = [{
+                "statement": f"Top 10 wilayah: " + "; ".join(f"{w['nama'] or w['kode']}: {w['petak']} petak" for w in packet["kpi"]["wilayah"]),
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "rkap_achievement":
+            cats = {}
+            for r in rows:
+                w = r.get("warna", "unknown")
+                cats[w] = cats.get(w, 0) + 1
+            packet["kpi"] = {"warna": cats, "total": row_count}
+            packet["evidence"] = [{
+                "statement": f"RKAP achievement {row_count} petak: " + ", ".join(f"{k}={v}" for k,v in sorted(cats.items())),
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "penyadap_productivity":
+            packet["kpi"] = {"n_penyadap": row_count}
+            packet["evidence"] = [{
+                "statement": f"{row_count} penyadap tercatat",
+                "source": template, "value": scope_str
+            }]
+        
+        elif template == "drum_flow":
+            stats = {}
+            for r in rows:
+                stats[r.get("status_drum", "?")] = int(r.get("jumlah_drum") or 0)
+            packet["kpi"] = {"status_drum": stats}
+            packet["evidence"] = [{
+                "statement": "Drum flow: " + ", ".join(f"{k}={v}" for k,v in stats.items()),
+                "source": template, "value": scope_str
+            }]
+        
+        else:
+            # Generic fallback
+            packet["kpi"] = {"rows": row_count}
+            packet["evidence"] = [{"statement": explanation or f"Query {template} returned {row_count} rows",
+                                   "source": template, "value": scope_str}]
+    
+    except Exception as e:
+        packet["kpi"] = {"error": str(e)[:100], "rows": row_count}
+        packet["evidence"] = [{"statement": f"Packet build error: {e}", "source": template}]
+    
+    return packet
+
+
+def _simoge_query_packet(template, params):
+    """Wrapper: query + build packet (no raw rows to model unless requested)."""
+    result = _simoge_query(template, params)
+    packet = _build_packet(template, params, result)
+    # Optionally include rows for debug: params.get("include_rows") == True
+    if params.get("include_rows"):
+        packet["rows"] = result.get("rows") or []
+    packet["explanation"] = result.get("explanation") or ""
+    packet["elapsed_ms"] = result.get("elapsed_ms")
+    return packet
+
+
+def _simoge_analyze(template, params, operations, max_result_rows=20):
+    """Pandas analytical — 1 call batch SQL->pandas->small result (hemat dynamic tokens)."""
+    mod = _simoge_mod("ana_pandas_tool")
+    return mod.call_pandas_tool(template=template, params=params, operations=operations, max_result_rows=max_result_rows)
 
 
 def _simoge_features(result):
@@ -459,12 +723,17 @@ _PERSONA_CACHE: dict = {"key": None, "base": ""}
 # WIKI_PATH dari .env profil anna. Cache by mtime+size; hilang/rusak =
 # degradasi ke string kosong (SOUL + persona tetap jalan, wiki pasif).
 _WIKI_CACHE: dict = {"key": None, "text": ""}
-_WIKI_MAX_INDEX = 6000  # index.md ~7KB: cukup untuk katalog + ringkasan
+_WIKI_MAX_INDEX = 1700  # ponytail: 6000→1700 tiered T1 header+18 entities clean-cut, full 104 via describe() on-demand; add when query butuh concept detail
 _WIKI_MAX_ALIAS = 2000  # alias-wilayah.md ~1.6KB: wajib full (licin/glenmore/jatim)
 
 
 def _wiki_path():
     p = (os.environ.get("WIKI_PATH") or "").strip()
+    return pathlib.Path(p) if p else None
+
+
+def _journal_path():
+    p = (os.environ.get("ANA_JOURNAL_PATH") or "").strip()
     return pathlib.Path(p) if p else None
 
 
@@ -482,25 +751,91 @@ def wiki_block():
             key = (st.st_mtime_ns, st.st_size, None, None)
     except OSError:
         return ""
-    if _WIKI_CACHE["key"] == key:
+    # journal daily mtime into cache key so 10 Daily edits invalidate
+    _j_daily_key = None
+    try:
+        _jb = _journal_path()
+        if _jb is not None:
+            import datetime as _dt
+            _jf = _jb / "10 Daily" / f"{_dt.date.today().isoformat()}.md"
+            _stj = _jf.stat()
+            _j_daily_key = (_stj.st_mtime_ns, _stj.st_size)
+    except OSError:
+        _j_daily_key = None
+    _full_key = (key, _j_daily_key)
+    if _WIKI_CACHE["key"] == _full_key:
         return _WIKI_CACHE["text"]
     try:
-        idx = idx_f.read_text(encoding="utf-8", errors="replace")[:_WIKI_MAX_INDEX]
+        raw = idx_f.read_text(encoding="utf-8", errors="replace")
+        if len(raw) > _WIKI_MAX_INDEX:
+            cut = raw[:_WIKI_MAX_INDEX]
+            nl = cut.rfind("\n")
+            idx = cut[:nl] if nl > 800 else cut  # ponytail: clean line-cut, need header intact
+        else:
+            idx = raw
     except OSError:
         return ""
     try:
         alias = alias_f.read_text(encoding="utf-8", errors="replace")[:_WIKI_MAX_ALIAS]
     except OSError:
         alias = ""
-    parts = ["## ANNA Knowledge Wiki (kompas semantik — bukan sumber angka)",
-             idx.strip()]
+    # Second brain: ana_journal daily context — OSError on index.md must still try daily
+    journal_extra = ""
+    jbase = _journal_path()
+    j_daily_key = None
+    if jbase is not None:
+        jidx = ""
+        jidx_ok = False
+        # try jbase/index.md then jbase/ANNA-KNOWLEDGE/index.md (vault root varies)
+        for cand in [jbase / "index.md", jbase / "ANNA-KNOWLEDGE" / "index.md"]:
+            try:
+                jidx = cand.read_text(encoding="utf-8", errors="replace")[:2000]
+                jidx_ok = True
+                break
+            except OSError:
+                continue
+        if jidx_ok and jidx.strip() and "Total pages: 0" not in jidx:
+            journal_extra = jidx.strip()
+        else:
+            # fallback: today's daily note (also used when index.md missing)
+            import datetime
+            today = datetime.date.today().isoformat()
+            jf = jbase / "10 Daily" / f"{today}.md"
+            try:
+                journal_extra = jf.read_text(encoding="utf-8", errors="replace")[:2000].strip()
+                try:
+                    stj = jf.stat()
+                    j_daily_key = (stj.st_mtime_ns, stj.st_size)
+                except OSError:
+                    j_daily_key = None
+            except OSError:
+                journal_extra = ""
+    # T1 hemat: journal 2000c -> 400c Fokus+MIT, skip index kosong
+    if journal_extra:
+        _lines = []
+        for _l in journal_extra.splitlines():
+            _s = _l.strip()
+            if "Fokus Hari Ini" in _l or _s.startswith("- [ ]") or _s.startswith("- [x]") or _s.startswith(">"):
+                _lines.append(_l)
+            elif _l.startswith("# ") and "\u2014" in _l:
+                _lines.append(_l)
+        _c = "\n".join(_lines).strip()[:400]
+        journal_extra = _c if _c else journal_extra[:400].strip()
+    _idx_text = idx.strip()
+    if "Total pages: 0" in _idx_text:
+        _idx_text = ""
+    parts = ["## ANNA Knowledge Wiki (kompas semantik — bukan sumber angka)"]
+    if _idx_text:
+        parts.append(_idx_text)
     if alias.strip():
         parts.append("## Alias wilayah (verbatim, filter resmi)\n" + alias.strip())
+    if journal_extra:
+        parts.append("## Journal (second brain — daily context)\n" + journal_extra)
     parts.append("Aturan pakai wiki: semantik/ontology/alias dari sini; "
                  "angka/fakta selalu dari Business Data Engine. "
                  "Tak ada SQL langsung — larangan tetap.")
     text = "\n\n".join(parts)
-    _WIKI_CACHE.update(key=key, text=text)
+    _WIKI_CACHE.update(key=_full_key, text=text)
     return text
 
 
@@ -597,6 +932,13 @@ def _clear_session():
         SESSION["id"] = None
         SESSION["meta"] = None
     _session_save()
+    # P0-A: SESSION id/meta cleared but gateway cached _CURRENT_SESSION_ID
+    # persisted -> fresh:true reuse old session. Reset both layers here so
+    # every caller (fresh, /api/new, /new, TTL, error) gets true isolation.
+    try:
+        runtime.reset_session()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _session_get():
@@ -1371,6 +1713,43 @@ class Handler(BaseHTTPRequestHandler):
                     traceback.print_exc()
                 return self._json({"error": str(e)[:300]}, 500)
 
+        if p == "/api/simoge/packet":
+            template = (body.get("template") or "").strip()
+            if not template:
+                return self._json({"error": "template required"}, 400)
+            params = body.get("params", {})
+            if not isinstance(params, dict):
+                return self._json({"error": "params must be object"}, 400)
+            try:
+                return self._json(_simoge_query_packet(template, params))
+            except Exception as e:
+                _dlog(f"simoge/packet {template} ERROR {type(e).__name__}: {str(e)[:160]}")
+                if _DEBUG_MAP:
+                    traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/simoge/analyze":
+            template = (body.get("template") or "").strip()
+            if not template:
+                return self._json({"error": "template required"}, 400)
+            params = body.get("params", {})
+            if not isinstance(params, dict):
+                return self._json({"error": "params must be object"}, 400)
+            operations = body.get("operations") or body.get("ops") or []
+            if not isinstance(operations, list):
+                return self._json({"error": "operations must be list"}, 400)
+            try:
+                mrr = int(body.get("max_result_rows", 20))
+            except Exception:
+                mrr = 20
+            try:
+                return self._json(_simoge_analyze(template, params, operations, max_result_rows=mrr))
+            except Exception as e:
+                _dlog(f"simoge/analyze {template} ERROR {type(e).__name__}: {str(e)[:160]}")
+                if _DEBUG_MAP:
+                    traceback.print_exc()
+                return self._json({"error": str(e)[:400]}, 500)
+
         if p == "/api/simoge/show_on_map":
             template = (body.get("template") or "petak_with_geometry").strip()
             params = body.get("params", {})
@@ -1691,11 +2070,28 @@ class Handler(BaseHTTPRequestHandler):
         message = (payload.get("message") or "").strip()
         extra = (payload.get("system") or "").strip()
         system = "\n\n".join(x for x in (persona(), extra) if x) or None
+        # P0-B: ukur budget konteks per /api/run (static vs dynamic, chars).
+        # ponytail: history/schema gateway-side belum terukur di sini; upgrade
+        # lanjut = gateway usage + retriever counts saat P1.
+        try:
+            _b_base = _PERSONA_CACHE.get("base") or ""
+            _b_wiki = wiki_block()
+            _b_ctx = commands.context_block()
+            _b_mode = get_mode()
+            _b_overlay = ("[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS."
+                          if _b_mode == "asisten" else
+                          "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real.")
+            _budget_init = dict(t="budget", persona=len(_b_base), overlay=len(_b_overlay),
+                                wiki=len(_b_wiki), context=len(_b_ctx), extra=len(extra),
+                                message=len(message), system=len(system or ""))
+        except Exception:  # noqa: BLE001
+            _budget_init = None
         fresh = bool(payload.get("fresh"))
         if not message:
             return self._json({"error": "empty message"}, 400)
         if fresh:
             _clear_session()
+        _run_initial_mode = get_mode()  # snapshot for auto-restore: asisten→coding→asisten
 
         # -- natural language mode switch ("ganti ke mode asisten/coding", "ubah mode", etc.)
         _low = message.strip().lower()
@@ -1733,6 +2129,16 @@ class Handler(BaseHTTPRequestHandler):
         def emit(ev):
             self.wfile.write((json.dumps(ev) + "\n").encode())
             self.wfile.flush()
+        if _budget_init is not None:
+            emit(_budget_init)
+            try:
+                _log_to_file(
+                    f"[budget] persona={_budget_init['persona']} overlay={_budget_init['overlay']} "
+                    f"wiki={_budget_init['wiki']} context={_budget_init['context']} "
+                    f"extra={_budget_init['extra']} message={_budget_init['message']} "
+                    f"system={_budget_init['system']}")
+            except Exception:  # noqa: BLE001
+                pass
         # -- the command matrix: /new /profile /goal /personality /kanban /mission /background /tools /status /browser
         cmd = commands.handle(
             message,
@@ -1777,6 +2183,23 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 emit(dict(t="error", message=str(e)[:300]))
             except OSError:
+                pass
+        finally:
+            # Auto-restore: if ANNA escalated to coding for this run, return to asisten.
+            # Aman: default HUD adalah asisten (TTS ringkas). ANNA yang butuh coding
+            # wajib panggil ana_mode_tool.set_mode('coding') sebelum render, dan
+            # set_mode('asisten') sebelum delta final. Jika lupa, server balikin
+            # otomatis supaya run berikutnya tidak bocor markdown ke TTS.
+            try:
+                cur = get_mode()
+                ini = locals().get('_run_initial_mode', 'asisten')
+                if ini == 'asisten' and cur == 'coding':
+                    set_mode('asisten')
+                    try: emit(dict(t='mode', mode='asisten', auto=True, reason='auto-restore after coding run'))
+                    except Exception: pass
+                    try: _log_to_file('[mode] auto-restore coding→asisten after run')
+                    except Exception: pass
+            except Exception:
                 pass
 
 
