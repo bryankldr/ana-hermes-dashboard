@@ -5,7 +5,7 @@
   `python3 ~/.hermes/profiles/anna/skills/software-development/simoge-business/scripts/ana_kpi.py tahun=2026 bulan=3 periode=2 mode=asisten`
   Pipes into another interpreter are also blocked — redirect to `/tmp/*.json`, then `read_file`. One call, no discovery flailing.
   `execute_code` wrapping `hermes_tools.terminal` is BLOCKED in INTELLIGENCE SURFACE — call the `terminal` tool directly, never via `execute_code`.
-  Every `terminal` call must set absolute `workdir` (`/home/bryankldr/PROYEK_2026/ana-hermes-dashboard`) — without it the shell starts in the wrong cwd and relative paths fail.
+  Every `terminal` call must set `workdir` = `ANA_WORKDIR` (`.env`) di mesin tsb — without it the shell starts in the wrong cwd and relative paths fail.
 - Chart publish butuh env (`ANA_PORT`/`ANA_TOKEN` atau `.ana_token`) atau dia hanya mencetak
   state tanpa menyentuh layar (`visible:false`). Jalankan lewat CLI script, bukan `python3 -c`:
   `PYTHONPATH=<scripts> python3 <scripts>/ana_chart_tool.py show type=bar title=... labels='[...]' datasets='[...]'`

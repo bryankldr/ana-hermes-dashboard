@@ -18,7 +18,7 @@ satu angka. Angka selalu dari `call_simoge_tool`/`ana_kpi.py`, bukan diketik dar
 ### Verifikasi engine
 
 ```bash
-cd /home/bryankldr/ana-hermes-dashboard
+cd "$ANA_WORKDIR"  # =.env ANA_WORKDIR di mesin tsb
 python3 test_ana_chart.py          # 2 copy sinkron, 6 section, intent map, guard
 python3 test_spatial_chart.py      # state shape, alias, grid, clamp, guard tipe
 node ui/test/spatial-aktivitas.test.mjs   # guard periode=0 / pembaharuan_ke

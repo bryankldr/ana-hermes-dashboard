@@ -16,10 +16,22 @@ auto-restores to asisten 90s after the run completes (fallback, not primary).
 from __future__ import annotations
 import json, os, pathlib, urllib.request, urllib.error
 
-ROOT = pathlib.Path("/home/bryankldr/PROYEK_2026/ana-hermes-dashboard")  # fixed absolute
+def _find_root() -> pathlib.Path:
+    import os as _os
+    env = _os.getenv("ANA_WORKDIR")
+    if env:
+        q = pathlib.Path(_os.path.expanduser(env)).resolve()
+        if q.is_dir():
+            return q
+    for q in pathlib.Path(__file__).resolve().parents:
+        if (q / "server.py").exists():
+            return q
+    return pathlib.Path(__file__).resolve().parents[5]
+
+ROOT = _find_root()
 TOKEN_FILE = ROOT / ".ana_token"
 MODE_FILE = ROOT / ".ana_mode"
-HOST = "127.0.0.1:8730"
+HOST = f"127.0.0.1:{__import__('os').getenv('ANA_PORT', '8730')}"  # ponytail: single dashboard per host — extend with ANA_HOST when multi-instance needed
 
 def _token() -> str:
     try: return TOKEN_FILE.read_text().strip()

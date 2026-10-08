@@ -12,6 +12,12 @@ metadata:
 ## Source of Truth
 `docs/kontek_bisnis.md` + `docs/refaktor/2nd_kontek_bisnis_diperjelas.md` — hubungan tabel, periode P1/P2, 4 domain spasial, bongkor/idle/aktif, warna polygon. Bila ragu baca file langsung.
 
+**Distribusi-portable & hemat token (upgrade path):**
+- `ANA_WORKDIR` (`.env`) = path absolut dashboard di mesin tsb — jangan hardcode `/home/bryankldr/...` di kode/SKILL. Semua `sys.path.insert` pakai `pathlib.Path(__file__).resolve().parents[2]` atau `ANA_WORKDIR` env, bukan `ls -R`/`cat .env`/`read simoge_db.py` (hemat 8-12 exec, cache 300K+ → ~20K). `ponytail:` `references/` lazy-load on-demand — preload semua tiap turn hanya bila prompt butuh map/laporan.
+- Prompt `sekarang`/`hari ini` → interpretasi = periode latest dengan data (`freshness()`/`provenance()`), label eksplisit `data terakhir tersedia September P0 (1-30 Sep)` bila fallback, bukan Oktober. Jika `produksi_aktiv.total_kg is None` tapi `status_petak_per_wilayah.aktif>0` → suffix TTS `"(aktivitas tanpa penerimaan — penerimaan belum masuk)"` untuk hindari misread 0 kg vs 7 aktif.
+- `ponytail:` cache `757K>356K` mahal — upgrade lazy-load refs bila `cache_read >500K` persisten; bila `300K` masih acceptable skip.
+
+
 ## When to Use
 - SIMOGE: petak RTT, penyadap, andil, produksi, target RKAP, drum
 - "tampilkan di peta" → **wajib** `show_on_map`, jangan docker/mysql/manual SQL
@@ -30,7 +36,7 @@ show_for_intent_packet(pkt)
 # Jawab HANYA dari pkt["kpi"]/pkt["evidence"], jangan karang angka
 ```
 Larangan: untuk KPI terdefinisi JANGAN `skill_view`/`read_file`/`search_files`/`_q()`/`ana_kpi.get_production_kpi` loop per periode — packet/batch cukup. `call_simoge_tool` hanya debug mentah. `search_files ana_kpi` + `read_file ana_kpi.py` = boros — SKILL ini sudah cukup.
-**HEMAT MUTLAK — JANGAN JUGA:** `search_files ana_mode_tool|set_mode|show_spatial` / `terminal ls scripts` / `terminal .venv/bin/python` / `which python3` / `inspect.getsource(show_dashboard)` — semua path sudah di SKILL, langsung `sys.path.insert(0, ".../scripts")` + `call_simoge_packet`. `.venv` tidak ada, pakai `python3` Hermes. Detail CLI aman & pitfalls → `references/troubleshooting.md`.
+**HEMAT MUTLAK — JANGAN JUGA:** `search_files ana_mode_tool|set_mode|show_spatial` / `terminal ls scripts` / `terminal .venv/bin/python` / `which python3` / `inspect.getsource(show_dashboard)` — semua path sudah di SKILL, langsung `sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))` atau `os.getenv("ANA_WORKDIR")+"/profile-dist/.../scripts"` + `call_simoge_packet` — jangan hardcode user home. `.venv` tidak ada, pakai `python3` Hermes. Detail CLI aman & pitfalls → `references/troubleshooting.md`.
 
 **Trend/penurunan/korelasi + chart — FIX IDEAL HEMAT (COPY-PASTE 3 CALL, jangan loop 18×, jangan hardcode):**
 ```python

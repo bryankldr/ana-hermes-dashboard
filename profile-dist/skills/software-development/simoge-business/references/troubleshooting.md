@@ -6,7 +6,7 @@
 python3 ~/.hermes/profiles/anna/skills/software-development/simoge-business/scripts/ana_simoge_tool.py aktivitas_agregat tahun=2026 bulan=6 periode=0 grup_by=pembaharuan
 python3 .../ana_simoge_tool.py aktivitas_top_petak tahun=2026 bulan=6 periode=0 limit=10 > /tmp/x.json && read_file /tmp/x.json
 ```
-JANGAN `python3 -c`, JANGAN pipa python→python. Arg `key=value`, numerik auto int. `workdir` absolut `/home/bryankldr/PROYEK_2026/ana-hermes-dashboard`.
+JANGAN `python3 -c`, JANGAN pipa python→python. Arg `key=value`, numerik auto int. `workdir` = `ANA_WORKDIR` (`.env`) di mesin tsb — jangan hardcode home. Resolve via `pathlib.Path(__file__).resolve().parents` atau `$ANA_WORKDIR`.
 
 ## Aki memotong pesan
 Jangan `--select`/file 1-2 baris untuk multi-baris — `\n` terpotong. Pakai `2>&1 | tail -30` (handler), `| tail -5` (JSON).
