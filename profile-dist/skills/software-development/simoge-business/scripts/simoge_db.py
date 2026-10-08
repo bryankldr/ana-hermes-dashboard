@@ -1414,6 +1414,54 @@ def produksi_per_wilayah(tahun, bulan, periode, level="kode_bkph", **kw):
     """, (total_pct, total_pct, d0y, dlast, tahun))
 
 
+@template("produksi_trend")
+def produksi_trend(tahun: int, **kw):
+    """Produksi per periode P1/P2 Jan-Des 1 tahun — 1 query hemat 18 call. Untuk chart trend & hitung growth."""
+    w, wv = _wilayah_where(kw, alias="p")
+    # periode P1=1-15, P2=16-end — group langsung di DB, bukan loop Python
+    return q(f"""
+        SELECT MONTH(p.tanggal) AS bulan,
+               CASE WHEN DAY(p.tanggal) <= 15 THEN 1 ELSE 2 END AS periode,
+               ROUND(SUM(p.berat_penerimaan), 2) AS total_kg,
+               COUNT(*) AS n_terima,
+               COUNT(DISTINCT p.kode_evapot) AS n_petak
+        FROM getah_aktivitas_penerimaan p
+        WHERE YEAR(p.tanggal) = %s{w}
+        GROUP BY bulan, periode
+        ORDER BY bulan, periode
+    """, (tahun, *wv))
+
+
+@template("aktivitas_trend")
+def aktivitas_trend(tahun: int, **kw):
+    """Aktivitas sadap per periode P1/P2 — 1 query. aktif = distinct petak dengan cur>0."""
+    w, wv = _wilayah_where(kw, alias="p")
+    # _wilayah_where untuk aktivitas perlu join petak — filter via petak.kode_*
+    # bila tanpa wilayah, w kosong; bila ada, join getah_petak p
+    if w:
+        return q(f"""
+            SELECT MONTH(s.tgl_pembaharuan) AS bulan,
+                   CASE WHEN DAY(s.tgl_pembaharuan) <= 15 THEN 1 ELSE 2 END AS periode,
+                   COUNT(*) AS n_aktivitas,
+                   COUNT(DISTINCT s.kode_evapot) AS n_petak_aktif,
+                   COUNT(DISTINCT s.id_penyadap) AS n_penyadap
+            FROM getah_aktivitas_sadap s
+            JOIN getah_petak p ON p.kode_evapot = s.kode_evapot AND p.tahun_rtt = %s{w}
+            WHERE YEAR(s.tgl_pembaharuan) = %s
+            GROUP BY bulan, periode ORDER BY bulan, periode
+        """, (tahun, tahun, *wv))
+    return q("""
+        SELECT MONTH(s.tgl_pembaharuan) AS bulan,
+               CASE WHEN DAY(s.tgl_pembaharuan) <= 15 THEN 1 ELSE 2 END AS periode,
+               COUNT(*) AS n_aktivitas,
+               COUNT(DISTINCT s.kode_evapot) AS n_petak_aktif,
+               COUNT(DISTINCT s.id_penyadap) AS n_penyadap
+        FROM getah_aktivitas_sadap s
+        WHERE YEAR(s.tgl_pembaharuan) = %s
+        GROUP BY bulan, periode ORDER BY bulan, periode
+    """, (tahun,))
+
+
 @template("target_pct")
 def target_pct(tahun, bulan, periode, **kw):
     """Persen RO kumulatif s/d (bulan, periode) — skalar untuk guard KPI.

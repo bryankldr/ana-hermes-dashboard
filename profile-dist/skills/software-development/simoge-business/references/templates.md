@@ -8,3 +8,8 @@ Scalars: `target_pct` (persen RO kumulatif s/d periode — satu pintu dengan hel
 Stats/aggregate: `petak_count`, `petak_area`, `petak_with_geometry`, `petak_bongkor`, `petak_effectiveness`, `petak_detail`, `petak_penyadap`, `petak_adjacent`, `petak_multi_penyadap`, `petak_non_rtt`, `idle_petak`, `penyadap_productivity`, `produksi_aktiv`, `produksi_year_to_date`, `rkap_achievement`, `drum_flow`, `petak_tidak_efektif`
 
 `list_templates()` returns names. `petak_by_kph` is **aggregate** (GROUP BY) — no polygon. `aktivitas_recent` is `limit` + optional `tahun/bulan/periode` (WHEN BETWEEN period_bounds) + `_wilayah_where` via JOIN getah_petak.
+
+
+### Trend (hemat loop)
+- `produksi_trend(tahun)` — 1 query 20 baris P1/P2 Jan-Des: bulan,periode,total_kg,n_petak. Packet hitung `growth_pct` + `drops<-30%`. Ganti loop 18x produksi_aktiv/ana_kpi.
+- `aktivitas_trend(tahun)` — 1 query 20 baris: n_aktivitas,n_petak_aktif,n_penyadap per P1/P2. Packet untuk korelasi produksi-aktivitas.

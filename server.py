@@ -325,6 +325,24 @@ def _build_packet(template, params, result):
                 "source": template, "value": scope_str
             }]
         
+        elif template == "produksi_trend":
+            # 1 query -> 20 baris P1/P2 Jan-Des — hitung growth di packet, bukan di LLM
+            # rows: bulan, periode, total_kg, n_terima, n_petak
+            pts=[{"bulan":int(r["bulan"]),"periode":int(r["periode"]),"total_kg":float(r["total_kg"] or 0),"n_petak":int(r["n_petak"] or 0),"label":f"P{int(r['periode'])} {bln_nama[int(r['bulan'])-1][:3]}"} for r in rows]
+            # growth periode-ke-periode
+            for i in range(1,len(pts)):
+                prev=pts[i-1]["total_kg"]; cur=pts[i]["total_kg"]
+                pts[i]["growth_pct"]=round(100*(cur-prev)/prev,2) if prev else None
+            if pts: pts[0]["growth_pct"]=None
+            drops=[x for x in pts if x.get("growth_pct") is not None and x["growth_pct"] < -30]
+            packet["kpi"]={"total_kg":round(sum(x["total_kg"] for x in pts),1),"n_periode":len(pts),"drops":drops[:5],"breakdown":pts}
+            packet["evidence"]=[{"statement":f"Produksi {tahun}: {len(pts)} periode, total {packet['kpi']['total_kg']/1000:.1f} ton. Drop <-30%: "+( ", ".join(f"{d['label']} {d['growth_pct']}%" for d in drops[:3]) if drops else "tidak ada"),"source":template,"value":scope_str}]
+
+        elif template == "aktivitas_trend":
+            pts=[{"bulan":int(r["bulan"]),"periode":int(r["periode"]),"n_aktivitas":int(r["n_aktivitas"] or 0),"n_petak_aktif":int(r["n_petak_aktif"] or 0),"n_penyadap":int(r["n_penyadap"] or 0),"label":f"P{int(r['periode'])} {bln_nama[int(r['bulan'])-1][:3]}"} for r in rows]
+            packet["kpi"]={"total_aktivitas":sum(x["n_aktivitas"] for x in pts),"n_periode":len(pts),"breakdown":pts}
+            packet["evidence"]=[{"statement":f"Aktivitas {tahun}: {len(pts)} periode, total {packet['kpi']['total_aktivitas']} aktivitas, petak aktif max {max((x['n_petak_aktif'] for x in pts), default=0)}","source":template,"value":scope_str}]
+
         elif template == "aktivitas_top_petak":
             top = rows[0] if rows else {}
             packet["kpi"] = {

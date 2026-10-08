@@ -25,3 +25,7 @@ Edit merusak f-string sekitar sisip (`f"..." _fmt_num(x)` → SyntaxError). Atur
 
 ## Token retry
 `show_on_map`/`_post_show` resolve token fresh tiap call (`ANA_TOKEN` env atau `.ana_token`), retry 1x saat 401 bila env kosong — tutup race restart-mid-call.
+
+
+## Pitfall: loop ana_kpi boros
+`search_files ana_kpi` → `read_file ana_kpi.py` → `for y,m,p in loop: get_production_kpi` = 18 call, token 150K. Ganti 1× `call_pandas_tool(..., operations=[percentage_change])` atau 2× `call_simoge_packet`. SKILL 1.3.1 sudah contoh trend.

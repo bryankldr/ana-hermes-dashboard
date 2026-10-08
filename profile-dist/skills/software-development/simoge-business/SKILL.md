@@ -29,7 +29,25 @@ pkt = call_simoge_packet("petak_count", {"tahun": 2026, "bulan": 6, "periode": 0
 show_for_intent_packet(pkt)
 # Jawab HANYA dari pkt["kpi"]/pkt["evidence"], jangan karang angka
 ```
-Larangan: untuk KPI terdefinisi JANGAN `skill_view`/`read_file`/`search_files`/`_q()` per template — packet cukup. `call_simoge_tool` hanya debug mentah. Detail CLI aman & pitfalls → `references/troubleshooting.md`.
+Larangan: untuk KPI terdefinisi JANGAN `skill_view`/`read_file`/`search_files`/`_q()`/`ana_kpi.get_production_kpi` loop per periode — packet/batch cukup. `call_simoge_tool` hanya debug mentah. `search_files ana_kpi` + `read_file ana_kpi.py` = boros — SKILL ini sudah cukup. Detail CLI aman & pitfalls → `references/troubleshooting.md`.
+
+**Trend/penurunan/korelasi (jangan loop 18×):**
+```python
+from ana_pandas_tool import call_pandas_tool
+from ana_chart_tool import show_dashboard
+# 2 packet hemat 18 call — produksi + aktivitas per P1/P2 setahun (1 query each)
+from ana_simoge_tool import call_simoge_packet
+pkt_prod = call_simoge_packet("produksi_trend", {"tahun": 2026})   # kpi: breakdown[20], drops[<-30%], growth_pct sudah dihitung
+pkt_akt  = call_simoge_packet("aktivitas_trend", {"tahun": 2026})  # kpi: breakdown n_aktivitas/n_petak_aktif/n_penyadap
+# pkt["kpi"]["drops"] -> FACT tabel penurunan; pkt["kpi"]["breakdown"] -> chart (jangan loop ana_kpi)
+# Chart: 1× show_dashboard dengan 2 chart (jangan 2× show_spatial_chart — yang kedua overwrite)
+from ana_chart_tool import show_dashboard
+show_dashboard(charts=[
+  {"title":"Produksi per periode 2026 (kg)","type":"bar","labels":[x["label"] for x in pkt_prod["kpi"]["breakdown"]],"datasets":[{"label":"Produksi kg","data":[x["total_kg"] for x in pkt_prod["kpi"]["breakdown"]]}]},
+  {"title":"Aktivitas & Penyadap 2026","type":"line","labels":[x["label"] for x in pkt_akt["kpi"]["breakdown"]],"datasets":[{"label":"Petak aktif","data":[x["n_petak_aktif"] for x in pkt_akt["kpi"]["breakdown"]]}]},
+])
+# Detail per wilayah bila butuh LOCATION: call_simoge_packet("produksi_per_wilayah", {"tahun":2026,"bulan":6,"periode":0,"level":"kode_bkph"}) # breakdown 5 BKPH
+```
 
 ### Mode switch aman
 Default `asisten` (TTS 1-2 kalimat). Untuk tabel/chart/grid berat:
@@ -50,6 +68,8 @@ r = call_pandas_tool(template="produksi_per_wilayah", params={"tahun":2026,"bula
 # ops: filter|group_by|aggregate|sort|rank|pivot|percentage_change|compare_period|statistics|anomaly|describe|limit
 # ponytail: dataset_id session belum — add when reuse dataset iteratif
 ```
+
+**Chart anti-overwrite:** `show_spatial_chart` replace — jangan panggil 2× berurutan untuk 2 chart. Untuk 2 chart pakai `show_dashboard(charts=[...])` atau `show_for_intent_packet` 1× per turn (user toggle). `show_for_intent_packet(pkt)` auto `h_bar` dari `kpi.breakdown` — jangan hardcode `labels=["P1 Jan",...] + data=[...]`.
 
 **Show on map (query+render+auto-fit+warna in one call):**
 ```python
