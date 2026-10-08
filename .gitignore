@@ -28,3 +28,4 @@ ui/data/*.ndjson
 *.code-workspace
 real-arsitektur/
 real_arsitektur.md
+ui/data/petak_simple.json
