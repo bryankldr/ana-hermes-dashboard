@@ -60,6 +60,7 @@ import spatial_report_store  # noqa: E402
 import terminal as ana_terminal  # noqa: E402
 import voice            # noqa: E402
 import sysmetrics       # noqa: E402
+import voice_metrics    # noqa: E402
 
 # SIMOGE business API -- the `simoge-business` skill in Hermes owns all SQL.
 # The server resolves its scripts dir lazily and calls the skill's own entry
@@ -1452,6 +1453,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(dict(current=cur, agent_name=voice.agent_name(cur), available=voice.available(), voices=voice.curated_voices()))
         if p == "/api/mode":
             return self._json(dict(mode=get_mode()))
+        if p == "/api/voice/metrics":
+            if not self._token_ok():
+                return self._unauth()
+            return self._json(voice_metrics.metrics.summary())
+        if p == "/api/voice/metrics/recent":
+            if not self._token_ok():
+                return self._unauth()
+            return self._json({"recent": voice_metrics.metrics.recent(20)})
         if p == "/api/sysmetrics":
             if not self._token_ok():
                 return self._unauth()
@@ -1819,10 +1828,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "session": None})
 
         if p == "/api/speak":
+            session_id = (body.get("session_id") or "default").strip()
+            m = voice_metrics.metrics.ensure_session(session_id)
+            text = (body.get("text") or "").strip()
+            voice_metrics.metrics.record_tts_start(session_id, len(text))
             try:
-                text = (body.get("text") or "").strip()
-                return self._bytes(voice.speak(text), "audio/mpeg")
-            except Exception as e:                        # noqa: BLE001
+                audio = voice.speak(text)
+                voice_metrics.metrics.record_tts_end(session_id)
+                voice_metrics.metrics.complete(session_id)
+                return self._bytes(audio, "audio/mpeg")
+            except Exception as e:
+                voice_metrics.metrics.record_error(session_id, str(e))
+                voice_metrics.metrics.complete(session_id)
                 return self._json({"error": str(e)[:200]}, 503)
 
         if p == "/api/voice-preview":
@@ -1885,6 +1902,25 @@ class Handler(BaseHTTPRequestHandler):
             if ok is None:
                 return self._json(info, 400)
             return self._json({"ok": ok, **info}, 200 if ok else 500)
+
+        if p == "/api/voice/metrics":
+            return self._json(voice_metrics.metrics.summary())
+
+        if p == "/api/voice/metrics/stt":
+            # Client reports STT timing from browser Web Speech API
+            session_id = (body.get("session_id") or "default").strip()
+            start_ms = float(body.get("start_ms") or 0)
+            end_ms = float(body.get("end_ms") or 0)
+            confidence = float(body.get("confidence") or 0)
+            is_final = bool(body.get("is_final") or False)
+            ok = voice_metrics.metrics.record_stt(session_id, start_ms, end_ms, confidence, is_final)
+            return self._json({"ok": ok})
+
+        if p == "/api/voice/metrics/tts-chunk":
+            # Client reports TTS first-chunk playback start (perceived TTS latency)
+            session_id = (body.get("session_id") or "default").strip()
+            ok = voice_metrics.metrics.record_tts_first_chunk(session_id)
+            return self._json({"ok": ok})
 
         # ── terminal endpoints ──────────────────────────────
         if p == "/api/terminal":
@@ -2183,6 +2219,14 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             sid0, _ = _session_get()
+            session_id_raw = payload.get("session_id")
+            session_id = (session_id_raw or sid0 or "default")
+            if isinstance(session_id, str):
+                session_id = session_id.strip()
+            else:
+                session_id = "default"
+            m = voice_metrics.metrics.ensure_session(session_id)
+            _llm_first = False
             for ev in runtime.run(message, sid0, system):
                 # Only remember a real Hermes session, never demo/mock identifiers.
                 sid = ev.get("session_id")
@@ -2199,8 +2243,22 @@ class Handler(BaseHTTPRequestHandler):
                 if ev.get("t") == "complete" and runtime.valid_session(sid):
                     _session_set(sid)
                     _session_bump_count()
+                    m = voice_metrics.metrics.get(session_id)
+                    if m:
+                        tokens = ev.get("tokens", 0)
+                        if isinstance(tokens, str):
+                            try:
+                                tokens = int(tokens)
+                            except Exception:
+                                tokens = 0
+                        elif not isinstance(tokens, int):
+                            tokens = 0
+                        voice_metrics.metrics.record_llm_end(session_id, tokens)
                 if ev.get("t") == "error":
                     _clear_session()       # drop a bad/stale session so the next run is fresh
+                if ev.get("t") == "delta" and not _llm_first:
+                    _llm_first = True
+                    voice_metrics.metrics.record_llm_ttft(session_id)
                 emit(ev)
         except (BrokenPipeError, ConnectionResetError):
             pass                                          # client navigated away

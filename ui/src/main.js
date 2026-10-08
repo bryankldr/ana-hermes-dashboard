@@ -656,7 +656,7 @@ function speak(text) {
     // split at sentence boundaries and synthesize one clause at a time, so an
     // endless stream never builds a single unbounded request.
     const mySeq = ++speakSeq;
-    const finish = () => { if (mySeq === speakSeq) { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); } resolve(); };
+    const finish = () => { if (mySeq === speakSeq) { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); } try { window.voiceMetrics?.onTurnComplete(); } catch (_) {} resolve(); };
     const alive = () => mySeq === speakSeq;
     suppress = true;
     els.hud.classList.add('speaking');
@@ -668,7 +668,7 @@ function speak(text) {
       const r = await fetch('/api/speak', {
         method: 'POST',
         headers: api.headers({ 'content-type': 'application/json' }),
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text, session_id: window.voiceMetrics?.getSessionId() })
       });
       if (!alive()) return resolve();                 // superseded while synthesizing
       if (r.ok) {
@@ -677,6 +677,8 @@ function speak(text) {
           const blob = await r.blob();
           if (!alive()) return resolve();
           const url = URL.createObjectURL(blob);
+          // Report audio playback start for e2e metrics
+          if (window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
           await playMp3(url);
           finish();
           if (alive()) log('voice', 'VOICE', 'TTS played (server)');
@@ -710,6 +712,8 @@ function speak(text) {
         u.rate = 1.0; u.pitch = 1.0; u.volume = 1;
         u.onend = u.onerror = () => {
           if (speakUtterance === u) speakUtterance = null;
+          // Report audio playback start for e2e metrics (browser TTS)
+          if (window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
           finish();
           if (alive()) log('voice', 'VOICE', 'TTS played (browser)');
         };
@@ -727,6 +731,73 @@ function speak(text) {
 }
 
 // ═══ VOICE CONVERSATION ═══
+// VAD native (energy-based, tanpa dependensi): parallel monitor untuk
+// SpeechRecognition — kalibrasi noise floor, deteksi turn, barge-in.
+async function startVadMonitor() {
+  try { if (micStream) micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+  micStream = null; analyser = null; vdata = null;
+  if (vad) { clearInterval(vad); vad = null; }
+  spoke = false; loudAt = Date.now(); turnStart = 0;
+  floorSum = 0; floorN = 0; threshold = 0.02; peak = 0; calibrating = true;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { log('note', 'VOICE', 'VAD mic off — STT browser saja'); return; }
+  if (!convo) { stream.getTracks().forEach(t => t.stop()); return; }
+  micStream = stream;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') await actx.resume().catch(() => {});
+    const src = actx.createMediaStreamSource(stream);
+    analyser = actx.createAnalyser(); analyser.fftSize = 1024;
+    src.connect(analyser);
+    vdata = new Float32Array(analyser.fftSize);
+  } catch (e) { log('note', 'VOICE', 'VAD analyser off — STT browser saja'); return; }
+  const t0 = Date.now();
+  vad = setInterval(() => {
+    if (!convo || !analyser) return;
+    analyser.getFloatTimeDomainData(vdata);
+    let sum = 0;
+    for (let i = 0; i < vdata.length; i++) sum += vdata[i] * vdata[i];
+    const rms = Math.sqrt(sum / vdata.length);
+    peak = Math.max(peak * 0.95, rms);
+    // kalibrasi floor 600ms pertama
+    if (calibrating) {
+      floorSum += rms; floorN++;
+      if (Date.now() - t0 > 600 && floorN > 3) {
+        const floor = floorSum / floorN;
+        threshold = Math.max(0.02, floor * 3 + 0.008);
+        calibrating = false;
+      }
+      return;
+    }
+    const nowMs = Date.now();
+    const isLoud = rms > threshold;
+    if (isLoud) {
+      loudAt = nowMs;
+      if (!spoke) {
+        spoke = true; turnStart = nowMs;
+        if (window.voiceMetrics) window.voiceMetrics.onSpeechStart();
+        setAgentState('LISTENING');
+      }
+      // barge-in: user potong ANA bicara
+      if (els.hud.classList.contains('speaking')) {
+        stopSpeaking();
+        log('voice', 'VOICE', 'barge-in — TTS dipotong');
+      }
+      if (turnStart && nowMs - turnStart > MAX_TURN_MS) { spoke = false; turnStart = 0; }
+    } else if (spoke) {
+      const dur = nowMs - turnStart;
+      if (nowMs - loudAt > SILENCE && dur > MIN_TURN_MS) {
+        spoke = false; turnStart = 0;
+        log('voice', 'VOICE', `VAD turn ${(dur / 1000).toFixed(1)}s`);
+      }
+    } else if (nowMs - loudAt > NO_SPEECH_MS) {
+      // re-kalibrasi diam panjang (ruangan berubah)
+      floorSum = rms; floorN = 1; calibrating = true;
+      loudAt = nowMs;
+    }
+  }, 100);
+}
 function micToggle() {
   if (convo) { stopConvo(); return; }
   if (SpeechRecognition) {
@@ -734,7 +805,8 @@ function micToggle() {
     els.micBtn.classList.add('on'); els.micBtn.textContent = '● Live';
     log('voice', 'VOICE', 'browser speech recognition open · listening');
     setAgentState('LISTENING');
-    startBrowserRecognition(); return;
+    startBrowserRecognition();
+    startVadMonitor(); return;
   }
   log('error', 'VOICE', 'no speech recognition available');
 }
@@ -757,6 +829,12 @@ function startBrowserRecognition() {
   recognition = new SpeechRecognition();
   recognition.lang = 'id-ID'; recognition.interimResults = true; recognition.continuous = false;
   let finalText = '';
+  
+  // Speech start - approximate when user starts speaking
+  recognition.onaudiostart = () => {
+    if (window.voiceMetrics) window.voiceMetrics.onSpeechStart();
+  };
+  
   recognition.onresult = e => {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -765,6 +843,17 @@ function startBrowserRecognition() {
     }
     const shown = (finalText || interim || '').trim();
     if (shown) els.coreLabel.textContent = 'HEARD: ' + shown.slice(0, 30);
+    
+    // Report interim/final STT timing
+    if (window.voiceMetrics) {
+      const confidence = e.results[e.results.length - 1]?.[0]?.confidence || 0;
+      const isFinal = e.results[e.results.length - 1]?.isFinal || false;
+      if (isFinal) {
+        window.voiceMetrics.onSpeechEnd(true, confidence);
+      } else {
+        window.voiceMetrics.onSpeechInterim(confidence);
+      }
+    }
   };
   // Fatal errors mean this device/browser will never work; retrying just spams
   // the event log. no-speech and aborted are normal, so they fall through to
@@ -966,7 +1055,7 @@ async function transmit(message, options = {}) {
     activeController = new AbortController();
     const res = await fetch('/api/run', {
       method: 'POST', headers: api.headers({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ message, fresh }), signal: activeController.signal
+      body: JSON.stringify({ message, fresh, session_id: window.voiceMetrics?.getSessionId() }), signal: activeController.signal
     });
     if (!res.ok) throw new Error(`backend returned HTTP ${res.status}`);
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
