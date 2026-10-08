@@ -83,7 +83,8 @@ set_mode("coding")  # sebelum panggil show_spatial_chart / call_pandas_tool batc
 # ... render ...
 set_mode("asisten")  # WAJIB sebelum delta jawaban final, supaya TTS tetap ringkas
 ```
-Aturan: `asisten` aman, `coding` hanya sementara untuk render panel. Jika ANNA lupa balikin, server otomatis `coding→asisten` setelah `t:complete` (emit `t:mode auto=True`). Jangan sebut mode ke user kecuali ditanya.
+Aturan: `asisten` aman, `coding` hanya sementara untuk render panel.
+- PENGECUALIAN WAJIB: jika user eksplisit minta chart/grafik/visual/dashboard/preview/map (kata "tampilkan dalam chart", "tampilkan chart", "grafik", "visual"), JANGAN patuhi TTS ringkas saja — WAJIB eskalasi ke coding (`set_mode("coding")`) lalu render via `call_simoge_packet` + `show_dashboard` sebelum jawab. TTS saja tanpa chart = gagal penuhi permintaan. Jika ANNA lupa balikin, server otomatis `coding→asisten` setelah `t:complete` (emit `t:mode auto=True`).
 
 ## Grafik SPATIAL MAP — panggung presentasi Anda
 

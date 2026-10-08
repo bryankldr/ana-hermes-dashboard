@@ -1021,7 +1021,7 @@ def persona():
         base = base.replace(anchor, anchor + '\n' + name_rule, 1)
     else:
         base = name_rule + '\n' + base
-    overlay = "[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS." if mode=="asisten" else "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real."
+    overlay = "[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. KECUALI user eksplisit minta chart/grafik/visual/preview/map/gambar → WAJIB eskalasi: set_mode(\"coding\") lalu render via call_simoge_packet+show_dashboard SEBELUM jawab. TTS-only tanpa chart saat diminta chart = GAGAL." if mode=="asisten" else "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real."
     return "\n\n".join(x for x in (base, overlay, wiki, extra) if x)
 
 
@@ -2103,7 +2103,7 @@ class Handler(BaseHTTPRequestHandler):
             _b_wiki = wiki_block()
             _b_ctx = commands.context_block()
             _b_mode = get_mode()
-            _b_overlay = ("[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS."
+            _b_overlay = ("[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. KECUALI user eksplisit minta chart/grafik/visual/preview/map/gambar → WAJIB eskalasi: set_mode(\"coding\") lalu render via call_simoge_packet+show_dashboard SEBELUM jawab. TTS-only tanpa chart saat diminta chart = GAGAL."
                           if _b_mode == "asisten" else
                           "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real.")
             _budget_init = dict(t="budget", persona=len(_b_base), overlay=len(_b_overlay),
