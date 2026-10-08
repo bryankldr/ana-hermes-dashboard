@@ -628,7 +628,10 @@ let speakAudio = null, speakUtterance = null, speakSeq = 0;
 // while the user already moved on.
 function stopSpeaking() {
   speakSeq++;                                  // invalidate in-flight speak() promises
-  if (speakAudio) { try { speakAudio.pause(); speakAudio.currentTime = 0; } catch (_) {} speakAudio = null; }
+  if (speakAudio) {
+    const a = speakAudio; speakAudio = null;
+    try { if (a._forceDone) a._forceDone(); else { a.pause(); a.currentTime = 0; } } catch (_) {}
+  }
   if (speakUtterance && speechSynth) { try { speechSynth.cancel(); } catch (_) {} }
   speakUtterance = null;
   stopEqualizer();
@@ -643,6 +646,10 @@ function playMp3(url) {
     a._url = url;
     speakAudio = a;
     a.onended = () => done(true);
+    // stopSpeaking() hanya pause — onended tak selalu trigger → janji
+    // gantung → loop chunk macet. Simpan force-resolve agar stop bisa
+    // paksa lanjut.
+    a._forceDone = () => { a.onended = null; done(true); };
     // Autoplay policy: play() setelah run panjang sering ditolak sunyi
     // (transient activation habis) — jangan diam, fallback WebAudio.
     a.onerror = () => { a._url = null; playMp3WebAudio(url).then(ok => { URL.revokeObjectURL(url); resolve(ok); }); };
@@ -685,6 +692,28 @@ function playMp3WebAudio(url) {
   });
 }
 
+// Pecah jawaban jadi kalimat (cap ~450 char, belah koma bila perlu).
+// ponytail: pre-split dari LLM stream (sintesis kalimat-1 sebelum complete) bila e2e >2s.
+function splitSentences(t) {
+  const parts = String(t).replace(/([.!?…]+["”'\)\]]?)(\s+|$)/g, '$1\n').split('\n').map(s => s.trim()).filter(Boolean);
+  const out = [];
+  const pushHard = s => {
+    // Belah keras per kata bila masih >450 pasca-koma.
+    while (s.length > 450) {
+      let cut = s.lastIndexOf(' ', 430);
+      if (cut < 100) cut = 430;
+      out.push(s.slice(0, cut).trim());
+      s = s.slice(cut).trim();
+    }
+    if (s) out.push(s);
+  };
+  for (const s of parts) {
+    if (s.length <= 450 || !/[,;:]/.test(s)) { pushHard(s); continue; }
+    for (const sub of s.split(/(?<=[,;:])\s+/)) { const y = sub.trim(); if (y) pushHard(y); }
+  }
+  return out.length ? out : [String(t)];
+}
+
 function speak(text) {
   return new Promise(async resolve => {
     text = cleanForSpeech(text);
@@ -701,30 +730,48 @@ function speak(text) {
     if (els.core) els.core.classList.add('speaking');
     startEqualizer();
 
-    // prefer server TTS (edge-tts mp3) — same path as voice preview
+    const sess = () => window.voiceMetrics?.getSessionId();
+    // TTS chunk per kalimat: kalimat-1 disintesis lalu langsung bunyi,
+    // kalimat-2 disintesis paralel saat kalimat-1 diputar (lookahead).
+    // Latensi terdengar = sintesis 1 kalimat (~0.5s), bukan full jawaban.
+    const synthChunk = async (chunk, ci, total, totalChars) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const r = await fetch('/api/speak', {
+            method: 'POST',
+            headers: api.headers({ 'content-type': 'application/json' }),
+            body: JSON.stringify({ text: chunk, session_id: sess(), chunk_index: ci, total_chars: totalChars, chunk_final: ci === total - 1 })
+          });
+          if (r.ok && (r.headers.get('content-type') || '').includes('audio')) {
+            const url = URL.createObjectURL(await r.blob());
+            return url;
+          }
+        } catch (_) {}
+        await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
+      }
+      return null;
+    };
+    const sentences = splitSentences(text);
     try {
-      const r = await fetch('/api/speak', {
-        method: 'POST',
-        headers: api.headers({ 'content-type': 'application/json' }),
-        body: JSON.stringify({ text, session_id: window.voiceMetrics?.getSessionId() })
-      });
-      if (!alive()) return resolve();                 // superseded while synthesizing
-      if (r.ok) {
-        const ct = r.headers.get('content-type') || '';
-        if (ct.includes('audio')) {
-          const blob = await r.blob();
+      let nextUrl = synthChunk(sentences[0], 0, sentences.length, text.length);
+      for (let i = 0; i < sentences.length; i++) {
+        if (!alive()) { try { URL.revokeObjectURL(await nextUrl); } catch (_) {} return resolve(); }
+        const url = await nextUrl;                       // kalimat-i siap
+        if (i + 1 < sentences.length) nextUrl = synthChunk(sentences[i + 1], i + 1, sentences.length, text.length);
+        else nextUrl = null;
+        if (!alive()) { if (url) URL.revokeObjectURL(url); return resolve(); }
+        if (url) {
+          if (i === 0 && window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
+          const ok = await playMp3(url);
+          if (!ok && alive()) log('note', 'VOICE', `chunk ${i + 1}/${sentences.length} kosong — lanjut`);
           if (!alive()) return resolve();
-          const url = URL.createObjectURL(blob);
-          // Report audio playback start for e2e metrics
-          if (window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
-          await playMp3(url);
-          finish();
-          if (alive()) log('voice', 'VOICE', 'TTS played (server)');
-          return;
+        } else if (alive()) {
+          log('note', 'VOICE', `chunk ${i + 1}/${sentences.length} gagal 3x — teks dilewati`);
         }
       }
-      let msg = ''; try { const j = await r.clone().json(); msg = j.error || ''; } catch (_) { msg = 'status ' + r.status; }
-      if (msg) log('note', 'VOICE', 'server TTS: ' + msg.slice(0, 120) + ' — fallback browser');
+      finish();
+      if (alive()) log('voice', 'VOICE', `TTS played (server, ${sentences.length} chunk)`);
+      return;
     } catch (e) {
       log('note', 'VOICE', 'server TTS error: ' + String(e).slice(0, 120) + ' — fallback browser');
     }
@@ -825,7 +872,14 @@ async function startVadMonitor() {
         if (bargeN >= 3) {
           bargeN = 0;
           stopSpeaking();
-          log('voice', 'VOICE', 'barge-in — TTS dipotong');
+          // Barge-in → auto-turn: TTS mati saja tidak cukup, mic harus
+          // langsung dengar potongan user. Selama speak suppress=true
+          // blokir restart recognition — buka di sini lalu start ulang.
+          suppress = false;
+          if (SpeechRecognition && convo) {
+            try { startBrowserRecognition(); } catch (_) {}
+          }
+          log('voice', 'VOICE', 'barge-in — TTS dipotong, dengar potongan');
         }
       } else bargeN = 0;
       if (turnStart && nowMs - turnStart > MAX_TURN_MS) { spoke = false; turnStart = 0; }

@@ -1835,11 +1835,24 @@ class Handler(BaseHTTPRequestHandler):
             session_id = (body.get("session_id") or "default").strip()
             m = voice_metrics.metrics.ensure_session(session_id)
             text = (body.get("text") or "").strip()
-            voice_metrics.metrics.record_tts_start(session_id, len(text))
+            # TTS chunk per kalimat: metrics sesi ditulis sekali — start di
+            # chunk 0 (total_chars penuh), end+complete di chunk final.
+            try:
+                ci = int(body.get("chunk_index") or 0)
+            except (TypeError, ValueError):
+                ci = 0
+            cf = bool(body.get("chunk_final", True))
+            if ci == 0:
+                try:
+                    total = int(body.get("total_chars") or len(text))
+                except (TypeError, ValueError):
+                    total = len(text)
+                voice_metrics.metrics.record_tts_start(session_id, total)
             try:
                 audio = voice.speak(text)
-                voice_metrics.metrics.record_tts_end(session_id)
-                voice_metrics.metrics.complete(session_id)
+                if cf:
+                    voice_metrics.metrics.record_tts_end(session_id)
+                    voice_metrics.metrics.complete(session_id)
                 return self._bytes(audio, "audio/mpeg")
             except Exception as e:
                 voice_metrics.metrics.record_error(session_id, str(e))
