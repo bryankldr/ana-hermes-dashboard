@@ -7,14 +7,14 @@ description: Use when working on ANA HUD Dashboard project.
 # ANA HUD Dashboard - Project Skill
 
 ## Project Location
-**Fixed path:** `<dashboard-repo>`
+**Fixed path:** `/home/bryankldr/PROYEK_2026/ana-hermes-dashboard`
 
-> ⚠️ **CRITICAL**: Always use absolute path `<dashboard-repo>`
-> NEVER use `./<path>/...` (leading dot breaks cd)
+> ⚠️ **CRITICAL**: Always use absolute path `/home/bryankldr/PROYEK_2026/ana-hermes-dashboard`
+> NEVER use `./home/bryankldr/PROYEK_2026/...` (leading dot breaks cd)
 
 ## Quick Commands
 ```bash
-cd <dashboard-repo>
+cd /home/bryankldr/PROYEK_2026/ana-hermes-dashboard
 python3 server.py          # Start server on 127.0.0.1:8730
 python3 smoke.py           # Run 121 E2E checks
 python3 test_services.py   # Run 24 service assertions
@@ -30,7 +30,7 @@ ps aux | grep -E "server.py|python.*8730" | grep -v grep
 pkill -f "python3 server.py"
 
 # Restart clean
-cd <dashboard-repo> && ANA_OPEN=0 exec python3 server.py
+cd /home/bryankldr/PROYEK_2026/ana-hermes-dashboard && ANA_OPEN=0 exec python3 server.py
 ```
 
 ## Project Structure
@@ -73,7 +73,7 @@ ana-hermes-dashboard/
 
 ## Git Workflow
 ```bash
-cd <dashboard-repo>
+cd /home/bryankldr/PROYEK_2026/ana-hermes-dashboard
 git add -A
 git commit -m "type(scope): description"
 git push origin main
