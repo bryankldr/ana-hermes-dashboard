@@ -25,6 +25,7 @@ const ANA_TOKEN = document.querySelector('meta[name="ana-token"]')?.content || '
 
 // ═══ STATE ═══
 let running = false, answer = '', firstDelta = false, speakThisRun = true;
+let runningMsg = '', pendingParts = [], runGen = 0;   // interupsi suara saat thinking: cancel + gabung
 let speakDone = Promise.resolve(), activeController = null;
 let muted = false, player = null;
 let convo = false, suppress = false;
@@ -886,9 +887,15 @@ async function startVadMonitor() {
           // masih pending (transmit await speakDone) dan akan restart mic
           // sendiri ~350ms pasca-barge-in. Start ganda = dua recognition
           // bersamaan → Chrome bunuh keduanya → STT macet permanen.
-          // Kata interupsi ikut hilang (mic mati selama TTS) — user ulangi.
+          // Kata interupsi ikut hilang hanya bila mic mati total — di sini mic
+          // tetap jalan (suppress dihapus, guard single-instance di
+          // startBrowserRecognition cegah STT macet) → restart paksa agar
+          // potongan langsung ditangkap sebagai turn baru.
           suppress = false;
-          log('voice', 'VOICE', 'barge-in — TTS dipotong, silakan ulangi');
+          if (convo) {
+            try { startBrowserRecognition(); } catch (_) {}
+          }
+          log('voice', 'VOICE', 'barge-in — TTS dipotong, dengar potongan');
         }
       } else bargeN = 0;
       if (turnStart && nowMs - turnStart > MAX_TURN_MS) { spoke = false; turnStart = 0; }
@@ -952,7 +959,7 @@ async function startServerSttLoop() {
         const j = await r.json().catch(() => ({}));
         if (window.voiceMetrics) window.voiceMetrics.onSpeechEnd(true, j.confidence || 0);
         const text = (j.text || '').trim();
-        if (text) { log('voice', 'VOICE', `server STT (${((performance.now() - t0) / 1000).toFixed(1)}s): "${text}"`); els.chatInput.value = ''; await transmit(text); }
+        if (text) { log('voice', 'VOICE', `server STT (${((performance.now() - t0) / 1000).toFixed(1)}s): "${text}"`); els.chatInput.value = ''; await transmit(text, { voiceInterrupt: true }); }
       } catch (e) { log('error', 'VOICE', 'server STT failed — retry'); }
       if (convo) setTimeout(tick, 250);
     };
@@ -991,7 +998,11 @@ function stopConvo() {
   setAgentState('IDLE');
 }
 function startBrowserRecognition() {
-  if (!convo || suppress || !SpeechRecognition) return;
+  if (!convo || !SpeechRecognition) return;
+  // Single-instance: stop lama sebelum start baru. Tanpa ini dua recognition
+  // jalan bareng → Chrome bunuh keduanya → STT macet permanen. Guard ini yang
+  // bikin restart paksa dari barge-in aman.
+  if (recognition) { try { recognition.onend = null; recognition.abort(); } catch (_) {} recognition = null; }
   recognition = new SpeechRecognition();
   recognition.lang = 'id-ID'; recognition.interimResults = true; recognition.continuous = false;
   let finalText = '';
@@ -1032,11 +1043,14 @@ function startBrowserRecognition() {
   recognition.onend = async () => {
     const text = finalText.trim();
     if (!convo) return;
-    if (!text) { if (!suppress) setTimeout(startBrowserRecognition, 250); return; }
+    if (!text) {
+      if (convo) setTimeout(startBrowserRecognition, 250);
+      return;
+    }
     log('voice', 'VOICE', `browser transcribed: "${text}"`);
     els.chatInput.value = '';
     log('send', 'SEND', `auto-sent voice: ${text}`);
-    await transmit(text);
+    await transmit(text, { voiceInterrupt: true });
     suppress = false;
     if (convo) setTimeout(startBrowserRecognition, 350);
   };
@@ -1119,7 +1133,7 @@ function sendFromChat() {
   autosizeChat();
   disarm();
   log('send', 'SEND', `transmit (chat): ${full}`);
-  transmit(full);
+  transmit(full, { voiceInterrupt: running });
 }
 els.sendBtn.addEventListener('click', sendFromChat);
 els.chatInput.addEventListener('input', autosizeChat);
@@ -1196,13 +1210,77 @@ const TPL_GROUPS = [
 })();
 
 // ═══ TRANSMIT ═══
+// Interupsi suara saat thinking: cancel run lama, gabung relevansi.
+// Gabung murah tanpa LLM: potongan satu klausa pendek (≤8 kata, tanpa kata
+// tanya) = lanjutan → sambung ke pesan lama; sisanya = topik baru, ANNA
+// pilih yang paling relevan via instruksi merge (tanpa LLM call tambahan).
+// ponytail: skor relevansi embedding bila gabungan sering salah arah.
+function interruptWith(text) {
+  text = String(text || '').trim();
+  if (!text) return false;
+  if (!running) return false;   // tak ada yang jalan — jalur normal
+  pendingParts.push(text);
+  try {
+    fetch('/api/cancel', { method: 'POST', headers: api.headers({ 'content-type': 'application/json' }), body: '{}' }).catch(() => {});
+    if (activeController) activeController.abort();
+  } catch (_) {}
+  stopSpeaking();
+  log('voice', 'VOICE', `interupsi thinking: "${text.slice(0, 60)}" — digabung`);
+  return true;
+}
+function mergePending(oldMsg, newMsg) {
+  // oldMsg = pesan yang sedang diproses; newMsg = interupsi suara terbaru
+  // (sudah ada di pendingParts via interruptWith, jangan push ganda).
+  // Klausa pendek tanpa kata tanya → lanjutan, sambung koma.
+  // Sisanya → topik baru: pilih yang paling relevan via instruksi ke LLM.
+  const Q = /^(apa|siapa|kapan|di ?mana|ke mana|mengapa|kenapa|bagaimana|berapa|apakah|bisakah|tolong|jelaskan|buatkan|carikan|coba|gimana)\b/i;
+  const cont = [], fresh = [];
+  for (const p of pendingParts) {
+    if (p === newMsg) continue;   // newMsg digabung eksplisit di bawah
+    const words = p.split(/\s+/).length;
+    (!Q.test(p.trim()) && words <= 8 ? cont : fresh).push(p);
+  }
+  pendingParts = [];
+  const parts = [oldMsg];
+  const pNew = String(newMsg || '').trim();
+  if (pNew) {
+    const w = pNew.split(/\s+/).length;
+    if (!Q.test(pNew) && w <= 8) parts.push(pNew);   // lanjutan → sambung
+    else fresh.push(pNew);
+  }
+  let final = parts.join(', ');
+  if (cont.length) final += ', ' + cont.join(', ');
+  let note = '';
+  if (fresh.length) {
+    note = `\n\n[Catatan: saat kamu memproses pertanyaan di atas, user menyela dengan: "${fresh.join(' | ')}". ` +
+      `Bila relevan dengan pertanyaan di atas, gabungkan jadi satu jawaban. ` +
+      `Bila tidak relevan, jawab yang paling relevan saja dan abaikan sisanya.]`;
+  }
+  if (cont.length || (pNew && !fresh.includes(pNew))) log('voice', 'VOICE', `lanjutan digabung: "${[pNew, ...cont].filter(Boolean).join(' | ').slice(0, 80)}"`);
+  if (fresh.length) log('voice', 'VOICE', `topik baru saat thinking: "${fresh.join(' | ').slice(0, 80)}" — ANNA pilih relevan`);
+  return final + note;
+}
 async function transmit(message, options = {}) {
   if (!message.trim()) return;
-  if (running) { log('note', 'BUSY', `still working — "${message.slice(0, 40)}" not sent. Wait, or press Esc to cancel.`); return; }
+  // Interupsi suara saat thinking: cancel run + gabung, lalu jalan ulang
+  // dengan pesan gabungan. Beda dengan BUSY pasif — user tak perlu Esc.
+  if (running) {
+    if (options.voiceInterrupt) {
+      interruptWith(message);
+      // Retry loop: run lama mungkin belum mati (abort butuh waktu).
+      // Abort hang (>5s) → paksa flag mati, server sudah terima /api/cancel.
+      for (let i = 0; i < 17 && running; i++) await new Promise(r => setTimeout(r, 300));
+      if (running) { running = false; log('note', 'VOICE', 'run lama hang — paksa ganti ke pesan gabungan'); }
+      message = mergePending(runningMsg || message, message);
+    } else {
+      log('note', 'BUSY', `still working — "${message.slice(0, 40)}" not sent. Wait, or press Esc to cancel.`);
+      return;
+    }
+  }
   // A new question silences the previous answer. ANA now reads every answer to
   // the end, so without this a long report keeps talking over the new question.
   stopSpeaking();
-  running = true; answer = ''; firstDelta = false; speakThisRun = options.speak !== false;
+  running = true; runningMsg = message; answer = ''; firstDelta = false; speakThisRun = options.speak !== false;
   convoMsgs = [];
   const fresh = /^\/new\b/.test(message.trim());
   const id = rid();
@@ -1235,7 +1313,7 @@ async function transmit(message, options = {}) {
     if (e?.name === 'AbortError') { log('note', 'CANCEL', 'run cancelled'); setAgentState('IDLE'); progressDone(false); }
     else { log('error', 'ERROR', String(e).slice(0, 200)); setAgentState('ERROR'); progressDone(false); }
   }
-  activeController = null; running = false; clearInterval(tick);
+  activeController = null; running = false; runningMsg = ''; pendingParts = []; clearInterval(tick);
   // Nothing else resets the state to IDLE: speak() only does so via stopVoice()
   // on the path where audio actually played, and it returns early when muted or
   // the answer is empty. Without this the core label stays stuck on RESPONDING
