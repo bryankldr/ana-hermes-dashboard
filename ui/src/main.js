@@ -622,12 +622,15 @@ function initTelemetry() {
 // old one off instead of letting it talk over the new answer. `speakAudio` is the
 // server-MP3 <audio>; `speakUtterance` is the browser speechSynthesis fallback.
 let speakAudio = null, speakUtterance = null, speakSeq = 0;
+let speakAborts = new Set();   // AbortController fetch sintesis in-flight — diabort tiap stopSpeaking
 
 // Stop whatever ANA is saying right now. Called on every new transmit() so a new
 // question silences the previous answer — otherwise a long answer keeps reading
 // while the user already moved on.
 function stopSpeaking() {
   speakSeq++;                                  // invalidate in-flight speak() promises
+  for (const c of speakAborts) { try { c.abort(); } catch (_) {} }
+  speakAborts.clear();
   if (speakAudio) {
     const a = speakAudio; speakAudio = null;
     try { if (a._forceDone) a._forceDone(); else { a.pause(); a.currentTime = 0; } } catch (_) {}
@@ -736,9 +739,12 @@ function speak(text) {
     // Latensi terdengar = sintesis 1 kalimat (~0.5s), bukan full jawaban.
     const synthChunk = async (chunk, ci, total, totalChars) => {
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (!alive()) return null;
+        const ctl = new AbortController();
+        speakAborts.add(ctl);
         try {
           const r = await fetch('/api/speak', {
-            method: 'POST',
+            method: 'POST', signal: ctl.signal,
             headers: api.headers({ 'content-type': 'application/json' }),
             body: JSON.stringify({ text: chunk, session_id: sess(), chunk_index: ci, total_chars: totalChars, chunk_final: ci === total - 1 })
           });
@@ -746,7 +752,11 @@ function speak(text) {
             const url = URL.createObjectURL(await r.blob());
             return url;
           }
-        } catch (_) {}
+        } catch (e) {
+          if (e && e.name === 'AbortError') return null;   // stopSpeaking: keluar seketika
+        } finally {
+          speakAborts.delete(ctl);
+        }
         await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
       }
       return null;
@@ -872,14 +882,13 @@ async function startVadMonitor() {
         if (bargeN >= 3) {
           bargeN = 0;
           stopSpeaking();
-          // Barge-in → auto-turn: TTS mati saja tidak cukup, mic harus
-          // langsung dengar potongan user. Selama speak suppress=true
-          // blokir restart recognition — buka di sini lalu start ulang.
+          // JANGAN start recognition di sini: rantai onend→transmit→restart
+          // masih pending (transmit await speakDone) dan akan restart mic
+          // sendiri ~350ms pasca-barge-in. Start ganda = dua recognition
+          // bersamaan → Chrome bunuh keduanya → STT macet permanen.
+          // Kata interupsi ikut hilang (mic mati selama TTS) — user ulangi.
           suppress = false;
-          if (SpeechRecognition && convo) {
-            try { startBrowserRecognition(); } catch (_) {}
-          }
-          log('voice', 'VOICE', 'barge-in — TTS dipotong, dengar potongan');
+          log('voice', 'VOICE', 'barge-in — TTS dipotong, silakan ulangi');
         }
       } else bargeN = 0;
       if (turnStart && nowMs - turnStart > MAX_TURN_MS) { spoke = false; turnStart = 0; }
@@ -973,6 +982,7 @@ function stopConvo() {
   if (recorder && recorder.state === 'recording') { recorder._cancel = true; try { recorder.stop(); } catch (_) {} }
   recorder = null;
   if (player) { try { player.pause(); } catch (_) {} }
+  stopSpeaking();   // bunuh TTS juga — tanpanya audio nyangkut pasca-close
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
   if (actx) { actx.close().catch(() => {}); actx = null; analyser = null; }
   els.hud.classList.remove('speaking');
