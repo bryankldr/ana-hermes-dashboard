@@ -638,12 +638,50 @@ function stopSpeaking() {
 
 function playMp3(url) {
   return new Promise(resolve => {
+    const done = (ok, from) => { if (speakAudio && speakAudio._url === url) speakAudio = null; if (!from) URL.revokeObjectURL(url); resolve(ok); };
     const a = new Audio(url);
+    a._url = url;
     speakAudio = a;
-    const done = ok => { if (speakAudio === a) speakAudio = null; URL.revokeObjectURL(url); resolve(ok); };
     a.onended = () => done(true);
-    a.onerror = () => { log('error', 'VOICE', 'audio playback failed'); done(false); };
-    a.play().catch(() => done(false));
+    // Autoplay policy: play() setelah run panjang sering ditolak sunyi
+    // (transient activation habis) — jangan diam, fallback WebAudio.
+    a.onerror = () => { a._url = null; playMp3WebAudio(url).then(ok => { URL.revokeObjectURL(url); resolve(ok); }); };
+    a.play().catch(e => {
+      log('note', 'VOICE', 'HTMLAudio blocked (' + ((e && e.name) || e) + ') — fallback WebAudio');
+      a._url = null; playMp3WebAudio(url).then(ok => { URL.revokeObjectURL(url); resolve(ok); });
+    });
+  });
+}
+
+// Autoplay policy: Chrome tolak Audio.play() tanpa user gesture. Jawaban datang
+// detik setelah klik → activation habis → NotAllowedError. Solusi: AudioContext
+// di-unlock di setiap gesture user, mp3 diputar lewat WebAudio (tetap jalan).
+let audioCtx = null;
+function ensureAudioUnlock() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  } catch (_) {}
+  return audioCtx;
+}
+window.addEventListener('pointerdown', ensureAudioUnlock, { passive: true });
+window.addEventListener('keydown', ensureAudioUnlock);
+function playMp3WebAudio(url) {
+  return new Promise(async resolve => {
+    try {
+      const ctx = ensureAudioUnlock();
+      if (!ctx) return resolve(false);
+      const buf = await (await fetch(url)).arrayBuffer();
+      const ab = await ctx.decodeAudioData(buf);
+      const src = ctx.createBufferSource();
+      src.buffer = ab; src.connect(ctx.destination);
+      const wrap = { _url: url, pause() { try { src.stop(); } catch (_) {} }, currentTime: 0 };
+      speakAudio = wrap;
+      src.onended = () => resolve(true);
+      src.start();
+      if (window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
+      log('voice', 'VOICE', 'TTS played (server, webaudio)');
+    } catch (e) { log('error', 'VOICE', 'audio blocked: klik layar sekali lalu ulangi (' + String((e && e.name) || e).slice(0, 60) + ')'); resolve(false); }
   });
 }
 
