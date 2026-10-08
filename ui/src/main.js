@@ -30,7 +30,7 @@ let muted = false, player = null;
 let convo = false, suppress = false;
 let recognition = null;
 let micStream = null, recorder = null, chunks = [], actx = null, analyser = null, vdata = null;
-let vad = null, spoke = false, loudAt = 0, turnStart = 0;
+let vad = null, spoke = false, loudAt = 0, turnStart = 0, bargeN = 0;
 let floorSum = 0, floorN = 0, threshold = 0.02, peak = 0, calibrating = true;
 const SILENCE = 900, MIN_TURN_MS = 350, MAX_TURN_MS = 18000, NO_SPEECH_MS = 10000;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -775,7 +775,7 @@ async function startVadMonitor() {
   try { if (micStream) micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
   micStream = null; analyser = null; vdata = null;
   if (vad) { clearInterval(vad); vad = null; }
-  spoke = false; loudAt = Date.now(); turnStart = 0;
+  spoke = false; loudAt = Date.now(); turnStart = 0; bargeN = 0;
   floorSum = 0; floorN = 0; threshold = 0.02; peak = 0; calibrating = true;
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
@@ -817,11 +817,17 @@ async function startVadMonitor() {
         if (window.voiceMetrics) window.voiceMetrics.onSpeechStart();
         setAgentState('LISTENING');
       }
-      // barge-in: user potong ANA bicara
+      // barge-in: user potong ANA bicara — butuh 3 frame keras beruntun
+      // (~300ms) + ambang 2x lipat saat ANA bicara. Tanpa ini mic dengar
+      // speaker sendiri (echo) → TTS dipotong seketika → sunyi.
       if (els.hud.classList.contains('speaking')) {
-        stopSpeaking();
-        log('voice', 'VOICE', 'barge-in — TTS dipotong');
-      }
+        if (rms > threshold * 2) bargeN++; else bargeN = 0;
+        if (bargeN >= 3) {
+          bargeN = 0;
+          stopSpeaking();
+          log('voice', 'VOICE', 'barge-in — TTS dipotong');
+        }
+      } else bargeN = 0;
       if (turnStart && nowMs - turnStart > MAX_TURN_MS) { spoke = false; turnStart = 0; }
     } else if (spoke) {
       const dur = nowMs - turnStart;
