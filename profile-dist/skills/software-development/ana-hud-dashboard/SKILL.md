@@ -2,105 +2,78 @@
 name: ana-hud-dashboard
 category: software-development
 description: Use when working on ANA HUD Dashboard project.
+version: 1.1.0
+author: bryankldr
+license: MIT
+metadata:
+  hermes:
+    tags: [ANA, HUD, Dashboard, Flutter, Hermes]
+    related_skills: [simoge-business, maplibre-running-evals]
 ---
 
 # ANA HUD Dashboard - Project Skill
 
 ## Project Location
-**Fixed path:** `/home/bryankldr/PROYEK_2026/ana-hermes-dashboard`
+**Portable root** — gunakan `$ANA_WORKDIR` (set via `.env` di tiap mesin) atau fallback `$HOME/PROYEK_2026/ana-hermes-dashboard`.
 
-> ⚠️ **CRITICAL**: Always use absolute path `/home/bryankldr/PROYEK_2026/ana-hermes-dashboard`
-> NEVER use `./home/bryankldr/PROYEK_2026/...` (leading dot breaks cd)
+> ⚠️ **CRITICAL**: Jangan hardcode `/home/bryankldr/...` di skill/config/script. Resolve via `ANA_WORKDIR` env atau `Path(__file__).resolve().parents`.
 
 ## Quick Commands
 ```bash
-cd /home/bryankldr/PROYEK_2026/ana-hermes-dashboard
-python3 server.py          # Start server on 127.0.0.1:8730
+cd "$ANA_WORKDIR"
+./start.sh                 # Start server on 0.0.0.0:8730 (picks interpreter with websockets/edge_tts + discovers hermes serve WS)
 python3 smoke.py           # Run 121 E2E checks
 python3 test_services.py   # Run 24 service assertions
 node --check ui/src/main.js # Validate JS syntax
 ```
 
-## Server Management
-```bash
-# Check if running
-ps aux | grep -E "server.py|python.*8730" | grep -v grep
+## Key Files
+- `server.py` — FastAPI dashboard (port 8730), SSE + WS, serves `ui/` static, `api/` endpoints
+- `start.sh` — bootstrap: venv, deps, python `server.py`
+- `ui/` — Flutter web build output (`index.html`, `main.dart.js`, assets)
+- `profile-dist/` — **distributable skill package** untuk deploy ke mesin lain (copy ke `~/.hermes/profiles/anna/skills/`)
+- `.env` — `ANA_PORT=8730`, `ANA_TOKEN=...`, `ANA_WORKDIR=/abs/path/ana-hermes-dashboard`
+- `smoke.py` / `test_services.py` — E2E regression
 
-# Kill if stuck
-pkill -f "python3 server.py"
-
-# Restart clean
-cd /home/bryankldr/PROYEK_2026/ana-hermes-dashboard && ANA_OPEN=0 exec python3 server.py
+## Environment (`.env`)
 ```
-
-## Project Structure
+ANA_PORT=8730
+ANA_TOKEN=<generate via: openssl rand -hex 32>
+ANA_WORKDIR=/abs/path/to/ana-hermes-dashboard  # override bila bukan $HOME/PROYEK_2026/
 ```
-ana-hermes-dashboard/
-├── server.py          # HTTP orchestrator (port 8730)
-├── services.py        # Panel data sources (no HTTP)
-├── terminal.py        # PTY backend
-├── commands.py        # Slash commands
-├── runtime.py         # Runtime/subprocess
-├── voice.py           # Voice backend
-├── smoke.py           # 121 E2E/security checks
-├── test_services.py   # 24 service tests
-├── layout.json        # Local only (gitignored)
-├── state.json         # Local only (gitignored)
-├── .ana_token         # Local only (gitignored)
-├── .ana_mode          # Local only (gitignored)
-├── .gitignore         # Excludes local artifacts
-├── ui/
-│   ├── index.html     # FUI markup
-│   ├── src/main.js    # UI orchestration
-│   ├── src/core/      # LayoutManager, API client, bus
-│   ├── src/utils/     # DOM helpers, escaping
-│   ├── src/terminal.js # PTY UI module
-│   ├── styles/        # hud.css, layout.css, tokens.css
-│   └── vendor/        # xterm.js (vendored offline)
-```
-
-## Common Pitfalls (DOCUMENTED TO PREVENT REPEAT)
-
-| Pitfall | Cause | Fix |
-|---------|-------|-----|
-| `cd: ./home/... No such file` | Leading dot in path | Use `/home/...` not `./home/...` |
-| Port 8730 in use | Old server not killed | `pkill -f "python3 server.py"` then restart |
-| Token 401 | `.ana_token` not sent | Include `x-ana-token` header |
-| Equalizer not animating | `.speaking` class missing | Call `startEqualizer()` + `els.hud.classList.add('speaking')` |
-| Panel options empty | `loadVoices()` not awaited | `await Promise.allSettled([loadVoices(), ...])` before `initPanelOptions` |
-| `ensurePanel` replaces content | Returns early if exists | Updated to update `.panel-body` in place |
-| Voice preview 401 | Missing auth header | Use `api.headers({...})` which includes token |
 
 ## Git Workflow
 ```bash
-cd /home/bryankldr/PROYEK_2026/ana-hermes-dashboard
+cd "$ANA_WORKDIR"
 git add -A
 git commit -m "type(scope): description"
 git push origin main
 ```
 
-## Test Verification Checklist
-- [ ] `python3 smoke.py` → `PASS 121 checks`
-- [ ] `python3 test_services.py` → `all checks passed`
-- [ ] `node --check ui/src/main.js ui/src/terminal.js` → `JS OK`
-- [ ] Browser: `http://127.0.0.1:8730/` loads without console errors
-- [ ] Voice preview plays audio + equalizer animates
-- [ ] Terminal opens/closes correctly
-- [ ] Panel options toggles work & persist in layout.json
+## Architecture
+```
+Flutter web (ui/)  <--WS/SSE-->  FastAPI server.py:8730  <--skills/tools-->  ANNA profile
+    ^                                                         |
+    |-- static files (index.html, main.dart.js, assets)       |-- simoge-business (SIMOGE BI)
+                                                              |-- maplibre-* (spatial eval)
+                                                              |-- ana-hud (this skill)
+```
 
-## Key Files to Reference
-- `server.py:14` — `baseUrl` from `API_BASE_URL` env
-- `ui/src/main.js` — Main UI logic, `loadVoices()`, `previewVoice()`
-- `ui/src/utils/dom.js` — `ensurePanel()` (updates body in place)
-- `ui/src/core/layout.js` — `LayoutManager` with `setPanelEnabled()`
-- `ui/styles/hud.css` — `.panel-options-menu`, `.speaking` styles
-- `smoke.py` — Canonical E2E test (read for API contracts)
+## Dev Loop
+1. Edit `server.py` / `ui/` → rebuild flutter (`flutter build web --release`)
+2. `./start.sh` restarts server (auto-reload via `watchfiles`)
+3. `python3 smoke.py` verifies 121 checks (< 30s)
 
-## Current State (as of last commit)
-- 15 content panels in Options menu (14 + TERMINAL)
-- All toggles persist to `layout.json`
-- Equalizer: only animates during `.speaking`
-- Voice preview: ElevenLabs → browser fallback
-- Vertical overflow: expected (unlock/drag/save to reposition)
-- Horizontal overflow: FIXED (0)
-- All tests passing: 121/121 smoke, 24/24 services
+## Deploy to New Machine
+```bash
+git clone <repo> "$ANA_WORKDIR"
+cp .env.example .env  # edit ANA_TOKEN, ANA_WORKDIR, ANA_PORT
+./start.sh            # server up on 0.0.0.0:8730
+cp -r profile-dist/skills/software-development/* ~/.hermes/profiles/anna/skills/software-development/
+```
+
+## Related Skills
+- `simoge-business` — SIMOGE BI engine (petak, penyadap, produksi, drum)
+- `maplibre-running-evals` — spatial map eval procedure
+- `ana-briefing` — daily briefing from vault
+- `zk-vault-ops` — Obsidian ZK + Hermes sync

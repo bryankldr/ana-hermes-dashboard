@@ -6,8 +6,8 @@ description: Use when generating ANA proactive daily briefing.
 
 Generate concise morning briefing in Indonesian. Sections:
 
-1. **Project Status** — scan `/home/bryankldr/PROYEK_2026/` for active projects, recent git commits, TODO markers
-2. **Vault Updates** — recent notes in `/home/bryankldr/anna_brain/Anna's brain/10 Daily/` and `20 Fleeting/`
+1. **Project Status** — scan `$PROYEK_ROOT` (default `$HOME/PROYEK_2026/`) for active projects, recent git commits, TODO markers
+2. **Vault Updates** — recent notes in `$OBSIDIAN_VAULT_PATH/10 Daily/` (fallback `$HOME/anna_brain/Anna's brain/10 Daily/`) and `20 Fleeting/`
 3. **Mission Queue** — open tasks from dashboard state
 4. **System** — server status, disk space, pending updates
 

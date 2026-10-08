@@ -13,7 +13,7 @@ metadata:
 
 # ZK Vault Ops
 
-Umbrella for Obsidian + Hermes workflows with `anna` vault (`/home/bryankldr/anna_brain/Anna's brain`) as canonical ZK via `OBSIDIAN_VAULT_PATH`.
+Umbrella for Obsidian + Hermes workflows with `anna` vault (`$OBSIDIAN_VAULT_PATH` fallback `$HOME/anna_brain/Anna's brain`) as canonical ZK via `OBSIDIAN_VAULT_PATH`.
 
 ## When to Use
 
