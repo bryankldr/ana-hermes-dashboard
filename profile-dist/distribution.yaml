@@ -1,5 +1,5 @@
 name: anna
-version: 0.1.0
+version: 0.2.0
 description: ANNA BI operator profile for ana-hermes-dashboard (simoge-business + hud)
 hermes_requires: ">=0.21.5"
 author: bryankldr
@@ -28,3 +28,4 @@ env_requires:
 distribution_owned:
   - SOUL.md
   - skills
+  - plugins
