@@ -12,11 +12,11 @@ let _lastUpdated = 0;
 let _renderedOnce = false;   // true setelah render pertama (beda dari updated=0)
 let _wrap = null, _canvas = null, _titleEl = null, _metaEl = null;
 
-const PALETTE = ["#2DF2FF","#38BDF8","#A78BFA","#F472B6","#FACC15","#4ADE80","#FB7185","#F97316","#22D3EE","#E879F9","#34D399","#FDE047"];
-const STATUS_TONE = { Aktif:"#4ADE80", AKTIF:"#4ADE80", "Aktif":"#4ADE80", Idle:"#FACC15", IDLE:"#FACC15",
-  Idle:"#FACC15", Bongkor:"#FB7185", BONGKOR:"#FB7185", "Tanpa penyadap":"#F97316",
-  "Multi penyadap":"#A78BFA" };
-const GOOD = "#4ADE80", WARN = "#FACC15", BAD = "#FB7185";
+const PALETTE = ["#EF4444","#FACC15","#22C55E","#3B82F6","#A78BFA","#F97316","#38BDF8","#F472B6","#22D3EE","#E879F9","#34D399","#FDE047"];
+const STATUS_TONE = { Aktif:"#22C55E", AKTIF:"#22C55E", "Aktif":"#22C55E", Idle:"#FACC15", IDLE:"#FACC15",
+  Idle:"#FACC15", Bongkor:"#EF4444", BONGKOR:"#EF4444", "Tanpa penyadap":"#F97316",
+  "Multi penyadap":"#3B82F6", Terpenuhi:"#22C55E", Kurang:"#FACC15" };
+const GOOD = "#22C55E", WARN = "#FACC15", BAD = "#EF4444", INFO = "#3B82F6";
 function palette(i){ return PALETTE[i % PALETTE.length]; }
 function hexOk(s){ return typeof s==="string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.trim()); }
 
@@ -74,7 +74,7 @@ function buildDatasets(spec){
     return {
       type: "bubble",
       datasets: [{ label: sets[0]?.label || "petak", data: pts,
-        backgroundColor: sets[0]?.color || "#2DF2FF99", borderColor: sets[0]?.color || "#2DF2FF", borderWidth: 1 }]
+        backgroundColor: sets[0]?.color || "#3B82F699", borderColor: sets[0]?.color || "#3B82F6", borderWidth: 1 }]
     };
   }
   return {

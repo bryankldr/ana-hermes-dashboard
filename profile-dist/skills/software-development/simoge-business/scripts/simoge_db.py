@@ -1483,6 +1483,56 @@ def petak_non_rtt(tahun: int, **kw):
 
 
 
+@template("laporan_perencanaan_target_setor_vs_ro_nps")
+def laporan_perencanaan_target_setor_vs_ro_nps(tahun, bulan, periode, **kw):
+    """LAPORAN PERENCANAAN TARGET SETOR VS TARGET RO/NPS per Mandor/KTS x TPG.
+
+    Kolom (urut MERENCANAKAN terbesar):
+      BKPH, TPG (alias), NAMA (TRIM first_name+last_name), KODE JAB (jabatan.kode_jabatan),
+      TARGET RO/NPS (Kg) = SUM DISTINCT petak.target_rkap * _target_pct /100,
+      MERENCANAKAN (Kg) = SUM rencana_berat periode,
+      GAP % = 100*MERENCANAKAN/TARGET.
+
+    Periode: P1=1-15, P2=16-akhir bulan, 0=full month. TARGET kumulatif s/d (bulan,periode)
+    via _target_pct (getah_target_ro_nps). MERENCANAKAN hanya di window periode.
+    Dedup petak: satu petak dihitung sekali per mandor x TPG meski ada multi rencana.
+    Wilayah filter via _wilayah_where(alias pt) bila kw berisi kode_bkph/rph/tpg.
+    Judul laporan: LAPORAN PERENCANAAN TARGET SETOR VS TARGET RO/NPS (DD MMMM YYYY)
+    dengan DD = akhir periode (e1 dari period_bounds).
+    """
+    d0, e1 = period_bounds(tahun, bulan, periode)
+    total_pct = _target_pct(tahun, bulan, periode)
+    w, wv = _wilayah_where(kw, alias="pt")
+    # dedup petak per mandor x TPG dulu, baru agregat
+    return q(f"""
+        SELECT
+            t.BKPH AS bkph,
+            t.alias AS tpg,
+            TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) AS nama,
+            COALESCE(jb.kode_jabatan, '-') AS kode_jab,
+            ROUND(SUM(d.target_rkap) * %s / 100, 1) AS target_ro_nps_kg,
+            ROUND(SUM(d.merencanakan_kg), 1) AS merencanakan_kg,
+            ROUND(100 * SUM(d.merencanakan_kg) / NULLIF(SUM(d.target_rkap) * %s / 100, 0), 1) AS gap_pct
+        FROM (
+            SELECT
+                r.user_created,
+                pt.kode_tpg,
+                pt.kode_evapot,
+                MAX(pt.target_rkap) AS target_rkap,
+                SUM(r.rencana_berat) AS merencanakan_kg
+            FROM getah_rencana_aktivitas r
+            JOIN getah_petak pt ON pt.kode_evapot = r.kode_evapot AND pt.tahun_rtt = %s
+            WHERE r.tanggal_rencana BETWEEN %s AND %s{w}
+            GROUP BY r.user_created, pt.kode_tpg, pt.kode_evapot
+        ) d
+        LEFT JOIN getah_daftar_tpg t ON t.kode_tpg = d.kode_tpg
+        LEFT JOIN directus_users u ON u.id = d.user_created
+        LEFT JOIN jabatan jb ON jb.id = u.jabatan
+        GROUP BY t.BKPH, t.alias, u.first_name, u.last_name, jb.kode_jabatan, d.kode_tpg, d.user_created
+        ORDER BY merencanakan_kg DESC
+    """, (total_pct, total_pct, tahun, d0, e1, *wv))
+
+
 @template("rencana_aktivitas")
 def rencana_aktivitas(tahun, bulan, periode, **kw):
     """Rencana berat getah per periode (getah_rencana_aktivitas.rencana_berat). Scoped wilayah bila filter diberi."""

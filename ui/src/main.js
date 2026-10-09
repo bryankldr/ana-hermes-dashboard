@@ -25,15 +25,12 @@ const ANA_TOKEN = document.querySelector('meta[name="ana-token"]')?.content || '
 
 // ═══ STATE ═══
 let running = false, answer = '', firstDelta = false, speakThisRun = true;
-let runningMsg = '', pendingParts = [], runGen = 0, mergeLock = false;   // mergeLock: satu interupsi siapkan run gabungan, sisanya numpang
 let speakDone = Promise.resolve(), activeController = null;
 let muted = false, player = null;
 let convo = false, suppress = false;
 let recognition = null;
-let recogGen = 0, bargeAt = 0;   // recogGen: restart basi dibatalkan generasi baru; bargeAt: echo gate
-let instStart = 0, userLoudAt = 0, ttsStartAt = 0;   // echo guard: overlap TTS vs user nyela
 let micStream = null, recorder = null, chunks = [], actx = null, analyser = null, vdata = null;
-let vad = null, spoke = false, loudAt = 0, turnStart = 0, bargeN = 0;
+let vad = null, spoke = false, loudAt = 0, turnStart = 0;
 let floorSum = 0, floorN = 0, threshold = 0.02, peak = 0, calibrating = true;
 const SILENCE = 900, MIN_TURN_MS = 350, MAX_TURN_MS = 18000, NO_SPEECH_MS = 10000;
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -43,10 +40,6 @@ let progSteps = [], progStart = 0, progTimer = null, progHideTimer = null;
 let codeDiffBuf = '';
 // In-flight guard for the 7s AVD poll; one server-side poll can take 18s.
 let avdPending = false;
-// Generation guard: turn_id from server, reject stale events
-let currentTurnId = 0;
-// Recognition live guard — prevent double start
-let recogLive = false;
 
 // ═══ HELPERS ═══
 // now/rid/esc/cleanForSpeech live in utils/helpers.js (imported above).
@@ -629,19 +622,13 @@ function initTelemetry() {
 // old one off instead of letting it talk over the new answer. `speakAudio` is the
 // server-MP3 <audio>; `speakUtterance` is the browser speechSynthesis fallback.
 let speakAudio = null, speakUtterance = null, speakSeq = 0;
-let speakAborts = new Set();   // AbortController fetch sintesis in-flight — diabort tiap stopSpeaking
 
 // Stop whatever ANA is saying right now. Called on every new transmit() so a new
 // question silences the previous answer — otherwise a long answer keeps reading
 // while the user already moved on.
 function stopSpeaking() {
   speakSeq++;                                  // invalidate in-flight speak() promises
-  for (const c of speakAborts) { try { c.abort(); } catch (_) {} }
-  speakAborts.clear();
-  if (speakAudio) {
-    const a = speakAudio; speakAudio = null;
-    try { if (a._forceDone) a._forceDone(); else { a.pause(); a.currentTime = 0; } } catch (_) {}
-  }
+  if (speakAudio) { try { speakAudio.pause(); speakAudio.currentTime = 0; } catch (_) {} speakAudio = null; }
   if (speakUtterance && speechSynth) { try { speechSynth.cancel(); } catch (_) {} }
   speakUtterance = null;
   stopEqualizer();
@@ -651,77 +638,13 @@ function stopSpeaking() {
 
 function playMp3(url) {
   return new Promise(resolve => {
-    const done = (ok, from) => { if (speakAudio && speakAudio._url === url) speakAudio = null; if (!from) URL.revokeObjectURL(url); resolve(ok); };
     const a = new Audio(url);
-    a._url = url;
     speakAudio = a;
+    const done = ok => { if (speakAudio === a) speakAudio = null; URL.revokeObjectURL(url); resolve(ok); };
     a.onended = () => done(true);
-    // stopSpeaking() hanya pause — onended tak selalu trigger → janji
-    // gantung → loop chunk macet. Simpan force-resolve agar stop bisa
-    // paksa lanjut.
-    a._forceDone = () => { a.onended = null; done(true); };
-    // Autoplay policy: play() setelah run panjang sering ditolak sunyi
-    // (transient activation habis) — jangan diam, fallback WebAudio.
-    a.onerror = () => { a._url = null; playMp3WebAudio(url).then(ok => { URL.revokeObjectURL(url); resolve(ok); }); };
-    a.play().catch(e => {
-      log('note', 'VOICE', 'HTMLAudio blocked (' + ((e && e.name) || e) + ') — fallback WebAudio');
-      a._url = null; playMp3WebAudio(url).then(ok => { URL.revokeObjectURL(url); resolve(ok); });
-    });
+    a.onerror = () => { log('error', 'VOICE', 'audio playback failed'); done(false); };
+    a.play().catch(() => done(false));
   });
-}
-
-// Autoplay policy: Chrome tolak Audio.play() tanpa user gesture. Jawaban datang
-// detik setelah klik → activation habis → NotAllowedError. Solusi: AudioContext
-// di-unlock di setiap gesture user, mp3 diputar lewat WebAudio (tetap jalan).
-let audioCtx = null;
-function ensureAudioUnlock() {
-  try {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-  } catch (_) {}
-  return audioCtx;
-}
-window.addEventListener('pointerdown', ensureAudioUnlock, { passive: true });
-window.addEventListener('keydown', ensureAudioUnlock);
-function playMp3WebAudio(url) {
-  return new Promise(async resolve => {
-    try {
-      const ctx = ensureAudioUnlock();
-      if (!ctx) return resolve(false);
-      const buf = await (await fetch(url)).arrayBuffer();
-      const ab = await ctx.decodeAudioData(buf);
-      const src = ctx.createBufferSource();
-      src.buffer = ab; src.connect(ctx.destination);
-      const wrap = { _url: url, pause() { try { src.stop(); } catch (_) {} }, currentTime: 0 };
-      speakAudio = wrap;
-      src.onended = () => resolve(true);
-      src.start();
-      if (window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
-      log('voice', 'VOICE', 'TTS played (server, webaudio)');
-    } catch (e) { log('error', 'VOICE', 'audio blocked: klik layar sekali lalu ulangi (' + String((e && e.name) || e).slice(0, 60) + ')'); resolve(false); }
-  });
-}
-
-// Pecah jawaban jadi kalimat (cap ~450 char, belah koma bila perlu).
-// ponytail: pre-split dari LLM stream (sintesis kalimat-1 sebelum complete) bila e2e >2s.
-function splitSentences(t) {
-  const parts = String(t).replace(/([.!?…]+["”'\)\]]?)(\s+|$)/g, '$1\n').split('\n').map(s => s.trim()).filter(Boolean);
-  const out = [];
-  const pushHard = s => {
-    // Belah keras per kata bila masih >450 pasca-koma.
-    while (s.length > 450) {
-      let cut = s.lastIndexOf(' ', 430);
-      if (cut < 100) cut = 430;
-      out.push(s.slice(0, cut).trim());
-      s = s.slice(cut).trim();
-    }
-    if (s) out.push(s);
-  };
-  for (const s of parts) {
-    if (s.length <= 450 || !/[,;:]/.test(s)) { pushHard(s); continue; }
-    for (const sub of s.split(/(?<=[,;:])\s+/)) { const y = sub.trim(); if (y) pushHard(y); }
-  }
-  return out.length ? out : [String(t)];
 }
 
 function speak(text) {
@@ -733,62 +656,35 @@ function speak(text) {
     // split at sentence boundaries and synthesize one clause at a time, so an
     // endless stream never builds a single unbounded request.
     const mySeq = ++speakSeq;
-    const finish = () => { if (mySeq === speakSeq) { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); } try { window.voiceMetrics?.onTurnComplete(); } catch (_) {} resolve(); };
+    const finish = () => { if (mySeq === speakSeq) { stopEqualizer(); els.hud.classList.remove('speaking'); if (els.core) els.core.classList.remove('speaking'); } resolve(); };
     const alive = () => mySeq === speakSeq;
     suppress = true;
     els.hud.classList.add('speaking');
     if (els.core) els.core.classList.add('speaking');
     startEqualizer();
 
-    const sess = () => window.voiceMetrics?.getSessionId();
-    // TTS chunk per kalimat: kalimat-1 disintesis lalu langsung bunyi,
-    // kalimat-2 disintesis paralel saat kalimat-1 diputar (lookahead).
-    // Latensi terdengar = sintesis 1 kalimat (~0.5s), bukan full jawaban.
-    const synthChunk = async (chunk, ci, total, totalChars) => {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (!alive()) return null;
-        const ctl = new AbortController();
-        speakAborts.add(ctl);
-        try {
-          const r = await fetch('/api/speak', {
-            method: 'POST', signal: ctl.signal,
-            headers: api.headers({ 'content-type': 'application/json' }),
-            body: JSON.stringify({ text: chunk, session_id: sess(), chunk_index: ci, total_chars: totalChars, chunk_final: ci === total - 1 })
-          });
-          if (r.ok && (r.headers.get('content-type') || '').includes('audio')) {
-            const url = URL.createObjectURL(await r.blob());
-            return url;
-          }
-        } catch (e) {
-          if (e && e.name === 'AbortError') return null;   // stopSpeaking: keluar seketika
-        } finally {
-          speakAborts.delete(ctl);
-        }
-        await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
-      }
-      return null;
-    };
-    const sentences = splitSentences(text);
+    // prefer server TTS (edge-tts mp3) — same path as voice preview
     try {
-      let nextUrl = synthChunk(sentences[0], 0, sentences.length, text.length);
-      for (let i = 0; i < sentences.length; i++) {
-        if (!alive()) { try { URL.revokeObjectURL(await nextUrl); } catch (_) {} return resolve(); }
-        const url = await nextUrl;                       // kalimat-i siap
-        if (i + 1 < sentences.length) nextUrl = synthChunk(sentences[i + 1], i + 1, sentences.length, text.length);
-        else nextUrl = null;
-        if (!alive()) { if (url) URL.revokeObjectURL(url); return resolve(); }
-        if (url) {
-          if (i === 0 && window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
-          const ok = await playMp3(url);
-          if (!ok && alive()) log('note', 'VOICE', `chunk ${i + 1}/${sentences.length} kosong — lanjut`);
+      const r = await fetch('/api/speak', {
+        method: 'POST',
+        headers: api.headers({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ text })
+      });
+      if (!alive()) return resolve();                 // superseded while synthesizing
+      if (r.ok) {
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('audio')) {
+          const blob = await r.blob();
           if (!alive()) return resolve();
-        } else if (alive()) {
-          log('note', 'VOICE', `chunk ${i + 1}/${sentences.length} gagal 3x — teks dilewati`);
+          const url = URL.createObjectURL(blob);
+          await playMp3(url);
+          finish();
+          if (alive()) log('voice', 'VOICE', 'TTS played (server)');
+          return;
         }
       }
-      finish();
-      if (alive()) log('voice', 'VOICE', `TTS played (server, ${sentences.length} chunk)`);
-      return;
+      let msg = ''; try { const j = await r.clone().json(); msg = j.error || ''; } catch (_) { msg = 'status ' + r.status; }
+      if (msg) log('note', 'VOICE', 'server TTS: ' + msg.slice(0, 120) + ' — fallback browser');
     } catch (e) {
       log('note', 'VOICE', 'server TTS error: ' + String(e).slice(0, 120) + ' — fallback browser');
     }
@@ -814,8 +710,6 @@ function speak(text) {
         u.rate = 1.0; u.pitch = 1.0; u.volume = 1;
         u.onend = u.onerror = () => {
           if (speakUtterance === u) speakUtterance = null;
-          // Report audio playback start for e2e metrics (browser TTS)
-          if (window.voiceMetrics) window.voiceMetrics.onAudioPlaybackStart();
           finish();
           if (alive()) log('voice', 'VOICE', 'TTS played (browser)');
         };
@@ -833,142 +727,6 @@ function speak(text) {
 }
 
 // ═══ VOICE CONVERSATION ═══
-// VAD native (energy-based, tanpa dependensi): parallel monitor untuk
-// SpeechRecognition — kalibrasi noise floor, deteksi turn, barge-in.
-async function startVadMonitor() {
-  try { if (micStream) micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
-  micStream = null; analyser = null; vdata = null;
-  if (vad) { clearInterval(vad); vad = null; }
-  spoke = false; loudAt = Date.now(); turnStart = 0; bargeN = 0;
-  floorSum = 0; floorN = 0; threshold = 0.02; peak = 0; calibrating = true;
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-  catch (e) { log('note', 'VOICE', 'VAD mic off — STT browser saja'); return; }
-  if (!convo) { stream.getTracks().forEach(t => t.stop()); return; }
-  micStream = stream;
-  try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === 'suspended') await actx.resume().catch(() => {});
-    const src = actx.createMediaStreamSource(stream);
-    analyser = actx.createAnalyser(); analyser.fftSize = 1024;
-    src.connect(analyser);
-    vdata = new Float32Array(analyser.fftSize);
-  } catch (e) { log('note', 'VOICE', 'VAD analyser off — STT browser saja'); return; }
-  const t0 = Date.now();
-  vad = setInterval(() => {
-    if (!convo || !analyser) return;
-    analyser.getFloatTimeDomainData(vdata);
-    let sum = 0;
-    for (let i = 0; i < vdata.length; i++) sum += vdata[i] * vdata[i];
-    const rms = Math.sqrt(sum / vdata.length);
-    peak = Math.max(peak * 0.95, rms);
-    // kalibrasi floor 600ms pertama
-    if (calibrating) {
-      floorSum += rms; floorN++;
-      if (Date.now() - t0 > 600 && floorN > 3) {
-        const floor = floorSum / floorN;
-        threshold = Math.max(0.02, floor * 3 + 0.008);
-        calibrating = false;
-      }
-      return;
-    }
-    const nowMs = Date.now();
-    const isLoud = rms > threshold;
-    if (isLoud) {
-      loudAt = nowMs;
-      if (!spoke) {
-        spoke = true; turnStart = nowMs;
-        if (window.voiceMetrics) window.voiceMetrics.onSpeechStart();
-        setAgentState('LISTENING');
-      }
-      // barge-in: user potong ANA bicara — butuh 3 frame keras beruntun
-      // (~300ms) + ambang 2x lipat saat ANA bicara. Tanpa ini mic dengar
-      // speaker sendiri (echo) → TTS dipotong seketika → sunyi.
-      if (els.hud.classList.contains('speaking')) {
-        if (rms > threshold * 2) bargeN++; else bargeN = 0;
-        if (bargeN >= 3) {
-          bargeN = 0;
-          bargeAt = Date.now();
-          stopSpeaking();
-          // Mic sudah hidup selama TTS (tak ada suppress) — JANGAN restart
-          // recognition di sini. Restart = abort instance yang sedang
-          // menangkap potongan user, plus rantai onend→restart basi ikut
-          // restart lagi → kata interupsi mati dua kali → STT bungkam.
-          // Cukup potong TTS; recognition live teruskan potongan.
-          suppress = false;
-          log('voice', 'VOICE', 'barge-in — TTS dipotong, dengar potongan');
-        }
-      } else bargeN = 0;
-      if (turnStart && nowMs - turnStart > MAX_TURN_MS) { spoke = false; turnStart = 0; }
-    } else if (spoke) {
-      const dur = nowMs - turnStart;
-      if (nowMs - loudAt > SILENCE && dur > MIN_TURN_MS) {
-        spoke = false; turnStart = 0;
-        log('voice', 'VOICE', `VAD turn ${(dur / 1000).toFixed(1)}s`);
-      }
-    } else if (nowMs - loudAt > NO_SPEECH_MS) {
-      // re-kalibrasi diam panjang (ruangan berubah)
-      floorSum = rms; floorN = 1; calibrating = true;
-      loudAt = nowMs;
-    }
-  }, 100);
-}
-// STT server-side fallback (tanpa SpeechRecognition): VAD gate -> rekam
-// turn via MediaRecorder -> POST /api/stt -> transmit teks.
-// ponytail: streaming chunked 320ms saat WebSocket audio ada.
-async function startServerSttLoop() {
-  convo = true; suppress = false;
-  els.micBtn.classList.add('on'); els.micBtn.textContent = '● Live';
-  log('voice', 'VOICE', 'server STT loop open · listening');
-  setAgentState('LISTENING');
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-  catch (e) { log('error', 'VOICE', 'mic blocked — voice off'); convo = false; els.micBtn.classList.remove('on'); els.micBtn.textContent = '🎤'; return; }
-  if (!convo) { stream.getTracks().forEach(t => t.stop()); return; }
-  micStream = stream;
-  startVadMonitor();
-  const ANA_TOK = document.querySelector('meta[name="ana-token"]')?.content || '';
-  const tick = () => {
-    if (!convo) return;
-    if (!window.MediaRecorder) { log('error', 'VOICE', 'MediaRecorder missing'); stopConvo(); return; }
-    const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '' });
-    recorder = rec; chunks = [];
-    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-    rec.onstop = async () => {
-      recorder = null;
-      if (rec._cancel || !convo) { if (convo) setTimeout(tick, 200); return; }
-      const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-      chunks = [];
-      if (blob.size < 2000) { if (convo) setTimeout(tick, 200); return; } // turn kosong
-      try {
-        const buf = await blob.arrayBuffer();
-        // resample ke PCM16 16kHz mono via OfflineAudioContext (stdlib browser)
-        const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-        const actxTmp = new (window.AudioContext || window.webkitAudioContext)();
-        const abuf = await actxTmp.decodeAudioData(buf.slice(0));
-        const dur = abuf.duration, sr = 16000, n = Math.min(Math.floor(dur * sr), sr * 30);
-        const off = new AC(1, Math.max(n, 1), sr);
-        const srcb = off.createBufferSource(); srcb.buffer = abuf; srcb.connect(off.destination); srcb.start();
-        const rendered = await off.startRendering();
-        const pcm = rendered.getChannelData(0).slice(0, n);
-        const out = new Int16Array(pcm.length);
-        for (let i = 0; i < pcm.length; i++) out[i] = Math.max(-32768, Math.min(32767, pcm[i] * 32768));
-        actxTmp.close().catch(() => {});
-        const t0 = performance.now();
-        const sid = (window.voiceMetrics && window.voiceMetrics.getSessionId && window.voiceMetrics.getSessionId()) || 'default';
-        const r = await fetch('/api/stt?lang=id', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Ana-Token': ANA_TOK }, body: out });
-        const j = await r.json().catch(() => ({}));
-        if (window.voiceMetrics) window.voiceMetrics.onSpeechEnd(true, j.confidence || 0);
-        const text = (j.text || '').trim();
-        if (text) { log('voice', 'VOICE', `server STT (${((performance.now() - t0) / 1000).toFixed(1)}s): "${text}"`); els.chatInput.value = ''; await transmit(text, { voiceInterrupt: true }); }
-      } catch (e) { log('error', 'VOICE', 'server STT failed — retry'); }
-      if (convo) setTimeout(tick, 250);
-    };
-    rec.start();
-    setTimeout(() => { try { if (rec.state === 'recording') rec.stop(); } catch (_) {} }, 8000); // cap turn 8s
-  };
-  tick();
-}
 function micToggle() {
   if (convo) { stopConvo(); return; }
   if (SpeechRecognition) {
@@ -976,59 +734,29 @@ function micToggle() {
     els.micBtn.classList.add('on'); els.micBtn.textContent = '● Live';
     log('voice', 'VOICE', 'browser speech recognition open · listening');
     setAgentState('LISTENING');
-    startBrowserRecognition();
-    startVadMonitor(); return;
+    startBrowserRecognition(); return;
   }
-  // Fallback: VAD + rekam turn -> POST /api/stt (server faster-whisper).
-  // Tanpa SpeechRecognition (Firefox dkk) voice tetap jalan, latensi +~0.5s.
-  startServerSttLoop();
+  log('error', 'VOICE', 'no speech recognition available');
 }
 function stopConvo() {
   convo = false; suppress = false;
-  recogLive = false; recogGen++;
-  if (recognition) { try { recognition.onend = null; recognition.onerror = null; recognition.abort(); } catch (_) {} try { recognition.stop(); } catch (_) {} recognition = null; }
+  if (recognition) { try { recognition.onend = null; recognition.stop(); } catch (_) {} recognition = null; }
   if (vad) { clearInterval(vad); vad = null; }
   if (recorder && recorder.state === 'recording') { recorder._cancel = true; try { recorder.stop(); } catch (_) {} }
   recorder = null;
   if (player) { try { player.pause(); } catch (_) {} }
-  // JANGAN stopSpeaking() otomatis di sini: bisa meninggalkan TTS sedang diputar
-  // dan mic permission sudah dibuang. Biarkan caller (barge-in atau manual) decide.
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  if (actx) { try { actx.close(); } catch (_) {} actx = null; analyser = null; }
+  if (actx) { actx.close().catch(() => {}); actx = null; analyser = null; }
   els.hud.classList.remove('speaking');
   els.micBtn.classList.remove('on'); els.micBtn.textContent = '🎤';
   log('voice', 'VOICE', 'conversation closed');
   setAgentState('IDLE');
 }
-function scheduleRecogRestart(ms) {
-  // Restart basi (dari onend lama / barge lama) dibatalkan generasi baru.
-  // Tanpa ini timeout 250/350ms menebang recognition yang sedang nangkap
-  // omongan user → kata hilang → STT bungkam.
-  const g = recogGen;
-  setTimeout(() => {
-    if (g !== recogGen || !convo) return;
-    if (recogLive) return;
-    startBrowserRecognition();
-  }, ms);
-}
 function startBrowserRecognition() {
-  if (!convo || !SpeechRecognition) return;
-  if (recogLive) return;   // sedang nangkap suara — jangan tebang
-  if (recognition) {
-    try { recognition.onend = null; recognition.onerror = null; recognition.abort(); } catch (_) {}
-    try { recognition.stop(); } catch (_) {}
-    recognition = null;
-  }
+  if (!convo || suppress || !SpeechRecognition) return;
   recognition = new SpeechRecognition();
   recognition.lang = 'id-ID'; recognition.interimResults = true; recognition.continuous = false;
   let finalText = '';
-  
-  // Speech start - approximate when user starts speaking
-  recognition.onstart = recognition.onaudiostart = () => {
-    recogLive = true;
-    if (window.voiceMetrics) window.voiceMetrics.onSpeechStart();
-  };
-  
   recognition.onresult = e => {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -1037,47 +765,25 @@ function startBrowserRecognition() {
     }
     const shown = (finalText || interim || '').trim();
     if (shown) els.coreLabel.textContent = 'HEARD: ' + shown.slice(0, 30);
-    
-    // Report interim/final STT timing
-    if (window.voiceMetrics) {
-      const confidence = e.results[e.results.length - 1]?.[0]?.confidence || 0;
-      const isFinal = e.results[e.results.length - 1]?.isFinal || false;
-      if (isFinal) {
-        window.voiceMetrics.onSpeechEnd(true, confidence);
-      } else {
-        window.voiceMetrics.onSpeechInterim(confidence);
-      }
-    }
   };
   // Fatal errors mean this device/browser will never work; retrying just spams
   // the event log. no-speech and aborted are normal, so they fall through to
   // the onend restart.
   const FATAL = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported']);
   recognition.onerror = e => {
-    const err = e.error || '';
-    if (err === 'aborted') { recogLive = false; return; }
-    if (err === 'no-speech') { log('voice', 'VOICE', 'no-speech — dengar lagi'); return; }
-    log('error', 'VOICE', `browser speech: ${err || 'error'}`);
-    if (FATAL.has(err)) stopConvo();
+    log('error', 'VOICE', `browser speech: ${e.error || 'error'}`);
+    if (FATAL.has(e.error)) stopConvo();
   };
   recognition.onend = async () => {
-    recogLive = false;
     const text = finalText.trim();
     if (!convo) return;
-    // Echo gate: TTS baru dipotong <1.5s lalu + hasil kosong/pendek =
-    // sisa suara ANNA di mic, bukan omongan user → buang, jangan transmit.
-    if (!text || (Date.now() - bargeAt < 1500 && text.split(/\s+/).length <= 2)) {
-      if (!text) log('voice', 'VOICE', 'STT kosong — dengar lagi');
-      else log('voice', 'VOICE', `echo sisa TTS dibuang: "${text}"`);
-      if (convo) scheduleRecogRestart(250);
-      return;
-    }
+    if (!text) { if (!suppress) setTimeout(startBrowserRecognition, 250); return; }
     log('voice', 'VOICE', `browser transcribed: "${text}"`);
     els.chatInput.value = '';
     log('send', 'SEND', `auto-sent voice: ${text}`);
-    await transmit(text, { voiceInterrupt: true });
+    await transmit(text);
     suppress = false;
-    if (convo) scheduleRecogRestart(350);
+    if (convo) setTimeout(startBrowserRecognition, 350);
   };
   setAgentState('LISTENING');
   try { recognition.start(); } catch (e) { log('error', 'VOICE', 'speech recognition failed to start'); }
@@ -1158,7 +864,7 @@ function sendFromChat() {
   autosizeChat();
   disarm();
   log('send', 'SEND', `transmit (chat): ${full}`);
-  transmit(full, { voiceInterrupt: running });
+  transmit(full);
 }
 els.sendBtn.addEventListener('click', sendFromChat);
 els.chatInput.addEventListener('input', autosizeChat);
@@ -1235,77 +941,13 @@ const TPL_GROUPS = [
 })();
 
 // ═══ TRANSMIT ═══
-// Interupsi suara saat thinking: cancel run lama, gabung relevansi.
-// Gabung murah tanpa LLM: potongan satu klausa pendek (≤8 kata, tanpa kata
-// tanya) = lanjutan → sambung ke pesan lama; sisanya = topik baru, ANNA
-// pilih yang paling relevan via instruksi merge (tanpa LLM call tambahan).
-// ponytail: skor relevansi embedding bila gabungan sering salah arah.
-function interruptWith(text) {
-  text = String(text || '').trim();
-  if (!text) return false;
-  if (!running) return false;   // tak ada yang jalan — jalur normal
-  pendingParts.push(text);
-  try {
-    fetch('/api/cancel', { method: 'POST', headers: api.headers({ 'content-type': 'application/json' }), body: '{}' }).catch(() => {});
-    if (activeController) activeController.abort();
-  } catch (_) {}
-  stopSpeaking();
-  log('voice', 'VOICE', `interupsi thinking: "${text.slice(0, 60)}" — digabung`);
-  return true;
-}
-function mergePending(oldMsg, newMsg) {
-  // oldMsg = pesan yang sedang diproses; newMsg = interupsi suara terbaru
-  // (sudah ada di pendingParts via interruptWith, jangan push ganda).
-  // Klausa pendek tanpa kata tanya → lanjutan, sambung koma.
-  // Sisanya → topik baru: pilih yang paling relevan via instruksi ke LLM.
-  const Q = /^(apa|siapa|kapan|di ?mana|ke mana|mengapa|kenapa|bagaimana|berapa|apakah|bisakah|tolong|jelaskan|buatkan|carikan|coba|gimana)\b/i;
-  const cont = [], fresh = [];
-  for (const p of pendingParts) {
-    if (p === newMsg) continue;   // newMsg digabung eksplisit di bawah
-    const words = p.split(/\s+/).length;
-    (!Q.test(p.trim()) && words <= 8 ? cont : fresh).push(p);
-  }
-  pendingParts = [];
-  const parts = [oldMsg];
-  const pNew = String(newMsg || '').trim();
-  if (pNew) {
-    const w = pNew.split(/\s+/).length;
-    if (!Q.test(pNew) && w <= 8) parts.push(pNew);   // lanjutan → sambung
-    else fresh.push(pNew);
-  }
-  let final = parts.join(', ');
-  if (cont.length) final += ', ' + cont.join(', ');
-  let note = '';
-  if (fresh.length) {
-    note = `\n\n[Catatan: saat kamu memproses pertanyaan di atas, user menyela dengan: "${fresh.join(' | ')}". ` +
-      `Bila relevan dengan pertanyaan di atas, gabungkan jadi satu jawaban. ` +
-      `Bila tidak relevan, jawab yang paling relevan saja dan abaikan sisanya.]`;
-  }
-  if (cont.length || (pNew && !fresh.includes(pNew))) log('voice', 'VOICE', `lanjutan digabung: "${[pNew, ...cont].filter(Boolean).join(' | ').slice(0, 80)}"`);
-  if (fresh.length) log('voice', 'VOICE', `topik baru saat thinking: "${fresh.join(' | ').slice(0, 80)}" — ANNA pilih relevan`);
-  return final + note;
-}
 async function transmit(message, options = {}) {
   if (!message.trim()) return;
-  // Interupsi suara saat thinking: cancel run + gabung, lalu jalan ulang
-  // dengan pesan gabungan. Beda dengan BUSY pasif — user tak perlu Esc.
-  if (running) {
-    if (options.voiceInterrupt) {
-      interruptWith(message);
-      // Retry loop: run lama mungkin belum mati (abort butuh waktu).
-      // Abort hang (>5s) → paksa flag mati, server sudah terima /api/cancel.
-      for (let i = 0; i < 17 && running; i++) await new Promise(r => setTimeout(r, 300));
-      if (running) { running = false; log('note', 'VOICE', 'run lama hang — paksa ganti ke pesan gabungan'); }
-      message = mergePending(runningMsg || message, message);
-    } else {
-      log('note', 'BUSY', `still working — "${message.slice(0, 40)}" not sent. Wait, or press Esc to cancel.`);
-      return;
-    }
-  }
+  if (running) { log('note', 'BUSY', `still working — "${message.slice(0, 40)}" not sent. Wait, or press Esc to cancel.`); return; }
   // A new question silences the previous answer. ANA now reads every answer to
   // the end, so without this a long report keeps talking over the new question.
   stopSpeaking();
-  running = true; runningMsg = message; answer = ''; firstDelta = false; speakThisRun = options.speak !== false;
+  running = true; answer = ''; firstDelta = false; speakThisRun = options.speak !== false;
   convoMsgs = [];
   const fresh = /^\/new\b/.test(message.trim());
   const id = rid();
@@ -1324,7 +966,7 @@ async function transmit(message, options = {}) {
     activeController = new AbortController();
     const res = await fetch('/api/run', {
       method: 'POST', headers: api.headers({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ message, fresh, session_id: window.voiceMetrics?.getSessionId() }), signal: activeController.signal
+      body: JSON.stringify({ message, fresh }), signal: activeController.signal
     });
     if (!res.ok) throw new Error(`backend returned HTTP ${res.status}`);
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
@@ -1338,7 +980,7 @@ async function transmit(message, options = {}) {
     if (e?.name === 'AbortError') { log('note', 'CANCEL', 'run cancelled'); setAgentState('IDLE'); progressDone(false); }
     else { log('error', 'ERROR', String(e).slice(0, 200)); setAgentState('ERROR'); progressDone(false); }
   }
-  activeController = null; running = false; runningMsg = ''; pendingParts = []; clearInterval(tick);
+  activeController = null; running = false; clearInterval(tick);
   // Nothing else resets the state to IDLE: speak() only does so via stopVoice()
   // on the path where audio actually played, and it returns early when muted or
   // the answer is empty. Without this the core label stays stuck on RESPONDING
@@ -1348,13 +990,6 @@ async function transmit(message, options = {}) {
 }
 
 function handle(ev) {
-  // Generation guard: drop events from stale turns
-  if (ev.turn_id !== undefined && ev.turn_id !== currentTurnId) {
-    log('voice', 'VOICE', `drop stale turn ${ev.turn_id} (current ${currentTurnId})`);
-    return;
-  }
-  // Update current turn id from status/first event
-  if (ev.turn_id !== undefined) currentTurnId = ev.turn_id;
   switch (ev.t) {
     case 'session':
       if (ev.session_id) {
@@ -1413,7 +1048,6 @@ function handle(ev) {
       else renderAnswer(true);
       progressDone(false);
       break;
-    case 'mode': if (ev.mode) { applyMode(ev.mode); log('note','MODE', `mode → ${ev.mode}${ev.auto?' (auto-restore)':''}`);} break;
     case 'note': log('note', 'NOTE', ev.message || ''); break;
     // thinking: kawaii spinner prose and provider wait notices. Never part of
     // `answer` — it goes to the progress trace and the core label only, so
@@ -1921,8 +1555,6 @@ async function init() {
       loadStatus();
       log('status', 'BOOT', `gateway online · ${s.runtime} core · profile=${s.profile || 'default'} · permission=${s.permission}`);
       try { const mj = await fetch('/api/mode', { headers: api.headers() }).then(r => r.json()); if (mj.mode) applyMode(mj.mode); } catch (_) {}
-  // poll mode every 3s so ana_mode_tool.set_mode() reflects even mid-run
-  setInterval(async()=>{ try{ const r=await fetch('/api/mode',{headers:api.headers()}); const j=await r.json(); if(j.mode && j.mode!==state.mode) applyMode(j.mode);}catch(_){} }, 3000);
       log('voice', 'VOICE', `channel ready — ${s.stt || 'browser'} / ${s.tts || 'browser'}`);
     } catch (e) { log('error', 'STATUS', 'server unreachable'); }
   })();

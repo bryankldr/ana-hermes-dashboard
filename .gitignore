@@ -29,3 +29,8 @@ ui/data/*.ndjson
 real-arsitektur/
 real_arsitektur.md
 ui/data/petak_simple.json
+
+# runtime backup — jangan commit
+runtime_gateway_backup.py
+runtime_gateway.py.bak_current
+*.bak_current

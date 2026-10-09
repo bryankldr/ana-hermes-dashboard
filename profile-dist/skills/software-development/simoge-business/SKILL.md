@@ -36,13 +36,11 @@ show_for_intent_packet(pkt)
 # Jawab HANYA dari pkt["kpi"]/pkt["evidence"], jangan karang angka
 ```
 Larangan: untuk KPI terdefinisi JANGAN `skill_view`/`read_file`/`search_files`/`_q()`/`ana_kpi.get_production_kpi` loop per periode — packet/batch cukup. `call_simoge_tool` hanya debug mentah. `search_files ana_kpi` + `read_file ana_kpi.py` = boros — SKILL ini sudah cukup.
-**HEMAT MUTLAK — JANGAN JUGA:** `search_files ana_mode_tool|set_mode|show_spatial` / `terminal ls scripts` / `terminal .venv/bin/python` / `which python3` / `inspect.getsource(show_dashboard)` — semua path sudah di SKILL, langsung `sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))` atau `os.getenv("ANA_WORKDIR")+"/profile-dist/.../scripts"` + `call_simoge_packet` — jangan hardcode user home. `.venv` tidak ada, pakai `python3` Hermes. Detail CLI aman & pitfalls → `references/troubleshooting.md`.
+**HEMAT MUTLAK — JANGAN JUGA:** `read_file`/`search_files`/`skill_view` untuk chart/packet/pandas/ana_chart_tool/ana_simoge_tool/ana_pandas_tool — SKILL ini sudah cukup, JANGAN baca file lagi. Juga `search_files ana_mode_tool|set_mode|show_spatial` / `terminal ls scripts` / `terminal .venv/bin/python` / `which python3` / `inspect.getsource(show_dashboard)` — semua path sudah di SKILL, langsung `sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))` atau `os.getenv("ANA_WORKDIR")+"/profile-dist/.../scripts"` + `call_simoge_packet` — jangan hardcode user home. `.venv` tidak ada, pakai `python3` Hermes. Detail CLI aman & pitfalls → `references/troubleshooting.md`.
 
-**Trend/penurunan/korelasi + chart — FIX IDEAL HEMAT (COPY-PASTE 3 CALL, jangan loop 18×, jangan hardcode):**
+**Trend/penurunan/korelasi + chart — FIX IDEAL HEMAT (COPY-PASTE 1 CALL, jangan loop 18×, jangan hardcode, TETAP DI ASISTEN):**
 ```python
-# CALL 1 — eskalasi (wajib jika prompt ada kata chart/grafik)
-from ana_mode_tool import set_mode; set_mode("coding")
-# CALL 2 — 2 packet + 1 dashboard dalam 1 execute_code (hemat 11→3 call). Data dari packet, JANGAN hardcode labels=["P1 Jan",...]
+# 1 CALL = 2 packet + 1 dashboard (hemat 11→1 call, tanpa set_mode). Chart adalah tool biasa — jalan di asisten. Data dari packet, JANGAN hardcode labels=["P1 Jan",...]
 from ana_simoge_tool import call_simoge_packet
 from ana_chart_tool import show_dashboard
 pkt_prod = call_simoge_packet("produksi_trend", {"tahun": 2026})   # kpi: breakdown[16-20], drops[<-30%], growth_pct server-side
@@ -52,21 +50,17 @@ show_dashboard(charts=[
   {"title":"Produksi per periode 2026 (kg)","type":"bar","labels":[x["label"] for x in pkt_prod["kpi"]["breakdown"]],"datasets":[{"label":"Produksi kg","data":[x["total_kg"] for x in pkt_prod["kpi"]["breakdown"]]}]},
   {"title":"Aktivitas & Penyadap 2026","type":"line","labels":[x["label"] for x in pkt_akt["kpi"]["breakdown"]],"datasets":[{"label":"Petak aktif","data":[x["n_petak_aktif"] for x in pkt_akt["kpi"]["breakdown"]]}]},
 ])
-# CALL 3 — balik TTS sebelum jawab
-from ana_mode_tool import set_mode; set_mode("asisten")
+# Tidak perlu set_mode — chart jalan di asisten. Jawab TTS 1-2 kalimat setelah dashboard.
 ```
 Aturan keras: 1× `show_dashboard(charts=[2 chart])` saja — JANGAN `show_spatial_chart` lalu `show_dashboard` (overwrite, boros 1 call). JANGAN `labels=["P1 Jan","P2 Jan",...]` hardcode — ambil dari `pkt["kpi"]["breakdown"]`. Detail per wilayah bila butuh LOCATION: `call_simoge_packet("produksi_per_wilayah", {"tahun":2026,"bulan":6,"periode":0,"level":"kode_bkph"})` # breakdown 5 BKPH
 
 
-### Mode switch aman + CHART WAJIB saat diminta
-Default `asisten` (TTS 1-2 kalimat). ATURAN KERAS: jika prompt mengandung kata `chart`/`grafik`/`visual`/`preview`/`tampilkan dalam chart`/`tampilkan chartnya` → JANGAN jawab TTS-only. WAJIB `set_mode("coding")` dulu, lalu `call_simoge_packet` + `show_dashboard` (atau `show_for_intent_packet`), baru `set_mode("asisten")` sebelum delta. TTS tanpa chart saat diminta = gagal. Server overlay juga memaksa hal sama.
-```python
-from ana_mode_tool import set_mode
-set_mode("coding")       # sebelum render berat — WAJIB jika user minta chart
-# ... call_simoge_packet + show_dashboard ...
-set_mode("asisten")      # WAJIB sebelum delta final (server juga auto-restore)
-```
-`set_mode` POST `/api/mode` (butuh `x-ana-token`+`Host`/`Origin` 127.0.0.1:8730). Fallback `.ana_mode`. UI sinkron `t:mode`+poll 3s.
+### Mode & Chart — CHART/PANDAS ADALAH TOOL DI ASISTEN (TIDAK PERLU CODING UNTUK BISNIS)
+Default `asisten` untuk SEMUA pertanyaan bisnis. **Tool bisnis tidak perlu `coding`.** `call_simoge_packet` / `call_pandas_tool` / `show_dashboard` / `show_for_intent_packet` / `show_on_map` adalah tool biasa — jalan langsung di `asisten` via **satu** `execute_code`, tanpa `set_mode`. Aturan keras:
+- SEMUA pertanyaan bisnis (statistik, tren, korelasi, ranking, chart, pandas analytical) → **TETAP di `asisten`**. Langsung `execute_code` FIX IDEAL (1-2 packet + 1 dashboard) atau `call_pandas_tool` 1-CALL. Jangan `set_mode(coding)`, jangan `read_file`/`search_files`/`skill_view` untuk cari cara — SKILL ini sudah lengkap.
+- `coding` HANYA bila user eksplisit minta artifact kode (`tampilkan code`, `buatkan file .py`, `tampilkan diff`) — bukan untuk chart/peta/tabel bisnis. Chart 1-2 visual, peta, atau tabel KPI bukan alasan coding.
+- Jawab TTS singkat (1-2 kalimat) + visual ter-render (chart/peta). TTS-only saat diminta chart/peta = gagal.
+- Server overlay sama: business tool di asisten. `set_mode` tidak dibutuhkan untuk bisnis; UI tetap `asisten`.
 
 **Analytical batch — Pandas owns processing:**
 ```python

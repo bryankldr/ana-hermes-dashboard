@@ -8,20 +8,20 @@ configured tools, browser/Chrome automation, MCP servers, skills, memory, and
 third-party integrations that your normal Hermes sessions have. Voice can use the
 browser Web Speech API, plus server-side Edge TTS (id-ID) for voice output.
 """
+import datetime
 import json
 import mimetypes
 import os
 import pathlib
-import secrets
-import sys
-import threading
 import queue
 import re
+import secrets
+import socket
+import sys
+import threading
 import time
 import traceback
 import webbrowser
-import socket
-import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -50,18 +50,16 @@ if _env.exists():
             else:
                 os.environ.setdefault(k, v)
 
-import commands         # noqa: E402
-import runtime_gateway as runtime         # noqa: E402
-import services         # noqa: E402
-import map_store        # noqa: E402
-import spatial_intel    # noqa: E402
-import spatial_chart_store  # noqa: E402
-import spatial_report_store  # noqa: E402
-import terminal as ana_terminal  # noqa: E402
-import voice            # noqa: E402
-import sysmetrics       # noqa: E402
-import voice_metrics    # noqa: E402
-import voice_stt        # noqa: E402
+import commands
+import map_store
+import runtime_gateway as runtime
+import services
+import spatial_chart_store
+import spatial_intel
+import spatial_report_store
+import sysmetrics
+import terminal as ana_terminal
+import voice
 
 # SIMOGE business API -- the `simoge-business` skill in Hermes owns all SQL.
 # The server resolves its scripts dir lazily and calls the skill's own entry
@@ -170,7 +168,8 @@ def _simoge_templates():
 
 
 def _simoge_query(template, params):
-    import decimal, datetime
+    import datetime
+    import decimal
     def _coerce(o):
         if isinstance(o, decimal.Decimal):
             return float(o)
@@ -391,7 +390,7 @@ def _build_packet(template, params, result):
         elif template == "petak_by_kph":
             packet["kpi"] = {"wilayah": [{"kode": r.get("kode"), "nama": r.get("nama_wilayah"), "petak": int(r.get("jumlah_petak") or 0), "luas": float(r.get("luas_baku") or 0)} for r in rows[:10]]}
             packet["evidence"] = [{
-                "statement": f"Top 10 wilayah: " + "; ".join(f"{w['nama'] or w['kode']}: {w['petak']} petak" for w in packet["kpi"]["wilayah"]),
+                "statement": "Top 10 wilayah: " + "; ".join(f"{w['nama'] or w['kode']}: {w['petak']} petak" for w in packet["kpi"]["wilayah"]),
                 "source": template, "value": scope_str
             }]
         
@@ -831,10 +830,9 @@ def wiki_block():
             try:
                 journal_extra = jf.read_text(encoding="utf-8", errors="replace")[:2000].strip()
                 try:
-                    stj = jf.stat()
-                    j_daily_key = (stj.st_mtime_ns, stj.st_size)
+                    _ = jf.stat()
                 except OSError:
-                    j_daily_key = None
+                    pass
             except OSError:
                 journal_extra = ""
     # T1 hemat: journal 2000c -> 400c Fokus+MIT, skip index kosong
@@ -842,9 +840,7 @@ def wiki_block():
         _lines = []
         for _l in journal_extra.splitlines():
             _s = _l.strip()
-            if "Fokus Hari Ini" in _l or _s.startswith("- [ ]") or _s.startswith("- [x]") or _s.startswith(">"):
-                _lines.append(_l)
-            elif _l.startswith("# ") and "\u2014" in _l:
+            if "Fokus Hari Ini" in _l or _s.startswith("- [ ]") or _s.startswith("- [x]") or _s.startswith(">") or _l.startswith("# ") and "\u2014" in _l:
                 _lines.append(_l)
         _c = "\n".join(_lines).strip()[:400]
         journal_extra = _c if _c else journal_extra[:400].strip()
@@ -903,7 +899,7 @@ def set_mode(v):
 # Extended with metadata for cross-tab sync and TTL.
 # Diakses dari banyak thread (ThreadingHTTPServer tanpa batas thread):
 # _stream_run tulis, /api/session tulis, /api/status baca — lindungi semua.
-SESSION: dict[str, str | None | dict | None] = {
+SESSION: dict[str, str | None | dict] = {
     "id": None,
     "meta": None,  # {"title": str, "created": float, "message_count": int} | None
 }
@@ -1023,7 +1019,7 @@ def persona():
         base = base.replace(anchor, anchor + '\n' + name_rule, 1)
     else:
         base = name_rule + '\n' + base
-    overlay = "[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. KECUALI user eksplisit minta chart/grafik/visual/preview/map/gambar → WAJIB eskalasi: set_mode(\"coding\") lalu render via call_simoge_packet+show_dashboard SEBELUM jawab. TTS-only tanpa chart saat diminta chart = GAGAL." if mode=="asisten" else "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real."
+    overlay = "[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. Semua tool bisnis (call_simoge_packet/call_pandas_tool/show_dashboard/show_on_map/chart/peta/tabel KPI) adalah TOOL BIASA — langsung execute_code TETAP di asisten, tanpa set_mode(coding). Chart/peta/pandas TIDAK butuh coding. TTS-only tanpa visual saat diminta = GAGAL." if mode=="asisten" else "[MODE: coding] Mode agen koding: hanya untuk artifact kode/file. Pertanyaan bisnis tetap di asisten."
     return "\n\n".join(x for x in (base, overlay, wiki, extra) if x)
 
 
@@ -1454,14 +1450,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(dict(current=cur, agent_name=voice.agent_name(cur), available=voice.available(), voices=voice.curated_voices()))
         if p == "/api/mode":
             return self._json(dict(mode=get_mode()))
-        if p == "/api/voice/metrics":
-            if not self._token_ok():
-                return self._unauth()
-            return self._json(voice_metrics.metrics.summary())
-        if p == "/api/voice/metrics/recent":
-            if not self._token_ok():
-                return self._unauth()
-            return self._json({"recent": voice_metrics.metrics.recent(20)})
+        # voice metrics endpoint removed (rollback TTS/STT)
+        # (GET /api/voice/metrics removed)
         if p == "/api/sysmetrics":
             if not self._token_ok():
                 return self._unauth()
@@ -1694,17 +1684,11 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
-        if p == "/api/stt":
-            raw = b""  # handler baca body biner sendiri (pre-read bikin stream habis)
-        else:
-            try:
-                raw = self._read(MAX_JSON_BODY)
-            except (TypeError, ValueError):
-                return self._json({"error": "request body too large"}, 413)
-        # Parse once, for every JSON endpoint. Valid JSON that is not an object
-        # (a bare string, number or list) used to reach `.get()` outside the
-        # try below, so the handler thread died and the client saw a closed
-        # socket with no status line at all instead of a 400.
+        # /api/stt removed (server-side STT rollback)
+        try:
+            raw = self._read(MAX_JSON_BODY)
+        except (TypeError, ValueError):
+            return self._json({"error": "request body too large"}, 413)
         if ctype == "application/json":
             try:
                 body = json.loads(raw or b"{}")
@@ -1714,7 +1698,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "body must be a JSON object"}, 400)
         else:
             body = {}
-
         if p == "/api/layout":
             try:
                 layout_file = ROOT / "layout.json"
@@ -1832,8 +1815,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "session": None})
 
         if p == "/api/speak":
-            session_id = (body.get("session_id") or "default").strip()
-            m = voice_metrics.metrics.ensure_session(session_id)
             text = (body.get("text") or "").strip()
             # TTS chunk per kalimat: metrics sesi ditulis sekali — start di
             # chunk 0 (total_chars penuh), end+complete di chunk final.
@@ -1847,16 +1828,15 @@ class Handler(BaseHTTPRequestHandler):
                     total = int(body.get("total_chars") or len(text))
                 except (TypeError, ValueError):
                     total = len(text)
-                voice_metrics.metrics.record_tts_start(session_id, total)
+                # voice_metrics removed (rollback)
             try:
                 audio = voice.speak(text)
                 if cf:
-                    voice_metrics.metrics.record_tts_end(session_id)
-                    voice_metrics.metrics.complete(session_id)
+                    pass  # voice_metrics removed (rollback)
                 return self._bytes(audio, "audio/mpeg")
             except Exception as e:
-                voice_metrics.metrics.record_error(session_id, str(e))
-                voice_metrics.metrics.complete(session_id)
+                # voice_metrics removed (rollback)
+                # voice_metrics removed (rollback)
                 return self._json({"error": str(e)[:200]}, 503)
 
         if p == "/api/voice-preview":
@@ -1920,51 +1900,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(info, 400)
             return self._json({"ok": ok, **info}, 200 if ok else 500)
 
-        if p == "/api/voice/metrics":
-            return self._json(voice_metrics.metrics.summary())
+        # voice metrics endpoint removed (rollback TTS/STT)
 
-        if p == "/api/voice/metrics/stt":
-            # Client reports STT timing from browser Web Speech API
-            session_id = (body.get("session_id") or "default").strip()
-            start_ms = float(body.get("start_ms") or 0)
-            end_ms = float(body.get("end_ms") or 0)
-            confidence = float(body.get("confidence") or 0)
-            is_final = bool(body.get("is_final") or False)
-            ok = voice_metrics.metrics.record_stt(session_id, start_ms, end_ms, confidence, is_final)
-            return self._json({"ok": ok})
+        # voice metrics sub-endpoint removed
 
-        if p == "/api/voice/metrics/tts-chunk":
-            # Client reports TTS first-chunk playback start (perceived TTS latency)
-            session_id = (body.get("session_id") or "default").strip()
-            ok = voice_metrics.metrics.record_tts_first_chunk(session_id)
-            return self._json({"ok": ok})
+        # voice metrics sub-endpoint removed
 
-        if p == "/api/stt":
-            # STT server-side: raw PCM16 mono 16kHz atau WAV di body.
-            # Query ?lang=id (default id). Kembalikan {text, language, ...}.
-            if not voice_stt.available():
-                return self._json({"error": "stt unavailable (faster-whisper missing)"}, 503)
-            ctype_stt = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
-            if ctype_stt not in {"audio/wav", "audio/x-wav", "application/octet-stream"}:
-                return self._json({"error": "audio/wav or application/octet-stream required"}, 415)
-            try:
-                audio = self._read(2 * 1024 * 1024)  # ~30s PCM16 16kHz mono
-            except (TypeError, ValueError):
-                return self._json({"error": "audio too large (max ~30s)"}, 413)
-            if not audio:
-                return self._json({"error": "empty audio"}, 400)
-            lang = (urlparse(self.path).query.split("lang=")[-1].split("&")[0] or "id")[:5] if "lang=" in urlparse(self.path).query else "id"
-            try:
-                t0 = time.time()
-                out = voice_stt.transcribe(audio, language=lang)
-                sid_stt = (body.get("session_id") or "default").strip() if isinstance(body, dict) else "default"
-                voice_metrics.metrics.ensure_session(sid_stt)
-                voice_metrics.metrics.record_stt(sid_stt, t0 * 1000, time.time() * 1000, out.get("confidence", 0), True)
-                return self._json(out)
-            except Exception as e:
-                return self._json({"error": str(e)[:200]}, 500)
-
-        # ── terminal endpoints ──────────────────────────────
+        # /api/stt removed (server-side STT rollback)
         if p == "/api/terminal":
             # A bad action, id or dimension is a client mistake, so nothing in
             # here may raise past this handler: the thread would die and the
@@ -2181,7 +2123,7 @@ class Handler(BaseHTTPRequestHandler):
             _b_wiki = wiki_block()
             _b_ctx = commands.context_block()
             _b_mode = get_mode()
-            _b_overlay = ("[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. KECUALI user eksplisit minta chart/grafik/visual/preview/map/gambar → WAJIB eskalasi: set_mode(\"coding\") lalu render via call_simoge_packet+show_dashboard SEBELUM jawab. TTS-only tanpa chart saat diminta chart = GAGAL."
+            _b_overlay = ("[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. Semua tool bisnis (packet/pandas/chart/peta) adalah TOOL BIASA — langsung execute_code TETAP di asisten, tanpa set_mode(coding). Chart/peta TIDAK butuh coding. TTS-only tanpa visual = GAGAL."
                           if _b_mode == "asisten" else
                           "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real.")
             _budget_init = dict(t="budget", persona=len(_b_base), overlay=len(_b_overlay),
@@ -2267,7 +2209,7 @@ class Handler(BaseHTTPRequestHandler):
                 session_id = session_id.strip()
             else:
                 session_id = "default"
-            m = voice_metrics.metrics.ensure_session(session_id)
+            # voice_metrics removed (rollback)
             _llm_first = False
             for ev in runtime.run(message, sid0, system):
                 # Only remember a real Hermes session, never demo/mock identifiers.
@@ -2289,26 +2231,16 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         tok = 0
                     if tok:
-                        voice_metrics.metrics.record_llm_end(session_id, tok)
+                        pass  # voice_metrics removed (rollback)
                 if ev.get("t") == "complete" and runtime.valid_session(sid):
                     _session_set(sid)
                     _session_bump_count()
-                    m = voice_metrics.metrics.get(session_id)
-                    if m:
-                        tokens = ev.get("tokens", 0)
-                        if isinstance(tokens, str):
-                            try:
-                                tokens = int(tokens)
-                            except Exception:
-                                tokens = 0
-                        elif not isinstance(tokens, int):
-                            tokens = 0
-                        voice_metrics.metrics.record_llm_end(session_id, tokens)
+                    # voice_metrics removed (rollback) — token metrics stripped
                 if ev.get("t") == "error":
                     _clear_session()       # drop a bad/stale session so the next run is fresh
                 if ev.get("t") == "delta" and not _llm_first:
                     _llm_first = True
-                    voice_metrics.metrics.record_llm_ttft(session_id)
+                    # voice_metrics removed (rollback)
                 emit(ev)
         except (BrokenPipeError, ConnectionResetError):
             pass                                          # client navigated away
@@ -2318,11 +2250,11 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         finally:
-            # Auto-restore: if ANNA escalated to coding for this run, return to asisten.
-            # Aman: default HUD adalah asisten (TTS ringkas). ANNA yang butuh coding
-            # wajib panggil ana_mode_tool.set_mode('coding') sebelum render, dan
-            # set_mode('asisten') sebelum delta final. Jika lupa, server balikin
-            # otomatis supaya run berikutnya tidak bocor markdown ke TTS.
+            # Auto-restore: jika run diawali asisten lalu ANNA eskalasi ke coding,
+            # balikin ke asisten agar run berikutnya tidak bocor markdown ke TTS.
+            # Catatan: SEMUA tool bisnis (packet/pandas/chart/peta) adalah TOOL BIASA
+            # di asisten — TIDAK butuh coding. Coding HANYA untuk artifact kode/file
+            # (bukan bisnis); auto-restore hanya safety net bila lupa balik.
             try:
                 cur = get_mode()
                 ini = locals().get('_run_initial_mode', 'asisten')

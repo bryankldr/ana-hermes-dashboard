@@ -429,7 +429,7 @@ def show_for_intent_packet(pkt: dict, **kw):
 def _bullet(actual, target, title, unit="ton", meta=None):
     """Aktual vs target. >=100% hijau, <60% merah, selain itu kuning."""
     a, t = _num(actual), _num(target)
-    tone = "#4ADE80" if t and a >= t else ("#FB7185" if t and a < t * 0.6 else "#FACC15")
+    tone = "#22C55E" if t and a >= t else ("#EF4444" if t and a < t * 0.6 else "#FACC15")
     pct = (a / t * 100) if t else 0
     gap = a - t
     n = (lambda v: _fmt_kg(v) if unit == "ton" else _fmt_id(v))
@@ -439,11 +439,11 @@ def _bullet(actual, target, title, unit="ton", meta=None):
             "options": {"target": t, "yLabel": unit, "showLegend": False}}
     return show_dashboard(
         title=title or "AKTUAL vs TARGET", charts=[spec],
-        narration=(f"Aktual {n(a)} {unit} dari target {n(t)} {unit} atau {pct:.2f}%, "
+        narration=(f"Aktual {n(a)} {unit} dari target {n(t)} {unit} atau {pct:.1f}%, "
                    f"sehingga {'terlampaui' if gap >= 0 else 'tertinggal'} "
-                   f"{_fmt_num(abs(gap), 2)} {unit}."),
-        evidence=[{"statement": f"Gap {unit} {_fmt_num(abs(gap), 2)}",
-                   "source": f"{a:.2f} - {t:.2f}", "value": _fmt_num(abs(gap), 2),
+                   f"{_fmt_num(abs(gap), 1)} {unit}."),
+        evidence=[{"statement": f"Gap {unit} {_fmt_num(abs(gap), 1)}",
+                   "source": f"{a:.1f} - {t:.1f}", "value": _fmt_num(abs(gap), 1),
                    "unit": unit}],
         meta=meta)
 
@@ -458,11 +458,11 @@ def _waterfall(target, actual, title, unit="ton", meta=None):
             "options": {"target": t, "showLegend": False}}
     return show_dashboard(
         title=title or "TARGET KE AKTUAL KE GAP", charts=[spec],
-        narration=(f"Target {_fmt_num(t, 0)} {unit}, aktual {_fmt_num(a, 0)} {unit}. "
-                   f"Selisih {'positif' if gap >= 0 else 'negatif'} {_fmt_num(abs(gap), 0)} {unit}."),
-        evidence=[{"statement": f"Gap {_fmt_num(abs(gap), 0)} {unit}",
+        narration=(f"Target {_fmt_num(t, 1)} {unit}, aktual {_fmt_num(a, 1)} {unit}. "
+                   f"Selisih {'positif' if gap >= 0 else 'negatif'} {_fmt_num(abs(gap), 1)} {unit}."),
+        evidence=[{"statement": f"Gap {_fmt_num(abs(gap), 1)} {unit}",
                    "source": f"{a:.0f} - {t:.0f}",
-                   "value": f"{abs(gap):.0f}".replace(",", "."), "unit": unit}],
+                   "value": f"{abs(gap):.1f}".replace(",", "."), "unit": unit}],
         meta=meta)
 
 
@@ -679,13 +679,13 @@ def _qa_narrative(tpl, rows, q):
         d = rows[0]
         return (f"Ada {_fmt_id(_num(d.get('jumlah_petak')))} petak di KPH Barat "
                 f"untuk RTT {d.get('tahun', '?')}, total luas "
-                f"{_fmt_num(_num(d.get('total_luas_baku')), 2)} ha.")
+                f"{_fmt_num(_num(d.get('total_luas_baku')), 1)} ha.")
     if tpl == "petak_area":
         d = rows[0]
         return (f"Total luas baku {_fmt_num(_num(d.get('luas_baku_total')), 2)} ha "
                 f"dari {_fmt_id(_num(d.get('jumlah_petak')))} petak. "
                 f"Yang sudah jadi andil (daerah provinsi) "
-                f"{_fmt_num(_num(d.get('luas_andil_total')), 2)} ha, "
+                f"{_fmt_num(_num(d.get('luas_andil_total')), 1)} ha, "
                 f"atau {_fmt_num(_num(d.get('rasio_andil_pct')), 1)}%.")
     if tpl == "petak_bongkor":
         # template ini 1 baris per PETAK (bukan agregat per wilayah)
@@ -705,7 +705,7 @@ def _qa_narrative(tpl, rows, q):
         # satuan target_rkap TIDAK diverifikasi (lihat catatan rkap_achievement),
         # jadi tampilkan mentah - jangan dikonversi ke ton lalu terlihat implausibel.
         return (f"Petak {d.get('nomor_petak', '?')}, luas "
-                f"{_fmt_num(_num(d.get('luas_baku')), 2)} ha, target RKAP "
+                f"{_fmt_num(_num(d.get('luas_baku')), 1)} ha, target RKAP "
                 f"{_fmt_num(_num(d.get('target_rkap')), 1)} (satuan sesuai DB). "
                 + (f"Terisi {_fmt_id(pohon)} pohon. " if pohon else "")
                 + f"BKPH {d.get('kode_bkph', '?')}, TPG {d.get('kode_tpg', '?')}, "
@@ -813,7 +813,7 @@ def run_business_review(tahun, bulan, periode=0, level="kode_bkph", level_label=
         kpis += [
             {"label": "PRODUKSI", "value": _fmt_kg(act_kg), "unit": "ton"},
             {"label": "TARGET", "value": _fmt_kg(tgt_kg), "unit": "ton"},
-            {"label": "ACHIEVEMENT", "value": f"{ach:.2f}%",
+            {"label": "ACHIEVEMENT", "value": f"{ach:.1f}%",
              "tone": "good" if ach >= 100 else ("warn" if ach >= 60 else "bad")},
         ]
     t_petak = sum(_num(r.get("total_petak")) for r in petak_rows)
@@ -937,12 +937,12 @@ def run_business_review(tahun, bulan, periode=0, level="kode_bkph", level_label=
                                     "periode": periode, "limit": 2000}}})
 
     # -- 4. PRODUKSI: bullet + ranking wilayah ------------------------------
-    prod_charts, prod_kpis, act_kg, tgt_kg = [], [], 0.0, 0.0
+    prod_charts, prod_kpis, act_kg, tgt_kg, ach_pct = [], [], 0.0, 0.0, 0.0
     if prod_rows:
         act_kg = sum(_num(r.get("actual_kg")) for r in prod_rows)
         tgt_kg = sum(_num(r.get("target_kg")) for r in prod_rows)
-        tone = ("#4ADE80" if act_kg >= tgt_kg else
-                "#FB7185" if tgt_kg and act_kg < tgt_kg * 0.6 else "#FACC15")
+        tone = ("#22C55E" if act_kg >= tgt_kg else
+                "#EF4444" if tgt_kg and act_kg < tgt_kg * 0.6 else "#FACC15")
         prod_charts.append({
             "type": "bullet", "title": "Produksi vs Target",
             "labels": ["ton"],
@@ -950,19 +950,32 @@ def run_business_review(tahun, bulan, periode=0, level="kode_bkph", level_label=
             "options": {"target": tgt_kg / 1000.0, "yLabel": "ton", "showLegend": False}})
         top = sorted(prod_rows, key=lambda r: -_num(r.get("actual_kg")))[:10]
         prod_charts.append({
-            "type": "h_bar", "title": "Produksi per wilayah",
+            "type": "h_bar", "title": "Produksi per wilayah (ton)",
             "labels": [_nm(r) for r in top],
             "datasets": [{"label": "ton",
                           "data": [_num(r.get("actual_kg")) / 1000.0 for r in top]}]})
+        # chart kedua: pencapaian % per wilayah (tonase saja tidak cukup — operator butuh % vs target)
+        top_pct = sorted(prod_rows, key=lambda r: -(_num(r.get("actual_kg"))/_num(r.get("target_kg")) if _num(r.get("target_kg")) else 0))[:10]
+        prod_charts.append({
+            "type": "h_bar", "title": "Pencapaian per wilayah (%)",
+            "labels": [_nm(r) for r in top_pct],
+            "datasets": [{"label": "% capai",
+                          "data": [round(_num(r.get("actual_kg"))/_num(r.get("target_kg"))*100, 1) if _num(r.get("target_kg")) else 0 for r in top_pct]}],
+            "options": {"yLabel": "%"}})
+        ach_pct = (act_kg / tgt_kg * 100) if tgt_kg else 0
         prod_kpis = [
-            {"label": "AKTUAL", "value": _fmt_kg(act_kg), "unit": "ton"},
+            {"label": "AKTUAL", "value": _fmt_kg(act_kg), "unit": "ton", "sub": f"{ach_pct:.1f}% dari target"},
             {"label": "TARGET", "value": _fmt_kg(tgt_kg), "unit": "ton"},
+            {"label": "CAPAI", "value": f"{ach_pct:.1f}", "unit": "%",
+             "tone": "good" if ach_pct >= 100 else ("warn" if ach_pct >= 60 else "bad"),
+             "sub": f"gap {_fmt_num(abs(act_kg - tgt_kg)/1000.0, 1)} ton"},
             {"label": "GAP", "unit": "ton",
-             "value": _fmt_num(abs(act_kg - tgt_kg) / 1000.0, 2),
+             "value": _fmt_num(abs(act_kg - tgt_kg) / 1000.0, 1),
              "tone": "good" if act_kg >= tgt_kg else "bad"}]
     secs.append({"key": "produksi", "title": "Kondisi Produksi",
                  "narrative": (f"Produksi aktual {_fmt_kg(act_kg)} ton dari target "
-                               f"{_fmt_kg(tgt_kg)} ton." if prod_rows else
+                               f"{_fmt_kg(tgt_kg)} ton — pencapaian {ach_pct:.1f}%."
+                               if prod_rows else
                                "Data produksi tidak tersedia untuk scope ini."),
                  "kpis": prod_kpis, "charts": prod_charts,
                  "evidence": [{"statement": "Produksi aktual dibanding target",
