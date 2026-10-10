@@ -97,11 +97,19 @@
 .map-fly-top .spatial-toggle-btn { flex: 0 0 auto; align-self: center; }
 /* Desktop: toolbar selebar isi (cap 560px), bukan full-width. Specificity di atas rule generik .map-fly. */
 #mapPanel .map-fly-top .spatial-toolbar.flying { flex: 0 1 auto; width: auto; max-width: 560px; min-width: 0; align-self: center; }
-.map-fly-top .spatial-filters.flying, .map-fly-top .map-tools.flying { flex: 1 1 100%; }
+.map-fly-top .spatial-filters.flying, .map-fly-top .map-tools.flying { flex: 1 1 100%; width: 100%; box-sizing: border-box; }
+/* Desktop: filter + pencarian selebar bar (toggle 30 + gap 6 + toolbar ≤560 = ≤596px),
+   tepi kiri-kanan sejajar toolbar. Kartu sama dengan toolbar. */
+#mapPanel .map-fly-top .spatial-filters.flying { max-width: 596px; }
+#mapPanel .map-fly-top .map-tools.flying { max-width: 596px; display: flex; gap: 6px; align-items: center; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; padding: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+#mapPanel .map-fly-top .map-tools.flying input { flex: 1 1 auto; min-width: 0; min-height: 30px; }
+#mapPanel .map-fly-top .map-tools.flying button { flex: 0 0 auto; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 8px; }
 /* Tablet + mobile: bar full-width, toolbar isi sisa. */
 @media (max-width: 1024px) {
   #mapPanel .map-fly-top { width: 100%; max-width: 100%; }
   #mapPanel .map-fly-top .spatial-toolbar.flying { flex: 1 1 auto; width: auto; max-width: none; }
+  #mapPanel .map-fly-top .spatial-filters.flying,
+  #mapPanel .map-fly-top .map-tools.flying { max-width: none; }
 }
 @media (max-width: 560px) {
   #mapPanel .map-fly-top .spatial-toolbar.flying { flex-wrap: wrap; }
