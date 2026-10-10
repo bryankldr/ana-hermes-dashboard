@@ -1,6 +1,6 @@
 # SPATIAL MAP — Audit UI + Konsep (2026-10-10)
 
-Status: KONSEP — belum eksekusi. Tunggu persetujuan user.
+Status: SELESAI K1–K6 — commit dc24fbb (2026-10-10). K7 tak disentuh sesuai konsep.
 
 ## 1. Struktur sekarang (audit baca kode)
 
