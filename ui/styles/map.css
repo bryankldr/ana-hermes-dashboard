@@ -88,12 +88,15 @@
 #mapPanel .panel-title .sh-badge.periode { color: var(--neon); border-color: var(--neon-border-strong); }
 #mapPanel .panel-title .sh-badge.mode-asisten { color: #39F5A6; border-color: rgba(57,245,166,.35); }
 #mapPanel .panel-title .sh-badge.mode-coding { color: var(--text-dim); }
-/* K6: tombol tiles ⚙ di header panel (ops, bukan toolbar bisnis). */
-#mapPanel .panel-title .sh-tiles { border: 1px solid var(--neon-border); background: transparent; color: var(--text-dim); border-radius: 6px; font-size: 10px; padding: 2px 6px; cursor: pointer; line-height: 1.4; }
-#mapPanel .panel-title .sh-tiles:hover { color: var(--neon); border-color: var(--neon); }
+/* K6: tombol tiles ⚙ di header panel (ops, bukan toolbar bisnis). Sejajar badge: pill 22px, ikon redup → neon saat hover. */
+#mapPanel .panel-title .sh-tiles { border: 1px solid var(--neon-border); background: rgba(2,15,42,.6); color: var(--text-dim); border-radius: 999px; font-size: 11px; width: 24px; height: 22px; display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; line-height: 1; transition: color .15s, border-color .15s, background .15s; }
+#mapPanel .panel-title .sh-tiles:hover { color: var(--neon); border-color: var(--neon); background: rgba(0,220,255,.12); }
 /* toggle toolbar: 1 tombol seukuran tombol layer (30x30), sembunyikan
    toolbar + filter + pencarian sekaligus. Pola sama seperti layer control. */
-.map-fly-top { position: relative; top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: calc(100% - 88px); overflow: visible; align-items: flex-start; pointer-events: none; }
+.map-fly-top { position: relative; top: 8px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; max-height: calc(100% - 88px); overflow: visible; pointer-events: none; }
+.map-fly-top .spatial-toggle-btn { flex: 0 0 auto; align-self: center; }
+.map-fly-top .spatial-toolbar.flying { flex: 1 1 auto; width: auto; min-width: 0; align-self: center; }
+.map-fly-top .spatial-filters.flying, .map-fly-top .map-tools.flying { flex: 1 1 100%; }
 .spatial-toggle-btn { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--neon); cursor: pointer; padding: 0; flex: 0 0 auto; }
 .spatial-toggle-btn:hover { background: rgba(0,220,255,.14); border-color: var(--neon); }
 .spatial-toggle-btn.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
@@ -253,14 +256,15 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 
 .leaflet-top { top: 56px; }
 .leaflet-bottom.leaflet-left { bottom: 72px; }
-.leaflet-top.leaflet-right { top: 8px; }
-/* kanan-atas: skala pojok, lalu layer, lalu zoom di bawah kontrol layer */
-.leaflet-top.leaflet-right .leaflet-control { margin-bottom: 6px; }
-/* zoom + skala serasi tema toolbar */
+.leaflet-top.leaflet-right { top: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.leaflet-top.leaflet-right .leaflet-control { margin: 0 !important; float: none !important; clear: none !important; }
+/* Kolom kanan-atas desktop: layers → zoom → skala → badge. Satu kolom, gap rata 8px, lebar seragam. */
 #mapPanel .leaflet-bar { border: 1px solid rgba(45,242,255,.28); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
-#mapPanel .leaflet-bar a { background: rgba(2,15,42,.88); color: var(--neon); border-bottom: 1px solid rgba(45,242,255,.18); font-family: var(--font-mono); backdrop-filter: blur(10px); }
+#mapPanel .leaflet-bar a { width: 30px; height: 30px; line-height: 30px; background: rgba(2,15,42,.88); color: var(--neon); border-bottom: 1px solid rgba(45,242,255,.18); font-family: var(--font-mono); backdrop-filter: blur(10px); }
+#mapPanel .leaflet-bar a:last-child { border-bottom: none; }
 #mapPanel .leaflet-bar a:hover { background: rgba(0,220,255,.14); color: var(--neon); }
-#mapPanel .leaflet-control-scale-line { background: none; border: none; border-left: 2px solid var(--text-body); border-right: 2px solid var(--text-body); border-bottom: 2px solid var(--text-body); color: #fff; font-family: var(--font-mono); font-size: 10px; text-shadow: 0 1px 3px rgba(0,0,0,.9); box-shadow: none; }
+#mapPanel .leaflet-control-scale { margin-top: 2px !important; }
+#mapPanel .leaflet-control-scale-line { background: rgba(2,15,42,.88); border: 1px solid rgba(45,242,255,.28); border-top: none; border-radius: 0 0 6px 6px; color: var(--text-body); font-family: var(--font-mono); font-size: 10px; padding: 2px 8px 3px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.45); }
 /* opsi layer serasi toolbar/filter */
 #mapPanel .leaflet-control-layers { background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--text-body); font-family: var(--font-mono); font-size: 12px; }
 #mapPanel .leaflet-control-layers-toggle { width: 30px; height: 30px; border-radius: 8px; }
@@ -268,7 +272,8 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 #mapPanel .leaflet-control-layers label { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
 #mapPanel .leaflet-control-layers-separator { border-color: rgba(45,242,255,.18); }
 .leaflet-control-zoom { margin-top: 4px !important; }
-.zoom-badge { margin-top: 6px; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(45,242,255,.28); background: rgba(2,15,42,.92); backdrop-filter: blur(10px); color: var(--neon); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.45); pointer-events: none; }
+/* Badge zoom info: sejajar kolom kanan, selebar tombol zoom, teks 2 baris rapi. */
+.zoom-badge { margin: 0; min-width: 62px; max-width: 110px; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(45,242,255,.28); background: rgba(2,15,42,.92); backdrop-filter: blur(10px); color: var(--neon); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-align: center; line-height: 1.5; white-space: nowrap; box-shadow: 0 6px 20px rgba(0,0,0,.45); pointer-events: none; }
 
 @media (max-width: 900px){
   .map-bottom-bar { flex-wrap: wrap; align-items: stretch; }

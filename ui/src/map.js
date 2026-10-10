@@ -257,15 +257,21 @@ export function initMapPanel({ log = () => {} } = {}) {
   window.L.control.scale({ position: 'topright' }).addTo(map);
   window.L.control.layers({ 'Satelit': satGroup, 'Gelap': dark }, { 'Petak': petakLayer }, { position: 'topright' }).addTo(map);
   window.L.control.zoom({ position: 'topright' }).addTo(map);
-  // zoom-badge: angka zoom + tier di bawah tombol +/- (audit viewport/centroid)
+  // zoom-badge: angka zoom + tier tepat di bawah skala (urutan: skala → badge → layers → zoom)
   (function(){
     try {
       const zb = document.createElement('div');
       zb.id = 'zoomBadge'; zb.className = 'zoom-badge';
       zb.textContent = 'Z' + map.getZoom();
-      // selipkan di leaflet-top leaflet-right tepat setelah control zoom
+      // append dulu lalu susun ulang: skala → badge → layers → zoom
       const tr = box.querySelector('.leaflet-top.leaflet-right');
-      if (tr) tr.appendChild(zb); else box.appendChild(zb);
+      if (tr) {
+        tr.appendChild(zb);
+        const sc = tr.querySelector('.leaflet-control-scale');
+        const ly = tr.querySelector('.leaflet-control-layers');
+        const zm = tr.querySelector('.leaflet-control-zoom');
+        if (sc && ly && zm) tr.append(sc, zb, ly, zm);
+      } else box.appendChild(zb);
       window.__anaZoomBadge = zb;
       const upd = () => { try { const z = map.getZoom(); const t = (z <= 11 ? 'PMTiles' : 'GeoJSON'); zb.textContent = 'Z' + z + ' \u00b7 ' + t; zb.dataset.zoom = String(z); } catch(_){} };
       map.on('zoomend', upd); map.on('moveend', upd); // moveend juga untuk sinkron setelah fit_all
