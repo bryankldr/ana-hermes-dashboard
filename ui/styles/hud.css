@@ -15,7 +15,7 @@ html, body {
 
 /* ── HUD Canvas ── */
 .hud {
-  width: 100vw; height: 100vh;
+  width: 100%; height: 100%;
   position: relative;
   overflow: hidden;
   background:
@@ -78,11 +78,35 @@ html, body {
 
 .top-controls {
   position: absolute;
-  top: 12px; left: 50%;
-  transform: translateX(-50%);
+  top: 8px; left: 12px;
+  transform: none;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
   z-index: 20;
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.top-controls::-webkit-scrollbar { display: none; }
+
+/* ═══ HUD DRAWER (FASE 3) ═══ — floating ☰ 38x26, gaya sama tombol header.
+   Mobile (<780px, body.hud-header-hidden): header 3 strip sembunyi sebagai
+   drawer, peta full-body. Desktop: tombol sembunyi, header selalu tampil. */
+.hud-drawer-btn {
+  position: absolute; top: 8px; left: 12px; z-index: 50;
+  width: 38px; height: 26px; padding: 0;
+  display: none; align-items: center; justify-content: center; font-size: 14px;
+  background: rgba(10,25,47,.85); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--foreground); cursor: pointer;
+}
+.hud-drawer-btn:hover { border-color: var(--neon); color: var(--neon); }
+@media (max-width: 779px) { .hud-drawer-btn { display: inline-flex; } }
+@media (max-width: 779px) {
+  body:not(.hud-header-open) .top-controls,
+  body:not(.hud-header-open) .top-dials,
+  body:not(.hud-header-open) .bottom-telemetry { display: none !important; }
+  body.hud-header-open .top-controls { top: 40px; }
 }
 
 /* ═══ TOP DIALS ═══ */
@@ -99,16 +123,21 @@ html, body {
    meant the panel resized but the dials stayed the same size. */
 .top-dials {
   position: absolute;
-  top: 25px; left: 50%;
-  transform: translateX(-50%);
-  display: flex; gap: 12px;
-  align-items: stretch;
-  padding-bottom: 16px;
+  top: 8px; left: auto; right: 10px;
+  transform: none;
+  display: flex; gap: 6px;
+  align-items: center;
+  width: auto;
+  padding-bottom: 0;
   z-index: 15;
-  cursor: grab;
+  cursor: default;
 }
-.top-dials:active { cursor: grabbing; }
-.top-dials .dial { pointer-events: none; }
+.top-dials:active { cursor: default; }
+/* dial terima hover sendiri (tooltip native per dial, gaya sama topControls).
+   FASE 1: strip statis — tanpa drag, cursor default. Ukuran kunci 30px:
+   container width:auto + .dial flex:1 basis 0 bikin dial susut ke min 28
+   dan tinggi ikut (svg ikut lebar via aspect ratio). */
+.top-dials .dial { cursor: default; flex: none; width: 30px; height: 30px; min-width: 0; max-width: none; }
 
 /* Dial is sized by the flex row, not by a fixed px: flex:1 shares the panel
    width, and the SVG keeps a circular shape via preserveAspectRatio on its
@@ -135,26 +164,12 @@ html, body {
 .dial-arc { transition: d 240ms ease-out; }
 .dial-needle { transition: none; }
 
-.dial-label {
-  position: absolute;
-  bottom: -14px; left: 50%;
-  transform: translateX(-50%);
-  font-size: 11px; color: var(--text-dim);
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.dial-val {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 11px;
-  color: var(--text-header);
-  pointer-events: none;
-}
+/* teks dial (label + angka) tidak dirender sama sekali — aturan sama topControls:
+   ikon saja, teks hanya via title native per dial ("CPU 42%") saat hover */
+.dial-label,
+.dial-val { display: none; }
 /* metrik tak terbaca (GPU absen, offline) — arc disembunyikan, bukan dipalsukan 0 */
 .dial.dial-na .dial-arc { opacity: 0; }
-.dial.dial-na .dial-val { opacity: 0.45; }
 
 /* ── LEFT RAIL ═══ */
 .left-rail {
@@ -464,14 +479,19 @@ html, body {
 /* ═══ BOTTOM TELEMETRY ═══ */
 .bottom-telemetry {
   position: absolute;
-  bottom: 8px; left: 50%;
-  transform: translateX(-50%);
-  display: flex; align-items: center; gap: 12px;
+  top: 8px; right: 200px;
+  left: auto; bottom: auto;
+  transform: none;
+  display: flex; align-items: center; gap: 2px;
   z-index: 15;
+  max-width: calc(100% - 220px);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.bottom-telemetry::-webkit-scrollbar { display: none; }
 
 .tele-left, .tele-right {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: 2px;
 }
 
 /* Thermometer, not a percentage bar: the fill maps 20C..100C across its width
@@ -480,7 +500,7 @@ html, body {
    needing the number. */
 .tele-thermo {
   position: relative;
-  width: 80px; height: 8px;
+  width: 48px; height: 6px;
   background: rgba(0, 220, 255, 0.08);
   border: 1px solid rgba(0, 220, 255, 0.18);
   border-radius: 4px;
@@ -525,7 +545,7 @@ html, body {
 }
 
 .tele-center {
-  width: 100px; height: 32px;
+  width: 48px; height: 16px;
   position: relative;
 }
 
@@ -533,16 +553,16 @@ html, body {
   width: 100%; height: 100%;
 }
 
-#equalizerWrap {
-  /* draggable wrapper, children injected by LayoutManager */
-}
+.tele-left { order: 1; }
+.tele-right { order: 2; }
+.tele-center { order: 3; }
 
 /* ═══ INTERACTION LAYER ═══ */
 #response {
   position: absolute;
   left: 50%; top: 50%;
   transform: translate(-50%, -50%);
-  width: 320px; height: 180px;
+  width: min(320px, calc(100% - 20px)); height: 180px;
   z-index: 20;
 }
 
@@ -555,7 +575,7 @@ html, body {
   position: absolute;
   bottom: 8px; left: 50%;
   transform: translateX(-50%);
-  width: 400px;
+  width: min(400px, calc(100% - 20px));
   min-height: 41px;
   z-index: 20;
   display: flex; gap: 8px;
@@ -816,7 +836,7 @@ html, body {
   position: absolute;
   top: 60px; left: 50%;
   transform: translateX(-50%);
-  width: 300px;
+  width: min(300px, calc(100% - 20px));
   max-height: 150px;
   background: rgba(0, 26, 56, 0.85);
   border: 1px solid var(--neon-dim);
@@ -825,7 +845,10 @@ html, body {
   display: none;
 }
 
-.code-viewer.visible { display: block; }
+.code-viewer.visible { display: block; z-index: 12 !important; }
+/* 12 = lapisan event-log, di atas #mapPanel (11). Fallback saat dibuka via
+   Options (setPanelEnabled, tanpa bringToFront); showCodeDiff menaikkan ke
+   freeZ++ important via LayoutManager. */
 
 .cv-header {
   font-size: 12px;
@@ -1008,9 +1031,10 @@ html, body {
   justify-content: center;
 }
 
-.top-controls .mute-clear-bar { margin-top: 0; }
+.top-controls .quick-bar,
+.top-controls .mute-clear-bar { margin-top: 0; margin-bottom: 0; display: flex; align-items: center; }
 
-.mute-btn, .clear-btn, .restart-btn {
+.mute-btn, .clear-btn, .restart-btn, .db-btn {
   padding: 2px 8px;
   background: rgba(0, 220, 255, 0.06);
   border: 1px solid rgba(0, 220, 255, 0.15);
@@ -1022,11 +1046,61 @@ html, body {
   transition: all 0.2s;
 }
 
-.mute-btn:hover, .clear-btn:hover, .restart-btn:hover {
+.mute-btn:hover, .clear-btn:hover, .restart-btn:hover, .db-btn:hover {
   background: rgba(0, 220, 255, 0.15);
   border-color: var(--neon);
   color: var(--neon);
 }
+
+.db-btn.remote {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.db-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 230px;
+  background: rgba(10, 18, 30, 0.97);
+  border: 1px solid rgba(0, 220, 255, 0.25);
+  border-radius: 4px;
+  padding: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.db-menu-head {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--neon);
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid rgba(0, 220, 255, 0.15);
+  margin-bottom: 6px;
+}
+
+.db-menu-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.db-menu-item span:last-child { display: flex; flex-direction: column; }
+.db-menu-item small { color: var(--text-dim); font-size: 11px; }
+.db-menu-item:hover { background: rgba(0, 220, 255, 0.08); border-color: transparent; color: var(--text); }
+.db-menu-item.active { border-color: var(--neon); }
+.db-menu-item.active .db-dot { color: var(--neon); }
 
 .restart-btn:disabled { opacity: 0.6; cursor: wait; }
 
@@ -1326,6 +1400,25 @@ html, body {
   font-size: 12px;
 }
 
+.top-controls .logout-btn {
+  border-color: rgba(255,93,108,.5); color: var(--red);
+}
+/* ═══ TOP CONTROLS — icon only, hover tampil nama (title), persegi panjang ═══ */
+.top-controls .layout-toggle,
+.top-controls .quick-btn,
+.top-controls .mute-btn,
+.top-controls .db-btn,
+.top-controls .clear-btn,
+.top-controls .restart-btn,
+.top-controls .btn-ghost {
+  width: 38px; height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 14px; flex: none;
+}
+.top-controls .layout-toggle .toggle-icon { font-size: 14px; }
+.top-controls .logout-btn:hover {
+  background: rgba(255,93,108,.15); border-color: var(--red); color: var(--red);
+}
+
 /* ═══ PANEL OPTIONS DROPDOWN ═══ */
 .panel-options-wrap {
   position: relative;
@@ -1402,7 +1495,7 @@ html, body {
   position: absolute !important;
   left: 50%; top: 22px;
   transform: translateX(-50%);
-  width: 400px; max-height: 110px;
+  width: min(400px, calc(100% - 20px)); max-height: 110px;
   z-index: 18 !important;
   display: none; flex-direction: column;
   background: rgba(0, 20, 44, 0.92) !important;
@@ -1423,7 +1516,7 @@ html, body {
 .progress-cancel { font-size: 10px; padding: 2px 8px; margin-top: 4px; align-self: flex-end; background: rgba(255,60,60,0.12); border: 1px solid rgba(255,60,60,0.3); color: #ff6464; border-radius: 2px; cursor: pointer; }
 
 /* ═══ CODE DIFF VIEWER — Fase B ═══ */
-.code-viewer.live { max-height: 260px !important; width: 360px !important; }
+.code-viewer.live { max-height: 260px !important; width: min(360px, calc(100% - 20px)) !important; }
 .code-viewer.live .cv-body { max-height: 200px !important; font-size: 11px !important; }
 .cv-actions { display: flex; gap: 4px; padding: 4px; border-top: 1px solid var(--neon-dim); }
 .cv-actions button { flex: 1; padding: 3px; font-size: 11px; border-radius: 2px; cursor: pointer; }
@@ -1493,6 +1586,8 @@ html, body {
   .core { width: 260px; height: 206px; }
   .interaction { left: 20px; right: 200px; }
   .event-log { display: none; }
+  .top-controls { max-width: calc(100% - 20px); }
+  .bottom-telemetry { top: 42px; right: 10px; max-width: calc(100% - 20px); }
 }
 
 @media (max-width: 600px) {

@@ -5,6 +5,7 @@ import { now, rid, esc, cleanForSpeech } from './utils/helpers.js';
 import { ensurePanel } from './utils/dom.js';
 import { createTerminal } from './terminal.js';
 import { startBootGuard } from './core/bootGuard.js';
+import { requireAuth, formatWilayah } from './core/authGuard.js';
 import { initMapPanel, startMapBridge } from './map.js';
 
 // ═══ DOM refs ═══
@@ -142,6 +143,9 @@ function showCodeDiff(title, diff){
   const v=document.getElementById('codeViewer');
   if(!v) return;
   v.classList.add('visible','live');
+  // Lapisan atas map via LayoutManager.bringToFront (counter freeZ, bukan
+  // z baru) — measure() lewati panel hidden jadi tanpa ini viewer tetap 6.
+  if (window._layoutManager?.bringToFront) window._layoutManager.bringToFront('codeViewer');
   const h=v.querySelector('.cv-header');
   if(h) h.textContent=title||'CODE DIFF';
   const body=document.getElementById('cvBody');
@@ -337,6 +341,8 @@ function setDial(key, frac) {
   if (val) val.textContent = known ? `${shown.toFixed(0)}${meta.unit}` : '—';
   // indeterminate tak boleh tampil sebagai 0%: hilang total lebih jujur
   host.classList.toggle('dial-na', !known);
+  // tooltip native per dial, gaya sama topControls: "CPU 42%" per tombol
+  host.title = known ? `${meta.label} ${shown.toFixed(0)}${meta.unit}` : `${meta.label} —`;
   if (known && prev === undefined) host.dataset.prev = String(shown);
 }
 
@@ -834,7 +840,7 @@ function initQuickButtons() {
   const quicks = ['/status', '/tools', '/toolsets', '/connectors'];
   const bar = document.createElement('div');
   bar.className = 'quick-bar';
-  bar.innerHTML = quicks.map(q => `<button class="quick-btn" data-quick="${q}">${q.slice(1).toUpperCase()}</button>`).join('');
+  bar.innerHTML = quicks.map(q => `<button class="quick-btn" data-quick="${q}" title="${q}">${{ '/status': '◈', '/tools': '🛠', '/toolsets': '🧰', '/connectors': '🔌' }[q]}</button>`).join('');
   document.getElementById('topControls').appendChild(bar);
   bar.addEventListener('click', e => {
     const b = e.target.closest('.quick-btn'); if (!b) return;
@@ -1262,27 +1268,87 @@ async function refreshBriefing() {
 
 // ═══ MIC / MUTE / CLEAR ═══
 els.micBtn.addEventListener('click', micToggle);
-function initMuteClear() {
+async function initMuteClear() {
   const bar = document.createElement('div'); bar.className = 'mute-clear-bar';
-  bar.innerHTML = `<button id="muteBtn" class="mute-btn">🔊 Voice On</button><button id="restartBtn" class="restart-btn" title="Restart server (mis. setelah update kode)">↻ Restart</button><button id="clearBtn" class="clear-btn">Clear</button>`;
+  bar.innerHTML = `<button id="muteBtn" class="mute-btn" title="Voice On — klik untuk matikan">🔊</button><button id="dbBtn" class="db-btn" title="DB: lokal — klik untuk ganti sumber">🗄</button><button id="restartBtn" class="restart-btn" title="Restart server (mis. setelah update kode)">↻</button><button id="clearBtn" class="clear-btn" title="Clear — bersihkan panel response">✕</button>`;
   document.getElementById('topControls').appendChild(bar);
+  // ── DB source menu (pilih: lokal | remote via kphbwb-tunnel) ──
+  // innerHTML di bawah aman: hanya label statis + host/port/db dari API internal.
+  const dbBtn = bar.querySelector('#dbBtn');
+  const paintDb = (src) => {
+    const remote = src === 'remote';
+    dbBtn.textContent = remote ? '🗄ᴿ' : '🗄';
+    dbBtn.classList.toggle('remote', remote);
+    dbBtn.title = `DB: ${remote ? 'remote (server kphbwb via tunnel)' : 'lokal'} — klik untuk pilih`;
+  };
+  try {
+    const ds = await api.getDbSource();
+    if (ds && ds.source) paintDb(ds.source);
+  } catch (_) {}
+  const closeDbMenu = () => { const m = document.querySelector('.db-menu'); if (m) m.remove(); };
+  dbBtn.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (document.querySelector('.db-menu')) { closeDbMenu(); return; }
+    let info = null;
+    try { info = await api.getDbSource(); } catch (_) {}
+    const cur = (info && info.source) || 'local';
+    const L = (info && info.local) || {};
+    const R = (info && info.remote) || {};
+    const tun = info ? !!info.tunnel : false;
+    const row = (key, label, sub, active) => `<button class="db-menu-item${active ? ' active' : ''}" data-src="${key}"><span class="db-dot">${active ? '✓' : '○'}</span><span><b>${label}</b><small>${sub}</small></span></button>`;
+    const menu = document.createElement('div');
+    menu.className = 'db-menu';
+    menu.innerHTML = `<div class="db-menu-head">DATABASE</div>`
+      + row('local', 'Lokal', `${L.host || '127.0.0.1'}:${L.port || 3306} / ${L.database || ''}`, cur === 'local')
+      + row('remote', 'Remote kphbwb', `${R.host || '127.0.0.1'}:${R.port || 13307} / ${R.database || ''} · tunnel ${tun ? 'OK' : 'mati'}`, cur === 'remote');
+    document.body.appendChild(menu);
+    const rc = dbBtn.getBoundingClientRect();
+    menu.style.top = `${rc.bottom + 6}px`;
+    menu.style.left = `${Math.max(8, rc.left - 140)}px`;
+    const pick = async (next) => {
+      closeDbMenu();
+      if (next === cur) return;
+      if (next === 'remote' && !confirm('Pindah ke DB REMOTE (server kphbwb via tunnel)? Data yang tampil ikut DB server. Lanjut?')) return;
+      dbBtn.disabled = true;
+      log('note', 'DB', `switch DB → ${next}…`);
+      try {
+        const res = await api.setDbSource(next);
+        if (res && res.ok) {
+          paintDb(next);
+          log('complete', 'DB', `sumber DB sekarang: ${next} — sesi lama logout, alihkan ke login…`);
+          setTimeout(() => { location.href = `/login.html#db-${next}`; }, 800);
+        } else {
+          log('error', 'DB', `gagal switch: ${(res && res.error) || 'unknown'}`);
+        }
+      } catch (e) {
+        log('error', 'DB', `gagal switch: ${e.message || e}`);
+      }
+      dbBtn.disabled = false;
+    };
+    menu.querySelectorAll('.db-menu-item').forEach((b) => b.addEventListener('click', () => pick(b.dataset.src)));
+    setTimeout(() => {
+      document.addEventListener('click', closeDbMenu, { once: true });
+      document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') closeDbMenu(); }, { once: true });
+    }, 0);
+  });
   bar.querySelector('#muteBtn').addEventListener('click', () => {
     muted = !muted;
     const b = bar.querySelector('#muteBtn');
-    b.textContent = muted ? '🔇 Voice Off' : '🔊 Voice On';
+    b.textContent = muted ? '🔇' : '🔊';
+    b.title = muted ? 'Voice Off — klik untuk nyalakan' : 'Voice On — klik untuk matikan';
     b.classList.toggle('off', muted); b.classList.toggle('on', !muted);
     if (muted) stopSpeaking();
   });
   bar.querySelector('#restartBtn').addEventListener('click', async () => {
     const b = bar.querySelector('#restartBtn');
     if (!confirm('Restart server ANA? Sesi chat aktif ikut reset. Lanjut?')) return;
-    b.disabled = true; b.textContent = '↻ Restarting…';
+    b.disabled = true; b.textContent = '↻'; b.title = 'Restarting…';
     log('note', 'RESTART', 'permintaan restart dikirim, server exec ulang…');
     try {
       const r = await api.restart();
       if (!r || !r.ok) {
         // Server lama (sebelum patch ini) belum punya /api/restart.
-        b.disabled = false; b.textContent = '↻ Restart';
+        b.disabled = false; b.textContent = '↻'; b.title = 'Restart server (mis. setelah update kode)';
         log('error', 'RESTART', 'server ini terlalu lama untuk restart via tombol — restart manual sekali terakhir dari terminal, setelah itu tombol berfungsi.');
         return;
       }
@@ -1301,7 +1367,7 @@ function initMuteClear() {
         }
       } catch (_) {}
       if (Date.now() - t0 > 30000) {
-        b.disabled = false; b.textContent = '↻ Restart';
+        b.disabled = false; b.textContent = '↻'; b.title = 'Restart server (mis. setelah update kode)';
         log('error', 'RESTART', 'server belum online setelah 30 dtk — cek terminal');
         return;
       }
@@ -1336,6 +1402,33 @@ setInterval(async () => {
     }
   } catch (_) {}
 }, 4000);
+
+// ═══ PANEL ACCESS — allowlist dari directus_users.panel_access ═══
+// value (string di JSON) → id panel DOM. 1=mapPanel dikunci sesuai DB.
+// NULL di DB = tanpa batasan (semua enabled, perilaku lama) — cegah lockout.
+// Panel tak terdaftar: force-hide + checkbox Options di-disable (tak bisa ON).
+// Panel terdaftar: kontrol penuh via Options + layout.json seperti semula.
+const PANEL_ACCESS_MAP = {
+  '1': 'mapPanel', '2': 'agentPanel', '3': 'statusMatrix',
+  '4': 'workspacePanel', '5': 'intelPanel', '6': 'pipelinePanel',
+  '7': 'toolsPanel', '8': 'sysTelemetry', '9': 'cmdPanel',
+  '10': 'voicePicker', '11': 'briefingPanel', '12': 'projectList',
+  '13': 'missionKanban', '14': 'vaultPanel', '15': 'avdPanel',
+  '16': 'termPanel', '17': 'eventLog', '18': 'codeViewer',
+  '19': 'topDials', '20': 'response', '21': 'chatBar',
+  '22': 'core', '23': 'bottomTelemetry',
+};
+function applyPanelAccess(layout) {
+  const pa = window._authUser?.panel_access;
+  if (pa == null) return; // NULL = tanpa batasan
+  const allowed = new Set((Array.isArray(pa) ? pa : []).map(String));
+  for (const [val, id] of Object.entries(PANEL_ACCESS_MAP)) {
+    if (allowed.has(val)) continue;
+    try { layout.setPanelEnabled(id, false); } catch (_) {}
+    const cb = document.querySelector(`#panelOptionsList input[data-id="${CSS.escape(id)}"]`);
+    if (cb) { cb.checked = false; cb.disabled = true; cb.closest('label')?.classList.add('locked'); }
+  }
+}
 
 // ═══ PANEL OPTIONS — enable / disable any panel ═══
 function initPanelOptions(layout) {
@@ -1472,8 +1565,26 @@ async function init() {
     'eventLog','codeViewer','toolsPanel','sysTelemetry',
     'cmdPanel','response','chatBar','core','topControls',
     'topDials','bottomTelemetry'
-  ].filter(id => document.getElementById(id)));
+  ].filter(id => document.getElementById(id)),
+    // FASE 1 header-lock + map full-body: posisi 4 id ini dari CSS, bukan layout.json
+    { static: ['topControls','topDials','bottomTelemetry','mapPanel'] });
   window._layoutManager = layout;
+  // FASE 3 drawer mobile (konsep v3 §4): <780px header 3 strip sembunyi
+  // default (peta full-body), floating ☰ buka/tutup. Desktop abaikan.
+  try {
+    const drawerBtn = document.getElementById('hudDrawerBtn');
+    const isMobile = () => window.innerWidth < 780;
+    const syncDrawer = () => {
+      if (!isMobile()) { document.body.classList.remove('hud-header-open', 'hud-header-hidden'); return; }
+      document.body.classList.toggle('hud-header-hidden', !document.body.classList.contains('hud-header-open'));
+    };
+    drawerBtn?.addEventListener('click', () => {
+      document.body.classList.toggle('hud-header-open');
+      syncDrawer();
+    });
+    window.addEventListener('resize', syncDrawer);
+    syncDrawer();
+  } catch (_) {}
   // Tunggu GET /api/layout selesai DULU sebelum panel dinamis dibuat:
   // tanpa ini register()/save() panel dinamis (mapPanel, voicePicker, ...)
   // berpacu dengan loadConfig dan menimpa layout.json dengan disabled:[].
@@ -1484,6 +1595,29 @@ async function init() {
   // Bridge ANA ↔ peta: poll /api/map/queue, eksekusi via adapter (Fase 5).
   try { startMapBridge({ token: ANA_TOKEN, log }); } catch (_) {}
   // Token basi (server restart) → auto-reload via BOOT_ID poll, tanpa baca token.
+  // Auth gate — redirect to /login.html if no Directus cookie session
+  try {
+    const _auth = await requireAuth();
+    if (_auth && _auth.user) {
+      // show wilayah in AGENT STATUS panel (SESSION row doubles as user)
+      const sessEl = document.getElementById('stSess');
+      if (sessEl) sessEl.textContent = [ _auth.user.email, _auth.user.jabatan?.nama_jabatan || _auth.user.jabatan || '', _auth.user.kode_divre?.divre || '', _auth.user.kode_kph?.kph || '' ].filter(Boolean).join(' · ') || _auth.user.email;
+      // also expose on state for other panels
+      try { state.authUser = _auth.user; window._authUser = _auth.user; } catch {}
+      // inject 2FA badge into topControls if not exists (logout button lives
+      // next to Reset — see injectLogoutBtn() in the topControls block below)
+      const tc = document.getElementById('topControls');
+      if (tc) {
+        // 2FA badge
+        if (!_auth.user.tfa_enabled) {
+          const t = document.createElement('a');
+          t.textContent='🛡'; t.title='Aktifkan 2FA'; t.href='#'; t.style.cssText='font-size:14px;width:38px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--amber);border-radius:2px;color:var(--amber);text-decoration:none';
+          t.onclick=(e)=>{ e.preventDefault(); location.href='/login.html#tfa'; };
+          tc.appendChild(t);
+        }
+      }
+    }
+  } catch (_) {}
   try { startBootGuard(); } catch (_) {}
   // Dynamically created panels register themselves inside ensurePanel(), so
   // these only have to fire — no .then(register) bookkeeping to keep in sync.
@@ -1506,8 +1640,8 @@ async function init() {
     const termBtn = document.createElement('button');
     termBtn.className = 'layout-toggle';
     termBtn.id = 'termBtn';
-    termBtn.innerHTML = '<span class="toggle-icon">⌘</span> Terminal';
-    termBtn.title = 'Toggle terminal (Ctrl+`)';
+    termBtn.innerHTML = '<span class="toggle-icon">⌘</span>';
+    termBtn.title = 'Terminal — toggle (Ctrl+`)';
     termBtn.addEventListener('click', terminal.toggle);
     topControls.appendChild(termBtn);
 
@@ -1515,37 +1649,49 @@ async function init() {
     const optBtn = document.createElement('button');
     optBtn.className = 'layout-toggle';
     optBtn.id = 'optBtn';
-    optBtn.innerHTML = '<span class="toggle-icon">⚙</span> Options';
-    optBtn.title = 'Show / hide panels';
+    optBtn.innerHTML = '<span class="toggle-icon">⚙</span>';
+    optBtn.title = 'Options — show / hide panels';
     topControls.appendChild(optBtn);
 
     const t = document.createElement('button');
     t.className = 'layout-toggle' + (layout.locked ? '' : ' active');
     t.id = 'layoutLockBtn';
-    t.innerHTML = `<span class="toggle-icon">${layout.locked ? '🔒' : '✎'}</span> ${layout.locked ? 'Lock' : 'Unlock'}`;
-    t.title = 'Lock / unlock panel layout (drag + resize)';
+    t.innerHTML = `<span class="toggle-icon">${layout.locked ? '🔒' : '✎'}</span>`;
+    t.title = layout.locked ? 'Lock — layout terkunci' : 'Unlock — drag + resize aktif';
     t.onclick = () => {
       const locked = layout.toggleLock();
-      t.innerHTML = `<span class="toggle-icon">${locked ? '🔒' : '✎'}</span> ${locked ? 'Lock' : 'Unlock'}`;
+      t.innerHTML = `<span class="toggle-icon">${locked ? '🔒' : '✎'}</span>`;
+      t.title = locked ? 'Lock — layout terkunci' : 'Unlock — drag + resize aktif';
       t.classList.toggle('active', !locked);
       log('status', 'LAYOUT', locked ? 'layout locked' : 'layout unlocked (drag + resize enabled)');
     };
     topControls.appendChild(t);
     const resetBtn = document.createElement('button');
     resetBtn.className = 'layout-toggle';
-    resetBtn.textContent = 'Reset';
-    resetBtn.title = 'Reset layout to defaults';
+    resetBtn.textContent = '↺';
+    resetBtn.title = 'Reset — kembalikan layout ke default';
     resetBtn.onclick = () => {
       if (!confirm('Reset layout?')) return;
       layout.reset();
     };
     topControls.appendChild(resetBtn);
+    // Logout — kanan Reset, merah
+    if (!document.getElementById('btnLogout')) {
+      const lo = document.createElement('button');
+      lo.id = 'btnLogout'; lo.textContent = '⏻'; lo.title = 'Keluar (logout)';
+      lo.className = 'layout-toggle logout-btn';
+      lo.onclick = async () => { try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) {} location.href = '/login.html'; };
+      topControls.appendChild(lo);
+    }
   }
   // optBtn dibuat di blok topControls di atas, jadi di frame yang sama sudah ada
   // di DOM — tidak perlu menunggu frame berikutnya. rAF sengaja dihindari: tab
   // yang tidak terlihat (background tab, SESI idle) tidak pernah menjalankan rAF,
   // jadi menu Options tidak akan pernah dibangun sampai tab di-render ulang.
   initPanelOptions(layout);
+  // Allowlist panel_access (DB) — setelah menu Options jadi, panel tak
+  // terdaftar di-hide + checkbox dikunci. Panel terdaftar tak tersentuh.
+  try { applyPanelAccess(layout); } catch (_) {}
   log('status', 'INIT', 'ANA FUI HUD terintegrasi penuh.');
   setAgentState('IDLE');
   // Boot

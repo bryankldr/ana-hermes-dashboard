@@ -39,17 +39,29 @@ export class LayoutManager {
   // Layout.json bisa berasal dari viewport lebih besar (monitor ganti, panel
   // di-drag saat layar lebar). Viewport lebih kecil (tablet): clamp ke dalam
   // layar, bukan tolak — posisi relatif dipertahankan, panel tetap terjangkau.
+  // FASE 3 frac truth (konsep v3 §3): fx/fy/fw/fh 0-1 sumber tunggal,
+  // x/y/w/h px cache. applyCfg pakai frac bila ada ( anti-drift lintas
+  // viewport), px hanya fallback legacy.
   applyCfg(el, cfg) {
     if (!el || !cfg) return false;
     if (this.staticIds.has(el.id)) return false; // FASE 1: posisi dari CSS
-    if (!cfg.x && !cfg.y && !cfg.w && !cfg.h) return false;
     const pr = this.hud.getBoundingClientRect();
     const num = (v, d = 0) => parseFloat(String(v ?? '').replace('px', '')) || d;
-    let w = num(cfg.w, el.offsetWidth), h = num(cfg.h, el.offsetHeight);
-    w = Math.min(w || el.offsetWidth, Math.max(80, pr.width - 8));
-    h = Math.min(h || el.offsetHeight, Math.max(60, pr.height - 8));
-    const x = Math.min(Math.max(num(cfg.x), 0), Math.max(0, pr.width - w));
-    const y = Math.min(Math.max(num(cfg.y), 0), Math.max(0, pr.height - h));
+    const fr = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    let w, h, x, y;
+    if (fr(cfg.fx) !== null && fr(cfg.fy) !== null && fr(cfg.fw) !== null && fr(cfg.fh) !== null && pr.width > 0 && pr.height > 0) {
+      w = Math.min(cfg.fw * pr.width, Math.max(80, pr.width - 8));
+      h = Math.min(cfg.fh * pr.height, Math.max(60, pr.height - 8));
+      x = Math.min(Math.max(cfg.fx * pr.width, 0), Math.max(0, pr.width - w));
+      y = Math.min(Math.max(cfg.fy * pr.height, 0), Math.max(0, pr.height - h));
+    } else {
+      if (!cfg.x && !cfg.y && !cfg.w && !cfg.h) return false;
+      w = num(cfg.w, el.offsetWidth); h = num(cfg.h, el.offsetHeight);
+      w = Math.min(w || el.offsetWidth, Math.max(80, pr.width - 8));
+      h = Math.min(h || el.offsetHeight, Math.max(60, pr.height - 8));
+      x = Math.min(Math.max(num(cfg.x), 0), Math.max(0, pr.width - w));
+      y = Math.min(Math.max(num(cfg.y), 0), Math.max(0, pr.height - h));
+    }
     el.style.left = x + 'px';
     el.style.top = y + 'px';
     el.style.width = w + 'px';
@@ -113,12 +125,23 @@ export class LayoutManager {
     // Config belum selesai di-GET: _pendingSave agar panel dinamis
     // (register setelah load) tidak menimpa layout.json dengan disabled kosong.
     if (!this._loaded) { this._pendingSave = true; return; }
+    const pr = this.hud.getBoundingClientRect();
     const layouts = {};
     for (const [id, el] of Object.entries(this.items)) {
       if (this.staticIds.has(id)) continue; // FASE 1: tidak disimpan
+      // FASE 3 frac truth: normalisasi 0-1 terhadap .hud agar posisi
+      // relatif lintas viewport (1440↔360). px ikut sebagai cache
+      // legacy; applyCfg baca frac dulu bila ada.
+      const num = v => parseFloat(String(v ?? '').replace('px', '')) || 0;
+      const x = num(el.style.left), y = num(el.style.top);
+      const w = num(el.style.width) || el.offsetWidth, h = num(el.style.height) || el.offsetHeight;
       layouts[id] = {
         x: el.style.left || '', y: el.style.top || '',
         w: el.style.width || '', h: el.style.height || '',
+        ...(pr.width > 0 && pr.height > 0 ? {
+          fx: +(x / pr.width).toFixed(4), fy: +(y / pr.height).toFixed(4),
+          fw: +(w / pr.width).toFixed(4), fh: +(h / pr.height).toFixed(4),
+        } : {}),
       };
     }
     this.config = { locked: this.locked, layouts, disabled: [...this.disabled] };

@@ -53,9 +53,22 @@
 .chip i { cursor: pointer; font-style: normal; opacity: .8; padding: 0 2px; font-size:13px; line-height:1; }
 .chip i:hover { opacity: 1; color: var(--red); }
 
-/* ── SPATIAL MAP: ikut LayoutManager seperti panel lain (RESPONSE) ── */
-/* Default wajar saat pertama register (rail 240px). Tanpa width !important agar resize inline style menang. z-index 5 !important agar selalu di bawah panel lain. */
-#mapPanel { min-height: 380px; z-index: 11 !important; }
+/* ── SPATIAL MAP: full-body, posisi dari CSS bukan LayoutManager (FASE 1) ── */
+/* inset:0 isi .hud penuh; z 11 di atas rail kosong (10) agar klik lolos, di
+   bawah header (15/20) + panel konten (20+). Tanpa width !important agar
+   inline style tak ada (statis tak pernah ditulis). Leaflet ikut via
+   ResizeObserver→invalidateSize yang sudah ada di map.js. */
+#mapPanel {
+  position: absolute; left: 0; right: 0; top: 48px; bottom: 0;
+  width: auto; height: auto;
+  min-height: 0;
+  z-index: 11 !important;
+}
+/* FASE 3 drawer mobile: header sembunyi → peta isi .hud penuh. */
+@media (max-width: 779px) {
+  body:not(.hud-header-open) #mapPanel,
+  body.hud-header-hidden #mapPanel { top: 0; }
+}
 /* 11 = di atas rail kosong (10) agar klik lolos, tetap di bawah semua panel konten (12+) */
 #mapPanel .panel-body { padding: 0; gap: 0; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .map-wrap.map-full { position: relative; flex: 1; min-height: 300px; border-radius: 8px; overflow: hidden; border: 1px solid var(--neon-border); background: #03101f; display: block; }

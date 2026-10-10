@@ -4,13 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="ana-token" content="__ANA_TOKEN__">
+  <meta name="theme-color" content="#020F2A">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ANA">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="application-name" content="ANA">
+  <meta name="description" content="ANA HUD — KPHBWB Sandbox · Autonomous AI dashboard">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/icon-167.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <title>ANA · Autonomous AI HUD</title>
+  <!-- Fonts: non-blocking (media=print swap) supaya first paint tidak nunggu Google Fonts.
+       Chromium fresh / jaringan lambat sebelumnya bikin layar putih 10-30 dtk. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-  <!-- LAPORAN: Plus Jakarta Sans = font template dokumen (lihat .rpt-page di map.css).
-       Dipisah dari link HUD di atas karena report butuh weight 400/500/600/700/800. -->
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  </noscript>
   <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/hud.css?v=20261004g">
   <!-- xterm vendored locally (see ui/vendor/): the terminal is the one feature
@@ -20,11 +40,11 @@
   <!-- ?v= bumped manual tiap ubah CSS/JS: tanpa ini browser pakai cache lama
        dan perbaikan panel chart tak akan terlihat. -->
   <link rel="stylesheet" href="styles/map.css?v=20261004d">
-  <script src="vendor/xterm.js"></script>
-  <script src="vendor/xterm-addon-fit.js"></script>
-  <script src="vendor/leaflet/leaflet.js"></script>
-  <script src="vendor/protomaps/protomaps-leaflet.min.js"></script>
-  <script src="vendor/chart.js"></script>
+  <script defer src="vendor/xterm.js"></script>
+  <script defer src="vendor/xterm-addon-fit.js"></script>
+  <script defer src="vendor/leaflet/leaflet.js"></script>
+  <script defer src="vendor/protomaps/protomaps-leaflet.min.js"></script>
+  <script defer src="vendor/chart.js"></script>
 </head>
 <body>
 <div class="hud" id="hud">
@@ -46,6 +66,7 @@
   </div>
 
   <!-- ═══ TOP CONTROLS ═══ -->
+  <button class="hud-drawer-btn" id="hudDrawerBtn" title="Menu — tampil / sembunyikan header" aria-label="Menu header">☰</button>
   <div class="top-controls" id="topControls"></div>
 
   <!-- ═══ TOP DIALS ═══ -->
@@ -168,5 +189,17 @@
 </div>
 
 <script type="module" src="src/main.js?v=20261004h"></script>
+<script>
+// PWA SW — universal (Chrome/Edge/Firefox/Safari/Samsung). Scope / via Service-Worker-Allowed header.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(()=>{});
+  });
+  // Firefox/Safari: expose manual install hint when beforeinstallprompt never fires
+  let deferredPrompt = null;
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; window.__anaDeferredPrompt = e; window.dispatchEvent(new CustomEvent('ana:pwa-installable')); });
+  window.addEventListener('appinstalled', () => { deferredPrompt = null; window.__anaDeferredPrompt = null; });
+}
+</script>
 </body>
 </html>
