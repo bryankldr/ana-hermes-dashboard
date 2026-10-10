@@ -10,6 +10,8 @@ browser Web Speech API, plus server-side Edge TTS (id-ID) for voice output.
 """
 import datetime
 import json
+import gzip
+import hashlib
 import mimetypes
 import os
 import pathlib
@@ -25,6 +27,14 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("application/manifest+json", ".json")
+# .js must be application/javascript, not text/javascript quirk
+try:
+    mimetypes.add_type("application/javascript", ".js")
+except Exception:
+    pass
+
 ROOT = pathlib.Path(__file__).resolve().parent
 UI = ROOT / "ui"
 
@@ -36,6 +46,30 @@ except Exception:
     PMTILES_AVAILABLE = False
 
 # load .env before importing anything that reads os.environ
+# Robust: inline " # comment" after unquoted values, quoted values keep # inside.
+def _parse_env_value(raw: str) -> str:
+    s = raw.strip()
+    if not s:
+        return ""
+    if s[0] in ('"', "'"):
+        q = s[0]
+        end = s.find(q, 1)
+        if end != -1:
+            return s[1:end]
+        return s.strip('"').strip("'")
+    # unquoted: strip inline comment starting with # preceded by space or at col 0
+    # keep # inside password only when quoted (handled above)
+    if " #" in s:
+        s = s.split(" #", 1)[0].strip()
+    elif s.startswith("#"):
+        return ""
+    # also handle trailing # without space as comment (conservative: only if no = left)
+    if "#" in s:
+        # don't chop hashes that are part of password chars when unquoted but no space
+        # — only chop if "# " or " #" pattern, otherwise keep (e.g. a#b)
+        pass
+    return s.strip().strip('"').strip("'")
+
 _env = ROOT / ".env"
 if _env.exists():
     for line in _env.read_text(encoding="utf-8").splitlines():
@@ -43,7 +77,7 @@ if _env.exists():
         if line and not line.startswith("#") and "=" in line:
             k, _, v = line.partition("=")
             k = k.strip()
-            v = v.strip().strip('"').strip("'")
+            v = _parse_env_value(v)
             # ponytail: WIKI_PATH/ANA_JOURNAL_PATH must follow .env (hermes snap exports stale ana_journal path)
             if k in ("WIKI_PATH", "ANA_JOURNAL_PATH", "OBSIDIAN_VAULT_PATH", "HERMES_PROFILE", "ANA_PROFILE", "ANA_SIMOGE_SCRIPTS", "HERMES_HOME"):
                 os.environ[k] = v
@@ -60,6 +94,23 @@ import spatial_report_store
 import sysmetrics
 import terminal as ana_terminal
 import voice
+import auth_local
+import db_source
+
+# argon2 top-level — jangan import di dalam try yang sama dengan except(VerifyMismatchError)
+# itu bikin UnboundLocalError: nama belum ter-bind saat except tuple dievaluasi (bug 17:41).
+try:
+    from argon2 import PasswordHasher as _ArgonPH
+    from argon2.exceptions import VerifyMismatchError as _ArgonVME, InvalidHashError as _ArgonIHE
+    try:
+        from argon2.exceptions import InvalidHash as _ArgonIH
+    except ImportError:
+        _ArgonIH = _ArgonIHE
+    _ARGON2_AVAILABLE = True
+except Exception:
+    _ArgonPH = None
+    _ArgonVME = _ArgonIH = _ArgonIHE = Exception
+    _ARGON2_AVAILABLE = False
 
 # SIMOGE business API -- the `simoge-business` skill in Hermes owns all SQL.
 # The server resolves its scripts dir lazily and calls the skill's own entry
@@ -88,8 +139,16 @@ _SIMOGE_SCRIPTS = os.environ.get(
 # Log satu baris per request: waktu, method, path, status, ms. Tanpa token,
 # tanpa SQL, tanpa body — aman dibaca di terminal.
 def _debug_on():
-    mode = (os.environ.get("ANA_MODE") or "develop").strip().lower()
-    flag = os.environ.get("ANA_DEBUG_MAP", os.environ.get("ANA_DEBUG", "")).strip().lower()
+    def _norm_flag(raw):
+        if raw is None:
+            return ""
+        # defensive: env var may still contain inline "# comment" if loaded before patch
+        s = raw.strip()
+        if " #" in s:
+            s = s.split(" #", 1)[0].strip()
+        return s.lower()
+    mode = _norm_flag(os.environ.get("ANA_MODE") or "develop")
+    flag = _norm_flag(os.environ.get("ANA_DEBUG_MAP", os.environ.get("ANA_DEBUG", "")))
     if flag in {"1", "true", "yes", "on"}:
         return True
     if flag in {"0", "false", "no", "off"}:
@@ -139,8 +198,34 @@ def _dlog(msg):
         pass
 
 
+def _alog(msg, level="info"):
+    """Auth/startup log — error selalu tampil walau _DEBUG_MAP off, info hanya saat debug on."""
+    is_err = level in ("warn", "error")
+    if not is_err and not _DEBUG_MAP:
+        return
+    tag = "auth" if level in ("info", "warn", "error") else "map"
+    line = f"  [{tag} {time.strftime('%H:%M:%S')}] {msg}"
+    if is_err:
+        _log_to_file(line.strip())
+    else:
+        # info juga ke file bila debug on
+        _log_to_file(line.strip())
+    try:
+        sys.stderr.write(line + "\n")
+    except Exception:
+        pass
+
+
 def _dlog_req(method, path, code, ms):
-    """Log HANYA yang berarti: error/lama/tak-bising. Tak ada filter = bising."""
+    """Log HANYA yang berarti: error/lama/tak-bising. Tak ada filter = bising.
+    Auth selalu logged (401/429 dll butuh diagnosa login/refresh/logout).
+    """
+    if path.startswith("/api/auth/"):
+        if code >= 400:
+            _alog(f"{method} {path} -> {code} ({ms:.0f}ms)", "warn" if code >= 400 else "info")
+        elif _DEBUG_MAP:
+            _alog(f"{method} {path} -> {code} ({ms:.0f}ms)", "info")
+        return
     if not _DEBUG_MAP:
         return
     if code >= 400:
@@ -733,6 +818,90 @@ else:
         _reuse = ""
     API_TOKEN = _reuse if _reuse else secrets.token_urlsafe(32)
 # File is written inside main() after the port guard, not at import time.
+# ── Local session cookie helpers (HttpOnly, 1 akun 1 perangkat) ──
+ANA_AUTH_REQUIRED = os.environ.get("ANA_AUTH_REQUIRED", "0").strip() not in ("0","", "false", "False")
+AUTH_MODE = "local"
+
+def _parse_cookies(header_val: str) -> dict:
+    out={}
+    for part in (header_val or "").split(";"):
+        if "=" in part:
+            k,v = part.strip().split("=",1)
+            out[k.strip()] = v.strip()
+    return out
+
+def _session_from_cookie(handler) -> dict | None:
+    raw = handler.headers.get("Cookie","")
+    sid = _parse_cookies(raw).get("ana_session","").strip()
+    if not sid: return None
+    sess = auth_local.get_session(sid)
+    if not sess: return None
+    if time.time() > float(sess.get("expires_at", 0)):
+        refreshed,_ = auth_local.refresh_session(sid)
+        if not refreshed: return None
+        sess = refreshed
+    ua = handler.headers.get("User-Agent","") or ""
+    if sess.get("device_hash") and sess.get("device_hash") != auth_local.device_hash(ua):
+        return None
+    auth_local.touch_session(sid)
+    return sess
+
+def _set_session_cookie(handler, sid: str):
+    secure = os.environ.get("ANA_COOKIE_SECURE","0").strip() == "1"
+    parts = [f"ana_session={sid}", "Path=/", "HttpOnly", "SameSite=Lax"]
+    if secure: parts.append("Secure")
+    try: ttl = int(os.environ.get("ANA_SESSION_TTL","28800"))
+    except: ttl = 28800
+    parts.append(f"Max-Age={ttl}")
+    handler.send_header("Set-Cookie", "; ".join(parts))
+
+def _clear_session_cookie(handler):
+    handler.send_header("Set-Cookie", "ana_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+
+# ── FASE 2: layout store per-user (konsep v3 §3/§5) ──
+# layout_<uid>.json {v:3,locked,disabled,desktop:{layouts},mobile:{layouts}}.
+# uid HANYA dari cookie sesi, bukan body/query. Tulis atomic tmp+rename.
+def _layout_uid_file(uid: str) -> pathlib.Path | None:
+    uid = (uid or "").strip()
+    if not uid or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", uid):
+        return None
+    return ROOT / f"layout_{uid}.json"
+
+def _layout_validate_layouts(layouts):
+    if not isinstance(layouts, dict):
+        return "layouts must be dict"
+    for k, v in layouts.items():
+        if not isinstance(k, str) or not isinstance(v, dict):
+            return "invalid layout entry"
+    return None
+
+def _layout_load_for_uid(uid: str) -> dict:
+    f = _layout_uid_file(uid)
+    if f is not None and f.exists():
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("desktop"), dict):
+                return data
+        except Exception:
+            pass
+    # seed: desktop = layout.json lama, mobile = {} (clamp di frontend)
+    seed_layouts, locked, disabled = {}, True, []
+    try:
+        old = json.loads((ROOT / "layout.json").read_text(encoding="utf-8"))
+        if isinstance(old, dict):
+            seed_layouts = old.get("layouts", {}) if isinstance(old.get("layouts"), dict) else {}
+            locked = bool(old.get("locked", True))
+            disabled = old.get("disabled", []) if isinstance(old.get("disabled"), list) else []
+    except Exception:
+        pass
+    return {"v": 3, "locked": locked, "disabled": disabled,
+            "desktop": {"layouts": seed_layouts}, "mobile": {"layouts": {}}}
+
+def _layout_atomic_write(path: pathlib.Path, data: dict):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
 RUN_LOCK = threading.Lock()
 MAX_JSON_BODY = 16 * 1024 * 1024
 
@@ -1067,12 +1236,52 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             pass
 
-    def _bytes(self, data, ctype, code=200):
+    def _bytes(self, data, ctype, code=200, cache_control="no-store", extra_headers=None):
+        # gzip for text assets when client supports it (cuts 772K vendor -> ~210K)
+        ctype_low = (ctype or "").split(";")[0].strip().lower()
+        compressible = ctype_low in ("text/html","text/css","application/javascript","text/javascript","application/json","application/manifest+json","image/svg+xml","text/plain")
+        if compressible and len(data) > 512:
+            try:
+                ae = (self.headers.get("Accept-Encoding") or "").lower()
+                if "gzip" in ae:
+                    gz = gzip.compress(data, compresslevel=6)
+                    # only use if actually smaller (tiny files may grow)
+                    if len(gz) < len(data):
+                        data = gz
+                        # mark for header below
+                        if extra_headers is None:
+                            extra_headers = {}
+                        extra_headers["Content-Encoding"] = "gzip"
+                        extra_headers["Vary"] = "Accept-Encoding"
+            except Exception:
+                pass
+        # ETag for cacheable assets (so 304 works even without explicit If-None-Match handling)
+        etag = None
+        if cache_control != "no-store" and code == 200 and len(data) > 0:
+            try:
+                etag = '"' + hashlib.md5(data).hexdigest()[:16] + '"'
+                inm = (self.headers.get("If-None-Match") or "").strip()
+                if inm and inm == etag:
+                    try:
+                        self.send_response(304)
+                        self.send_header("ETag", etag)
+                        self.send_header("Cache-Control", cache_control)
+                        self.end_headers()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                    return
+            except Exception:
+                pass
         try:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache_control)
+            if etag:
+                self.send_header("ETag", etag)
+            if extra_headers:
+                for k, v in extra_headers.items():
+                    self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError, OSError):
@@ -1387,6 +1596,11 @@ class Handler(BaseHTTPRequestHandler):
         supplied = self.headers.get("X-Ana-Token", "")
         if supplied and secrets.compare_digest(supplied, API_TOKEN):
             return True
+        try:
+            if _session_from_cookie(self) is not None:
+                return True
+        except Exception:
+            pass
         # Query token only for GET streaming where headers cannot be set (still localhost-only)
         path_only = urlparse(self.path).path
         if self.command == "GET" and (path_only == "/api/terminal-stream"
@@ -1419,6 +1633,20 @@ class Handler(BaseHTTPRequestHandler):
         # yang mana". Frontend poll ini; boot berubah = server restart = token
         # meta di HTML lama sudah basi → reload. Tidak ada cara baca token dari
         # endpoint ini karena respons tak pernah memuat API_TOKEN.
+        if p in ("/api/auth/login", "/api/auth/tfa/generate", "/api/auth/refresh") or p.startswith("/api/auth/"):
+            pass
+        if p == "/api/auth/me":
+            sess = _session_from_cookie(self)
+            if not sess:
+                return self._json({"error": "tidak ada sesi", "authenticated": False}, 401)
+            try:
+                prof = auth_local.fetch_user_profile_by_id(sess.get("user_id"))
+            except Exception as e:
+                _alog(f"auth me 503 db unreachable {type(e).__name__}", "error")
+                return self._json({"error": "database tidak terjangkau (tunnel DB mati?)", "authenticated": False}, 503)
+            if not prof:
+                return self._json({"error": "profil tidak tersedia"}, 500)
+            return self._json({"ok": True, "authenticated": True, "user": auth_local.sanitize_profile_for_client(prof), "session": {"created": sess.get("created"), "last_seen": sess.get("last_seen")}} )
         if p == "/api/token-status":
             return self._json({"boot": BOOT_ID})
         if p in ("/api/status", "/api/voices", "/api/mode"):
@@ -1450,6 +1678,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(dict(current=cur, agent_name=voice.agent_name(cur), available=voice.available(), voices=voice.curated_voices()))
         if p == "/api/mode":
             return self._json(dict(mode=get_mode()))
+        if p == "/api/db-source":
+            # Gated: bocorkan has_password saja, bukan password.
+            if not self._token_ok():
+                return self._unauth()
+            try:
+                info = db_source.public_info()
+            except Exception as e:
+                return self._json({"error": str(e)[:200]}, 500)
+            return self._json(info)
         # voice metrics endpoint removed (rollback TTS/STT)
         # (GET /api/voice/metrics removed)
         if p == "/api/sysmetrics":
@@ -1620,6 +1857,12 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/layout":
             if not self._token_ok():
                 return self._unauth()
+            # FASE 2 per-user slot: sesi login -> layout_<uid>.json (v3
+            # {v,locked,disabled,desktop:{layouts},mobile:{layouts}}). Tanpa
+            # sesi (token global) -> layout.json lama read-only.
+            sess = _session_from_cookie(self)
+            if sess and sess.get("user_id"):
+                return self._json(_layout_load_for_uid(str(sess["user_id"])))
             layout_file = ROOT / "layout.json"
             if layout_file.exists():
                 try:
@@ -1633,6 +1876,18 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(urlparse(self.path).query)
             tid = (qs.get("id", [""])[0] or "").strip()
             return self._terminal_stream(tid)
+        if ANA_AUTH_REQUIRED and p in ("/", "/index.html"):
+            if _session_from_cookie(self) is None and not self._token_ok():
+                self.send_response(302)
+                self.send_header("Location", "/login.html")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+        if p in ("/login.html", "/login.js", "/login.css") or p.startswith("/src/login"):
+            pass
+        elif ANA_AUTH_REQUIRED and p.startswith("/api/") and not p.startswith("/api/auth/") and p not in ("/api/token-status",):
+            if not self._token_ok():
+                return self._unauth()
         rel = "index.html" if p == "/" else p.lstrip("/")
         # A plain startswith() check passes for "../ui_secret" and
         # "../uix/anything" because there is no separator between the prefix
@@ -1644,11 +1899,36 @@ class Handler(BaseHTTPRequestHandler):
             return self._bytes(b"not found", "text/plain", 404)
         if not f.is_file():
             return self._bytes(b"not found", "text/plain", 404)
+        # smart mime: .webmanifest must be manifest+json, .js -> javascript
         ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+        if f.suffix == ".webmanifest":
+            ctype = "application/manifest+json"
+        elif f.suffix == ".js":
+            ctype = "application/javascript"
         data = f.read_bytes()
         if rel == "index.html":
             data = data.replace(b"__ANA_TOKEN__", API_TOKEN.encode())
-        return self._bytes(data, ctype)
+        # ── cache policy ──
+        # HTML navigations: no-store (must revalidate token), SW: no-cache (update fast)
+        # versioned/hashed vendor & styles: immutable 1y, icons/assets: 1y, else 1h
+        extra = None
+        if rel in ("index.html", "login.html") or rel == "":
+            cc = "no-store, no-cache, must-revalidate"
+        elif rel == "sw.js":
+            cc = "no-cache"
+            extra = {"Service-Worker-Allowed": "/"}
+        elif rel.startswith("vendor/") or rel.startswith("styles/") or rel.startswith("icons/") or rel.startswith("assets/"):
+            cc = "public, max-age=31536000, immutable"
+        elif f.suffix in (".js", ".css", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".woff", ".woff2", ".svg"):
+            cc = "public, max-age=3600"
+        else:
+            cc = "public, max-age=3600"
+        # manifest must be cacheable but not immutable (Chrome checks every install)
+        if rel in ("manifest.webmanifest", "manifest.json"):
+            cc = "public, max-age=3600"
+            if ctype == "application/octet-stream":
+                ctype = "application/manifest+json"
+        return self._bytes(data, ctype, cache_control=cc, extra_headers=extra)
 
     # ── terminal stream (GET long-poll) ──────────────
     def _terminal_stream(self, tid):
@@ -1677,9 +1957,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._t0 = time.time()
         p = urlparse(self.path).path
-        if not self._host_ok() or not self._origin_ok():
+        if not self._host_ok():
             return self._json({"error": "request origin rejected"}, 403)
-        if not self._token_ok():
+        # /api/auth/* adalah entry-point login: browser fetch selalu kirim Origin,
+        # tapi curl/ health-check tanpa Origin tetap harus lulus host-check saja.
+        if not p.startswith("/api/auth/") and not self._origin_ok():
+            return self._json({"error": "request origin rejected"}, 403)
+        # Auth endpoints are public (login) or cookie-authenticated (logout/refresh/tfa/me)
+        # — they must not require X-Ana-Token
+        if p.startswith("/api/auth/"):
+            # handled below after body is read (no X-Ana-Token needed)
+            pass
+        elif not self._token_ok():
             return self._unauth()
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel"} and ctype != "application/json":
@@ -1698,19 +1987,265 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "body must be a JSON object"}, 400)
         else:
             body = {}
+        # ── Local Auth (internal DB, public + cookie) ─────────────
+        if p == "/api/auth/login":
+            ip = self.client_address[0] if self.client_address else "unknown"
+            email = (body.get("email") or "").strip() if isinstance(body, dict) else ""
+            if not auth_local.check_rate_limit(ip):
+                _alog(f"auth login 429 rate-limit ip={ip} email={(email or '')[:32]}", "warn")
+                return self._json({"error": "terlalu banyak percobaan, tunggu 1 menit"}, 429)
+            password = body.get("password") or ""
+            otp = (body.get("otp") or "").strip() or None
+            if not email or not password:
+                _alog(f"auth login 400 missing field ip={ip} email={(email or '')[:32]}", "warn")
+                return self._json({"error": "email dan password wajib"}, 400)
+            # Watchdog dulu: source remote tapi tunnel mati = fallback lokal
+            # darurat agar dashboard tetap bisa login (tanpa hapus sesi).
+            try:
+                wd = db_source.watchdog_tick()
+                if wd.get("source") == "remote" and not wd.get("tunnel"):
+                    db_source.set_source("local")
+                    _alog("db watchdog: tunnel remote mati -> fallback lokal (darurat)", "error")
+            except Exception:
+                pass
+            try:
+                row = auth_local.get_user_by_email(email)
+            except Exception as e:
+                _alog(f"auth login 503 db unreachable {type(e).__name__} email={(email or '')[:32]}", "error")
+                return self._json({"error": "database tidak terjangkau — cek DB lokal (port 3306) lalu coba lagi"}, 503)
+            try:
+                _h = (row.get("password","") or "") if row else ""
+                _pw_len = len(password)
+                _h_len = len(_h)
+                _h_pre = _h[:18] if _h else "-"
+                _pw_pre = password[:2] + "*"*(max(0,_pw_len-2)) if _pw_len else "-"
+                _ver = False
+                _ver_err = ""
+                if row and _h and _ARGON2_AVAILABLE and _h.startswith("$argon2"):
+                    try:
+                        _ph=_ArgonPH()
+                        _ph.verify(_h, password)
+                        _ver=True
+                    except (_ArgonVME, _ArgonIH, _ArgonIHE) as e:
+                        _ver_err=type(e).__name__
+                    except Exception as e:
+                        _ver_err=type(e).__name__+":"+str(e)[:60]
+                elif row and _h:
+                    try:
+                        _ver = bool(auth_local.verify_password(_h, password))
+                        if not _ver:
+                            _ver_err = "VerifyMismatch"
+                    except Exception as e:
+                        _ver_err=type(e).__name__+":"+str(e)[:60]
+                _alog(f"auth login DBG email={email[:32]} ip={ip} found={bool(row)} h_len={_h_len} h_pre={_h_pre} pw_len={_pw_len} pw_pre={_pw_pre} ver={_ver} err={_ver_err}", "warn")
+            except Exception as _e:
+                _alog(f"auth login DBG err {type(_e).__name__}:{str(_e)[:80]}", "warn")
+            if not row or not auth_local.verify_password(row.get("password","") or "", password):
+                _alog(f"auth login 401 bad credentials email={email[:32]} ip={ip} found={bool(row)}", "warn")
+                return self._json({"error": "email atau password salah"}, 401)
+            prof = auth_local.fetch_user_profile_by_id(row["id"])
+            if not prof:
+                _alog(f"auth login 500 profil gagal email={email[:32]} ip={ip}", "error")
+                return self._json({"error": "gagal ambil profil user"}, 500)
+            if prof.get("status") and prof.get("status") != "active":
+                _alog(f"auth login 403 status={prof.get('status')} email={email[:32]} ip={ip}", "warn")
+                return self._json({"error": "akun tidak aktif"}, 403)
+            hud = prof.get("hud_access")
+            hud_ok = bool(int(hud) if isinstance(hud, (int, float)) or (isinstance(hud, str) and hud.isdigit()) else hud) if hud is not None else False
+            has_hud_field = "hud_access" in prof
+            if has_hud_field and not hud_ok:
+                _alog(f"auth login 403 hud_access=0 email={email[:32]} ip={ip}", "warn")
+                return self._json({"error": "akun tidak punya akses HUD (hud_access=0) \u2014 hubungi admin"}, 403)
+            is_2fa = False
+            if "2fa" in prof:
+                try: is_2fa = bool(int(prof.get("2fa") or 0))
+                except: is_2fa = bool(prof.get("2fa"))
+            else:
+                is_2fa = bool(prof.get("tfa_secret"))
+            secret = (prof.get("2fa_secret") or "").strip() if isinstance(prof.get("2fa_secret"), str) else ""
+            if is_2fa:
+                if not otp:
+                    _alog(f"auth login 401 otp_required email={email[:32]} ip={ip}", "warn")
+                    return self._json({"error": "otp_required", "message": "kode 2FA diperlukan"}, 401)
+                if not secret:
+                    _alog(f"auth login 500 2fa secret kosong email={email[:32]} ip={ip}", "error")
+                    return self._json({"error": "2FA aktif tapi secret kosong \u2014 hubungi admin untuk reset 2fa_secret"}, 500)
+                if not auth_local.totp_verify(secret, otp):
+                    _alog(f"auth login 401 otp salah/kadaluarsa email={email[:32]} ip={ip}", "warn")
+                    return self._json({"error": "kode 2FA salah atau kadaluarsa"}, 401)
+            ua = self.headers.get("User-Agent","") or ""
+            sid, sess, evicted = auth_local.create_session(prof, ua, ip)
+            _alog(f"auth login 200 ok email={email[:32]} ip={ip} evicted={bool(evicted)}", "info")
+            safe = auth_local.sanitize_profile_for_client(prof)
+            body_out = json.dumps({"ok": True, "user": safe, "evicted": bool(evicted)}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body_out)))
+            self.send_header("Cache-Control", "no-store")
+            _set_session_cookie(self, sid)
+            self.end_headers()
+            self.wfile.write(body_out)
+            return
+        if p == "/api/auth/refresh":
+            raw_ck = self.headers.get("Cookie","")
+            sid = _parse_cookies(raw_ck).get("ana_session","").strip()
+            if not sid:
+                return self._json({"error": "tidak ada sesi"}, 401)
+            refreshed, err = auth_local.refresh_session(sid)
+            if not refreshed:
+                body_out = json.dumps({"error": err or "sesi habis"}).encode()
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body_out)))
+                _clear_session_cookie(self)
+                self.end_headers()
+                self.wfile.write(body_out)
+                return
+            body_out = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body_out)))
+            _set_session_cookie(self, sid)
+            self.end_headers()
+            self.wfile.write(body_out)
+            return
+        if p == "/api/auth/logout":
+            raw_ck = self.headers.get("Cookie","")
+            sid = _parse_cookies(raw_ck).get("ana_session","").strip()
+            if sid:
+                auth_local.destroy_session(sid)
+            body_out = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body_out)))
+            _clear_session_cookie(self)
+            self.end_headers()
+            self.wfile.write(body_out)
+            return
+        if p == "/api/auth/tfa/generate":
+            sess = _session_from_cookie(self)
+            if not sess:
+                return self._json({"error": "login dulu"}, 401)
+            password = body.get("password") or ""
+            if not password:
+                return self._json({"error": "password wajib"}, 400)
+            # verifikasi password lokal
+            prof_check = auth_local.fetch_user_profile_by_id(sess.get("user_id"))
+            email_check = (prof_check or {}).get("email") or sess.get("email")
+            row_check = auth_local.get_user_by_email(email_check) if email_check else None
+            if not row_check or not auth_local.verify_password(row_check.get("password","") or "", password):
+                return self._json({"error": "password salah"}, 401)
+            # generate secret custom
+            secret = auth_local._b32_secret(20)
+            otpauth = auth_local.totp_otpauth_url(secret, email_check, issuer="ANA HUD")
+            # simpan pending di sesi server (tidak tulis DB sampai verify)
+            try:
+                import json as _js
+                db = auth_local._load_sessions()
+                cur = db.get(sess.get("id"))
+                if cur is not None:
+                    cur["_pending_2fa_secret"] = secret
+                    db[sess.get("id")] = cur
+                    auth_local._save_sessions(db)
+            except: pass
+            return self._json({"data": {"secret": secret, "otpauth_url": otpauth}})
+        if p == "/api/auth/tfa/enable":
+            sess = _session_from_cookie(self)
+            if not sess:
+                return self._json({"error": "login dulu"}, 401)
+            secret = (body.get("secret") or "").strip()
+            otp = (body.get("otp") or "").strip()
+            if not secret or not otp:
+                return self._json({"error": "secret dan otp wajib"}, 400)
+            # validasi TOTP terhadap secret yang dikirim (atau pending di sesi)
+            if not auth_local.totp_verify(secret, otp):
+                # coba pending secret jika client kirim secret berbeda
+                try:
+                    db = auth_local._load_sessions()
+                    pending = (db.get(sess.get("id")) or {}).get("_pending_2fa_secret")
+                    if pending and pending != secret and auth_local.totp_verify(pending, otp):
+                        secret = pending
+                    else:
+                        return self._json({"error": "kode 2FA salah atau kadaluarsa — pastikan jam HP sinkron"}, 400)
+                except:
+                    return self._json({"error": "kode 2FA salah atau kadaluarsa"}, 400)
+            ok, err = auth_local.update_user_2fa(sess.get("user_id"), True, secret)
+            if not ok:
+                return self._json({"error": f"gagal aktifkan 2FA: {err}", "detail": err}, 500)
+            # bersihkan pending dan refresh sesi flag
+            try:
+                db = auth_local._load_sessions()
+                cur = db.get(sess.get("id"))
+                if cur is not None:
+                    cur.pop("_pending_2fa_secret", None)
+                    cur["tfa_enabled"] = True
+                    cur["2fa"] = True
+                    db[sess.get("id")] = cur
+                    auth_local._save_sessions(db)
+            except: pass
+            prof = auth_local.fetch_user_profile_by_id(sess.get("user_id"))
+            return self._json({"ok": True, "user": auth_local.sanitize_profile_for_client(prof) if prof else None})
+        if p == "/api/auth/tfa/disable":
+            sess = _session_from_cookie(self)
+            if not sess:
+                return self._json({"error": "login dulu"}, 401)
+            otp = (body.get("otp") or "").strip()
+            if not otp:
+                return self._json({"error": "otp wajib"}, 400)
+            prof = auth_local.fetch_user_profile_by_id(sess.get("user_id"))
+            if not prof:
+                return self._json({"error": "gagal baca profil"}, 500)
+            secret = (prof.get("2fa_secret") or "").strip() if isinstance(prof.get("2fa_secret"), str) else ""
+            if not secret:
+                # fallback: coba baca dari DB langsung (ikut ANA_DB_SOURCE)
+                try:
+                    import pymysql
+                    import db_source as _dbsrc
+                    conn=pymysql.connect(**_dbsrc.kwargs())
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT `2fa_secret` FROM directus_users WHERE id=%s", (sess.get("user_id"),))
+                        row=cur.fetchone()
+                        if row: secret=(row[0] or "").strip()
+                    conn.close()
+                except: pass
+            if not secret or not auth_local.totp_verify(secret, otp):
+                return self._json({"error": "kode 2FA salah atau kadaluarsa"}, 400)
+            ok, err = auth_local.update_user_2fa(sess.get("user_id"), False, None)
+            if not ok:
+                return self._json({"error": f"gagal matikan 2FA: {err}"}, 500)
+            try:
+                db = auth_local._load_sessions()
+                cur = db.get(sess.get("id"))
+                if cur is not None:
+                    cur["tfa_enabled"]=False; cur["2fa"]=False
+                    db[sess.get("id")]=cur
+                    auth_local._save_sessions(db)
+            except: pass
+            return self._json({"ok": True})
         if p == "/api/layout":
             try:
-                layout_file = ROOT / "layout.json"
-                # validate: layouts must be dict, each entry is dict
+                # FASE 2: sesi login -> slot desktop|mobile di layout_<uid>.json
+                # (atomic tmp+rename). Token global tanpa sesi -> 401, tanpa tulis.
+                sess = _session_from_cookie(self)
+                uid = str(sess.get("user_id", "") or "") if sess else ""
+                ufile = _layout_uid_file(uid) if uid else None
+                if ufile is None:
+                    return self._json({"error": "login diperlukan untuk menyimpan layout"}, 401)
+                mode = str(body.get("mode", "desktop") or "desktop").strip()
+                if mode not in ("desktop", "mobile"):
+                    return self._json({"error": "mode harus desktop|mobile"}, 400)
                 layouts = body.get("layouts", {})
-                if not isinstance(layouts, dict):
-                    return self._json({"error": "layouts must be dict"}, 400)
-                for k, v in layouts.items():
-                    if not isinstance(k, str) or not isinstance(v, dict):
-                        return self._json({"error": "invalid layout entry"}, 400)
-                data = {"locked": bool(body.get("locked", True)), "layouts": layouts, "disabled": body.get("disabled", [])}
-                layout_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                return self._json(data)
+                err = _layout_validate_layouts(layouts)
+                if err:
+                    return self._json({"error": err}, 400)
+                cur = _layout_load_for_uid(uid)
+                cur["v"] = 3
+                cur["locked"] = bool(body.get("locked", cur.get("locked", True)))
+                if isinstance(body.get("disabled"), list):
+                    cur["disabled"] = body["disabled"]
+                cur[mode] = {"layouts": layouts}
+                _layout_atomic_write(ufile, cur)
+                return self._json(cur)
             except json.JSONDecodeError:
                 return self._json({"error": "bad json"}, 400)
             except Exception as e:
@@ -1866,6 +2401,68 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(dict(ok=True, mode=get_mode()))
             except Exception as e:
                 return self._json({"error": str(e)[:200]}, 400)
+        if p == "/api/db-source":
+            # POST {source:"local"|"remote"} atau {action:"test"}.
+            # Switch tanpa restart: auth baca .env tiap query,
+            # koneksi shared simoge di-reset agar ikut sumber baru.
+            try:
+                src = (body.get("source") or "").strip().lower()
+                action = (body.get("action") or "").strip().lower()
+                if action == "test":
+                    try:
+                        kw = db_source.kwargs(src or None)
+                        if db_source.source() == "remote" or src == "remote":
+                            db_source.ensure_tunnel(kw.get("port", 13307))
+                        r = db_source.test(kw)
+                        return self._json(dict(ok=r.get("ok"), source=src or db_source.source(),
+                                               users=r.get("users"), error=""))
+                    except Exception as e:
+                        return self._json(dict(ok=False, source=src or db_source.source(),
+                                               error=f"{type(e).__name__}: {str(e)[:160]}"))
+                if not src:
+                    return self._json({"error": "source wajib: local|remote"}, 400)
+                if src == "remote":
+                    kw = db_source.kwargs("remote")
+                    if not db_source.tunnel_ok(kw.get("port", 13307)):
+                        if not db_source.ensure_tunnel(kw.get("port", 13307)):
+                            return self._json({"error": "tunnel kphbwb-tunnel gagal dibuka (cek ssh key)"}, 502)
+                    try:
+                        r = db_source.test(kw)
+                    except Exception as e:
+                        return self._json({"error": f"remote DB tak terjangkau: {type(e).__name__}: {str(e)[:160]}"}, 502)
+                    if not r.get("ok"):
+                        return self._json({"error": "remote DB test gagal"}, 502)
+                db_source.set_source(src)
+                # Switch DB = sesi lama hangus (user wajib login ulang ke DB baru).
+                try:
+                    auth_local.destroy_all_sessions()
+                except Exception:
+                    pass
+                try:
+                    for _m in ("simoge_db",):
+                        if _m in sys.modules:
+                            _rc = getattr(sys.modules[_m], "reset_conn", None)
+                            if callable(_rc):
+                                _rc()
+                except Exception:
+                    pass
+                _alog(f"db-source switch -> {src} (semua sesi logout)", "warn")
+                try:
+                    body_out = json.dumps(dict(ok=True, source=src, logout=True)).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body_out)))
+                    _clear_session_cookie(self)
+                    self.end_headers()
+                    self.wfile.write(body_out)
+                    return
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                return
+            except ValueError as e:
+                return self._json({"error": str(e)[:200]}, 400)
+            except Exception as e:
+                return self._json({"error": str(e)[:200]}, 500)
         if p == "/api/new":
             runtime.cancel_active()
             _clear_session()

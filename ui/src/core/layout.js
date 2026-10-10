@@ -8,6 +8,11 @@ export class LayoutManager {
   constructor(hud, ids, opts = {}) {
     this.hud = hud;
     this.ids = [...ids];
+    // FASE 1 header-lock + map full-body: id statis tetap terdaftar (Options,
+    // panel_access gate, disabled) tapi tidak ikut measure/posisi/drag/resize/
+    // save. Posisi mereka murni dari CSS. Tanpa ini layout.json px menimpa CSS
+    // tiap reload dan header ikut kegeser.
+    this.staticIds = new Set(opts.static || []);
     this.minW = opts.minW || 120;
     this.minH = opts.minH || 60;
     this.grid = opts.grid || 4;
@@ -36,6 +41,7 @@ export class LayoutManager {
   // layar, bukan tolak — posisi relatif dipertahankan, panel tetap terjangkau.
   applyCfg(el, cfg) {
     if (!el || !cfg) return false;
+    if (this.staticIds.has(el.id)) return false; // FASE 1: posisi dari CSS
     if (!cfg.x && !cfg.y && !cfg.w && !cfg.h) return false;
     const pr = this.hud.getBoundingClientRect();
     const num = (v, d = 0) => parseFloat(String(v ?? '').replace('px', '')) || d;
@@ -52,13 +58,23 @@ export class LayoutManager {
     return true;
   }
 
+  // FASE 2 slot per-user (konsep v3 §3/§4): mode dari viewport,
+  // <780px = mobile. Tanpa toggle manual — reload saat pindah mode.
+  mode() { return window.innerWidth < 780 ? 'mobile' : 'desktop'; }
+
   async loadConfig() {
     try {
       const res = await fetch(LAYOUT_URL, { headers: { 'X-Ana-Token': getToken() } });
       if (!res.ok) return;
       const data = await res.json();
       if (!data || typeof data !== 'object') return;
-      this.config = { locked: !!data.locked, layouts: data.layouts || {}, disabled: data.disabled || [] };
+      this._mode = this.mode();
+      // v3 {desktop:{layouts},mobile:{layouts}} atau legacy {layouts} (token-only).
+      const slot = data[this._mode]?.layouts
+        || (this._mode === 'mobile' && data.desktop?.layouts && Object.keys(data.mobile?.layouts || {}).length === 0
+          ? data.desktop.layouts : null) // seed mobile pertama: copy desktop
+        || data.layouts || {};
+      this.config = { locked: !!data.locked, layouts: slot, disabled: data.disabled || [] };
       this.locked = !!data.locked;
       this.disabled = new Set(this.config.disabled);
       for (const [id, cfg] of Object.entries(this.config.layouts)) {
@@ -75,7 +91,8 @@ export class LayoutManager {
       this.applyLock();
       const btn = document.getElementById('layoutLockBtn');
       if (btn) {
-        btn.innerHTML = `<span class="toggle-icon">${this.locked ? '🔒' : '✎'}</span> ${this.locked ? 'Lock' : 'Unlock'}`;
+        btn.innerHTML = `<span class="toggle-icon">${this.locked ? '🔒' : '✎'}</span>`;
+        btn.title = this.locked ? 'Lock — layout terkunci' : 'Unlock — drag + resize aktif';
         btn.classList.toggle('active', !this.locked);
       }
       // Panel dinamis yang register() setelah loadConfig (mapPanel dkk)
@@ -98,6 +115,7 @@ export class LayoutManager {
     if (!this._loaded) { this._pendingSave = true; return; }
     const layouts = {};
     for (const [id, el] of Object.entries(this.items)) {
+      if (this.staticIds.has(id)) continue; // FASE 1: tidak disimpan
       layouts[id] = {
         x: el.style.left || '', y: el.style.top || '',
         w: el.style.width || '', h: el.style.height || '',
@@ -107,7 +125,8 @@ export class LayoutManager {
     fetch(LAYOUT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Ana-Token': getToken() },
-      body: JSON.stringify(this.config),
+      // FASE 2: mode ikut — server tulis ke slot desktop|mobile file per-user.
+      body: JSON.stringify({ ...this.config, mode: this._mode || this.mode() }),
     }).catch(() => {});
   }
 
@@ -122,6 +141,15 @@ export class LayoutManager {
     if (el.classList.contains('code-viewer')) el.classList.toggle('visible', enabled);
     if (enabled) this.disabled.delete(id); else this.disabled.add(id);
     this.save();
+  }
+
+  // Overlay (codeViewer) ke lapisan atas semua panel: hanya naikkan z via
+  // counter freeZ yang sama seperti panel lain. Posisi/ukuran/display tetap
+  // aturan semula (centered overlay, hidden default) — tanpa Awak.
+  bringToFront(id) {
+    const el = this.items[id] || document.getElementById(id);
+    if (!el) return;
+    el.style.setProperty('z-index', String(this.freeZ++), 'important');
   }
 
   toggleLock() {
@@ -153,6 +181,14 @@ export class LayoutManager {
       delete this.items[id];
     }
     if (!this.ids.includes(id)) this.ids.push(id);
+    // FASE 1: id statis (header + map full-body) hanya dicatat — tanpa
+    // posisi/handle/z, tanpa simpan. Direparent ke .hud agar inset:0 CSS jalan.
+    if (this.staticIds.has(id)) {
+      if (el.parentElement !== this.hud) this.hud.appendChild(el);
+      this.items[id] = el;
+      if (this.disabled.has(id)) el.style.setProperty('display', 'none', 'important');
+      return;
+    }
     const r = el.getBoundingClientRect();
     const pr = this.hud.getBoundingClientRect();
     // Width is still correct here: ensurePanel() appended the panel to its
@@ -229,6 +265,9 @@ export class LayoutManager {
     for (const id of this.ids) {
       const el = document.getElementById(id);
       if (!el) continue;
+      // FASE 1: id statis tetap terdaftar untuk Options/gate, tapi posisi
+      // murni CSS — tanpa data-layout-id (kebal drag) dan tanpa ukur.
+      if (this.staticIds.has(id)) { this.items[id] = el; continue; }
       el.dataset.layoutId = id;
       // Remember the rail before the detach below empties it. Only panels that
       // actually live in a rail get a side — .core/.topControls/.eventLog are
@@ -263,7 +302,8 @@ export class LayoutManager {
   }
 
   injectHandles() {
-    for (const el of Object.values(this.items)) {
+    for (const [id, el] of Object.entries(this.items)) {
+      if (this.staticIds.has(id)) continue;
       if (el.querySelector(':scope > .layout-handle')) continue;
       for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
         const h = document.createElement('div');
@@ -387,7 +427,7 @@ export class LayoutManager {
     fetch(LAYOUT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Ana-Token': getToken() },
-      body: JSON.stringify(this.config),
+      body: JSON.stringify({ ...this.config, mode: this._mode || this.mode() }),
     }).catch(() => {});
     for (const el of Object.values(this.items)) el.removeAttribute('data-free');
     location.reload();
