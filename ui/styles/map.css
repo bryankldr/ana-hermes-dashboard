@@ -88,6 +88,9 @@
 #mapPanel .panel-title .sh-badge.periode { color: var(--neon); border-color: var(--neon-border-strong); }
 #mapPanel .panel-title .sh-badge.mode-asisten { color: #39F5A6; border-color: rgba(57,245,166,.35); }
 #mapPanel .panel-title .sh-badge.mode-coding { color: var(--text-dim); }
+/* K6: tombol tiles ⚙ di header panel (ops, bukan toolbar bisnis). */
+#mapPanel .panel-title .sh-tiles { border: 1px solid var(--neon-border); background: transparent; color: var(--text-dim); border-radius: 6px; font-size: 10px; padding: 2px 6px; cursor: pointer; line-height: 1.4; }
+#mapPanel .panel-title .sh-tiles:hover { color: var(--neon); border-color: var(--neon); }
 /* toggle toolbar: 1 tombol seukuran tombol layer (30x30), sembunyikan
    toolbar + filter + pencarian sekaligus. Pola sama seperti layer control. */
 .map-fly-top { position: relative; top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: calc(100% - 88px); overflow: visible; align-items: flex-start; pointer-events: none; }
@@ -280,6 +283,10 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 }
 @media (max-width: 560px){
   .spatial-kpi.flying { grid-template-columns: repeat(2, 1fr); bottom: 56px; }
+  /* K5: toolbar mobile rapat — select max 40vw, padding kecil, tombol 30px. */
+  .map-fly .spatial-toolbar.flying { padding: 5px; gap: 4px; }
+  .map-fly .spatial-toolbar.flying .spatial-select { flex: 1 1 0; min-width: 0; max-width: 40vw; padding: 5px 8px; font-size: 12px; }
+  .map-fly .spatial-toolbar.flying .spatial-btn { padding: 5px 8px; font-size: 12px; }
 }
 
 /* bottom bar — KPI kiri, progress+insight+meta tengah, legend kanan — rata bawah
@@ -297,6 +304,13 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 .map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 160px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }
 .map-bottom-bar .map-meta.flying { position: static; flex: 1 1 auto; max-width: 100%; white-space: nowrap; min-height: 34px; align-self: center; left: auto; right: auto; bottom: auto; font-size: 11px; padding: 5px 10px; overflow: hidden; text-overflow: ellipsis; }
 .map-bottom-bar .map-legend.flying { position: static; width: auto; flex: 1 1 190px; min-height: 52px; max-height: 58px; left: auto; right: auto; bottom: auto; align-content: center; overflow: hidden; }
+/* ── K1: insight klik-expand (default 1 baris, klik buka 120px scroll) ── */
+.map-bottom-bar .spatial-insight.flying { cursor: pointer; }
+.map-bottom-bar .spatial-insight.flying.expanded { white-space: normal; max-height: 120px; overflow: auto; text-overflow: clip; }
+/* ── K3: legend ciut jadi tombol ⓘ (pola spatialToolsToggle) ── */
+.map-bottom-bar .legend-toggle { flex: 0 0 auto; align-self: center; }
+.map-bottom-bar .map-legend.flying.legend-collapsed { display: none; }
+.map-bottom-bar .legend-toggle.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
 
 /* Panel sempit tak muat BI bar satu baris. Before: 4 KPI + insight + meta +
    legend wrap jadi 141px dan menutupi 46% peta (664 dari 800 polygon tak
@@ -342,14 +356,10 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 #mapPanel .layout-handle { z-index: 500; }
 #mapPanel .layout-lock-indicator { z-index: 501; }
 
-/* ── SEMBUNYIKAN (bukan hapus): Meta bar + atribusi legend ──
-   Meta = "N baru · M total · status" di atas map.
-   Atribusi = "Leaflet · Esri, Maxar, Earthstar Geographics" di dalam legend.
-   Toggle: hapus/comment 2 rule ini untuk tampilkan lagi.
-   JS tetap jalan normal (metric.textContent, updateLegend, _legendAttrib
-   tetap update DOM) — hanya tidak tampil. Data/metric tidak hilang. */
-#mapPanel .map-bottom-bar .map-meta.flying,
-#mapPanel.narrow .map-bottom-bar .map-meta.flying { display: none; }
+/* ── K2: meta tampil lagi sebagai chip count ringkas ──
+   Sebelumnya display:none (aturan SEMBUNYIKAN). Sekarang tampil:
+   JS tetap sama (metric/stat.textContent), hanya CSS dibuka + diciutkan
+   jadi chip. Atribusi legend tetap sembunyi. */
 #mapPanel #mapLegend .lg-attrib { display: none; }
 
 /* ══ LAPORAN BISNIS (spatialReport.js) — dokumen multi halaman siap cetak ══

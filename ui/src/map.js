@@ -158,7 +158,6 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <button id="spatialFilterBtn" class="spatial-btn" title="Filter" aria-label="Filter"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.5 10 19 14 21 14 12.5"/></svg></button>'
       + '      <button id="spatialKpiBtn" class="spatial-btn ghost" title="KPI">KPI</button>'
       + '      <button id="spatialRefresh" class="spatial-btn" title="Muat ulang" aria-label="Muat ulang"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>'
-      + '      <button id="spatialTilesBtn" class="spatial-btn ghost" title="Pengaturan tiles (rebuild + cron harian)" aria-label="Pengaturan tiles">⚙</button>'
       + '    </div>'
       + '    <div id="spatialTilesModal" class="spatial-tiles-modal hidden" role="dialog" aria-label="Pengaturan tiles">'
       + '      <div class="spatial-tiles-card">'
@@ -216,7 +215,8 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '    </div>'
       + '    <div id="spatialInsight" class="spatial-insight flying"></div>'
       + '    <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
-      + '    <div class="map-legend flying" id="mapLegend"></div>'
+      + '    <button id="legendToggle" class="spatial-toggle-btn legend-toggle" title="Legenda" aria-label="Legenda">ⓘ</button>'
+      + '    <div class="map-legend flying legend-collapsed" id="mapLegend"></div>'
       + '  </div>'
       + '</div>',
   });
@@ -233,7 +233,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       // bungkus judul asli
       const titleText = head.textContent.trim() || 'SPATIAL MAP';
       head.innerHTML = '<span style="display:flex;align-items:center;gap:8px;"><span>SPATIAL MAP</span><span class="sh-title" style="font-family:var(--font-disp);font-size:7px;letter-spacing:.12em;color:var(--text-dim);opacity:.9">BUSINESS INTELLIGENCE</span></span>'
-        + '<span class="sh-badges" style="display:flex;gap:4px;align-items:center"><span id="shPeriode" class="sh-badge periode">' + perTxt + '</span><span id="shMode" class="sh-badge mode-coding">CODING</span></span>';
+        + '<span class="sh-badges" style="display:flex;gap:4px;align-items:center"><span id="shPeriode" class="sh-badge periode">' + perTxt + '</span><span id="shMode" class="sh-badge mode-coding">CODING</span><button id="spatialTilesBtn" class="sh-tiles" title="Pengaturan tiles (rebuild + cron harian)" aria-label="Pengaturan tiles">⚙</button></span>';
     }
   } catch(_) {}
   _built = true;
@@ -540,6 +540,7 @@ function updateLegend(biz, kat) {
 
   function renderInsight(biz, explanation, features, counts) {
     if (!insightBox) return;
+    const _wasExp = insightBox.classList.contains('expanded');
     insightBox.dataset.lastBiz = biz;
     insightBox.dataset.lastExpl = explanation || '';
     insightBox.dataset.lastFeat = String(features||0);
@@ -550,7 +551,7 @@ function updateLegend(biz, kat) {
     const c = counts||{};
     if (!n) {
       insightBox.innerHTML = '<div class="ins-title">Insight \u00b7 ' + esc(per) + '</div>Tidak ada polygon untuk filter ini. Coba longgarkan wilayah atau periode.';
-      insightBox.className = 'spatial-insight' + (mode==='coding' ? ' dev' : '');
+      insightBox.className = 'spatial-insight' + (mode==='coding' ? ' dev' : '') + (_wasExp ? ' expanded' : '');
       return;
     }
     if (mode === 'asisten') {
@@ -563,11 +564,11 @@ function updateLegend(biz, kat) {
       else if (biz==='matriks' || biz==='matrik') nar = 'Evaluasi Matriks ' + n + ' petak ' + per + ' — Keseimbangan luas/pohon/andil/produksi. Bongkor ' + (c.merah||0) + ', kurang ' + ((c.kuning||0)+(c.oranye||0)) + ', terpenuhi ' + ((c.hijau||0)+(c.emas||0)) + '.';
       else nar = (explanation||'').slice(0,160) || (n + ' polygon periode ' + per + '.');
       insightBox.innerHTML = '<div class="ins-title">Ringkasan ANNA \u00b7 ' + esc(per) + ' \u00b7 mode asisten</div>' + esc(nar);
-      insightBox.className = 'spatial-insight';
+      insightBox.className = 'spatial-insight' + (_wasExp ? ' expanded' : '');
     } else {
       const dev = 'template=' + esc(biz) + ' \u00b7 ' + n + ' feat \u00b7 ' + esc(per) + ' \u00b7 warna ' + esc(JSON.stringify(c)) + (explanation ? ' \u00b7 ' + esc(explanation.slice(0,120)) : '');
       insightBox.innerHTML = '<div class="ins-title">Dev detail \u00b7 ' + esc(per) + ' \u00b7 mode coding</div>' + dev;
-      insightBox.className = 'spatial-insight dev';
+      insightBox.className = 'spatial-insight dev' + (_wasExp ? ' expanded' : '');
     }
   }
 
@@ -880,6 +881,17 @@ function updateLegend(biz, kat) {
     kpiBox?.classList.toggle('collapsed');
     btnKpi.classList.toggle('active', !kpiBox?.classList.contains('collapsed'));
   });
+  // K1: klik insight expand/collapse. K3: tombol ⓘ toggle legend.
+  insightBox?.addEventListener('click', () => { insightBox.classList.toggle('expanded'); });
+  $sel('#legendToggle')?.addEventListener('click', function() {
+    const lg = $sel('#mapLegend');
+    lg?.classList.toggle('legend-collapsed');
+    this.classList.toggle('active', !lg?.classList.contains('legend-collapsed'));
+  });
+  // K4: mobile (≤780px) KPI mulai collapse — hemat peta 360px. Desktop tetap tampil.
+  if (window.matchMedia && window.matchMedia('(max-width: 780px)').matches) {
+    kpiBox?.classList.add('collapsed');
+  }
   bizSel?.addEventListener('change', () => { syncKatVisibility(); updateLegend(bizSel.value, katSel?.value || 'semua'); updateHead(); renderChips(); scheduleReload(); });
   katSel?.addEventListener('change', () => { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });
   [fBulan, fTahun, fPeriode, fPemKe, fDivre, fKph, fBkph, fRph, fTpg].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
