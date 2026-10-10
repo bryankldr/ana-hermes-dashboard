@@ -93,11 +93,16 @@
 #mapPanel .panel-title .sh-tiles:hover { color: var(--neon); border-color: var(--neon); background: rgba(0,220,255,.12); }
 /* toggle toolbar: 1 tombol seukuran tombol layer (30x30), sembunyikan
    toolbar + filter + pencarian sekaligus. Pola sama seperti layer control. */
-.map-fly-top { position: relative; top: 8px; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; width: fit-content; max-width: calc(100% - 16px); overflow: visible; pointer-events: none; }
-.map-fly-top .spatial-toggle-btn { flex: 0 0 auto; align-self: center; }
+.map-fly-top { position: relative; top: 8px; display: grid; grid-template-columns: 30px minmax(0, auto); column-gap: 6px; row-gap: 6px; align-items: center; width: fit-content; max-width: calc(100% - 16px); overflow: visible; pointer-events: none; }
+.map-fly-top .spatial-toggle-btn { grid-column: 1; grid-row: 1; align-self: center; }
 /* Desktop: toolbar selebar isi (cap 560px), bukan full-width. Specificity di atas rule generik .map-fly. */
-#mapPanel .map-fly-top .spatial-toolbar.flying { flex: 0 1 auto; width: auto; max-width: 560px; min-width: 0; align-self: center; }
-.map-fly-top .spatial-filters.flying, .map-fly-top .map-tools.flying { flex: 1 1 100%; width: 100%; box-sizing: border-box; }
+#mapPanel .map-fly-top .spatial-toolbar.flying { grid-column: 2; grid-row: 1; width: auto; max-width: 560px; min-width: 0; align-self: center; }
+/* Baris 2-3: filter lalu pencarian, selalu di bawah toolbar, tepi sejajar bar.
+   Specificity #mapPanel kalahkan rule generik .map-fly di bawah (width min 560px). */
+#mapPanel .map-fly-top > .spatial-filters.flying,
+#mapPanel .map-fly-top > .map-tools.flying { grid-column: 1 / -1; width: 100%; max-width: 596px; box-sizing: border-box; min-width: 0; align-self: stretch; }
+/* Modal tiles absolute — keluar dari flow grid, tak ganggu baris filter. */
+#mapPanel .map-fly-top > .spatial-tiles-modal { position: absolute; }
 /* Desktop: filter + pencarian selebar bar (toggle 30 + gap 6 + toolbar ≤560 = ≤596px),
    tepi kiri-kanan sejajar toolbar. Kartu sama dengan toolbar. */
 #mapPanel .map-fly-top .spatial-filters.flying { max-width: 596px; }
@@ -106,8 +111,8 @@
 #mapPanel .map-fly-top .map-tools.flying button { flex: 0 0 auto; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 8px; }
 /* Tablet + mobile: bar full-width, toolbar isi sisa. */
 @media (max-width: 1024px) {
-  #mapPanel .map-fly-top { width: 100%; max-width: 100%; }
-  #mapPanel .map-fly-top .spatial-toolbar.flying { flex: 1 1 auto; width: auto; max-width: none; }
+  #mapPanel .map-fly-top { width: 100%; max-width: 100%; grid-template-columns: 30px minmax(0, 1fr); }
+  #mapPanel .map-fly-top .spatial-toolbar.flying { width: auto; max-width: none; min-width: 0; }
   #mapPanel .map-fly-top .spatial-filters.flying,
   #mapPanel .map-fly-top .map-tools.flying { max-width: none; }
 }
