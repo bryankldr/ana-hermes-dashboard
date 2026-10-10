@@ -286,7 +286,7 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 #mapPanel .leaflet-bar a:last-child { border-bottom: none; }
 #mapPanel .leaflet-bar a:hover { background: rgba(0,220,255,.14); color: var(--neon); }
 #mapPanel .leaflet-control-scale { margin-top: 2px !important; }
-#mapPanel .leaflet-control-scale-line { background: rgba(2,15,42,.88); border: 1px solid rgba(45,242,255,.28); border-top: none; border-radius: 0 0 6px 6px; color: var(--text-body); font-family: var(--font-mono); font-size: 10px; padding: 2px 8px 3px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+#mapPanel .leaflet-control-scale-line { background: rgba(2,15,42,.95); border: 1px solid rgba(45,242,255,.45); border-top: none; border-radius: 0 0 6px 6px; color: var(--neon); font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 2px 8px 3px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.55); text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 /* opsi layer serasi toolbar/filter */
 #mapPanel .leaflet-control-layers { background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--text-body); font-family: var(--font-mono); font-size: 12px; }
 #mapPanel .leaflet-control-layers-toggle { width: 30px; height: 30px; border-radius: 8px; }
@@ -325,12 +325,12 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
    + bar wrap; tinggi dibatasi agar bar tak pernah menutupi peta. */
 .map-bottom-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 318; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; align-content: flex-end; pointer-events: none; max-height: 46%; overflow: hidden; }
 .map-bottom-bar > * { pointer-events: auto; min-width: 0; }
-.map-bottom-bar .spatial-kpi.flying { position: static; width: auto; flex: 1 1 190px; min-height: 56px; left: auto; right: auto; bottom: auto; gap: 4px; padding: 4px; }
+.map-bottom-bar .spatial-kpi.flying { position: static; width: auto; flex: 2 1 340px; min-width: 0; min-height: 56px; left: auto; right: auto; bottom: auto; gap: 4px; padding: 4px; }
 
 .map-bottom-bar .spatial-insight,
-.map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 160px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }
-.map-bottom-bar .map-meta.flying { position: static; flex: 1 1 auto; max-width: 100%; white-space: nowrap; min-height: 34px; align-self: center; left: auto; right: auto; bottom: auto; font-size: 11px; padding: 5px 10px; overflow: hidden; text-overflow: ellipsis; }
-.map-bottom-bar .map-legend.flying { position: static; width: auto; flex: 1 1 190px; min-height: 52px; max-height: 58px; left: auto; right: auto; bottom: auto; align-content: center; overflow: hidden; }
+.map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 120px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }
+.map-bottom-bar .map-meta.flying { position: static; flex: 0 1 240px; min-width: 0; max-width: 100%; white-space: nowrap; min-height: 34px; align-self: center; left: auto; right: auto; bottom: auto; font-size: 11px; padding: 5px 10px; overflow: hidden; text-overflow: ellipsis; }
+.map-bottom-bar .map-legend.flying { position: static; width: auto; flex: 0 1 170px; min-width: 0; min-height: 52px; max-height: 58px; left: auto; right: auto; bottom: auto; align-content: center; overflow: hidden; }
 /* ── K1: insight klik-expand (default 1 baris, klik buka 120px scroll) ── */
 .map-bottom-bar .spatial-insight.flying { cursor: pointer; }
 .map-bottom-bar .spatial-insight.flying.expanded { white-space: normal; max-height: 120px; overflow: auto; text-overflow: clip; }

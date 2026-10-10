@@ -203,7 +203,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      </div>'
       + '      <div id="spatialChips" class="spatial-chips"></div>'
       + '    </div>'
-      + '    <div class="map-tools flying"><input id="mapSearch" placeholder="cari no petak..." autocomplete="off"><button id="mapFit" title="fit ke semua petak">◎</button></div>'
+      + '    <div class="map-tools flying"><input id="mapSearch" placeholder="Cari No Petak…" autocomplete="off"><button id="mapFit" title="fit ke semua petak">◎</button></div>'
       + '  </div>'
       + '  <div id="spatialProgress" class="spatial-progress flying hidden" aria-live="polite"><div class="sp-bar"><div id="spBarFill" class="sp-fill" style="width:0%"></div></div><div id="spLabel" class="sp-label">siap</div></div>'
       + '  <div class="map-bottom-bar">'
@@ -249,13 +249,17 @@ export function initMapPanel({ log = () => {} } = {}) {
   const map = window.L.map(box, { zoomControl: false, attributionControl: false }).setView(CENTER, 11);
   const dark = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Esri' });
   const sat = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Esri, Maxar, Earthstar Geographics' });
-  const refLbl = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18 });
+  // Label di pane sendiri: filter redup imagery tak kena teks (cegah halo/bayangan).
+  try { map.createPane('labelPane'); const lp = map.getPane('labelPane'); if (lp) { lp.style.zIndex = 250; lp.style.pointerEvents = 'none'; } } catch(_) {}
+  const refLbl = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, pane: 'labelPane' });
   const petakLayer = window.L.layerGroup();
-  const satGroup = window.L.layerGroup([sat, refLbl]);
+  const satGroup = window.L.layerGroup([sat]);
+  const darkGroup = window.L.layerGroup([dark]);
   satGroup.addTo(map);
+  refLbl.addTo(map); // satu sumber label, default ON — cegah dobel/bayangan
   petakLayer.addTo(map);
   window.L.control.scale({ position: 'topright' }).addTo(map);
-  window.L.control.layers({ 'Satelit': satGroup, 'Gelap': dark }, { 'Petak': petakLayer }, { position: 'topright' }).addTo(map);
+  window.L.control.layers({ 'Satelit': satGroup, 'Gelap': darkGroup }, { 'Petak': petakLayer, 'Label': refLbl }, { position: 'topright' }).addTo(map);
   window.L.control.zoom({ position: 'topright' }).addTo(map);
   // zoom-badge: angka zoom + tier tepat di bawah skala (urutan: skala → badge → layers → zoom)
   (function(){
