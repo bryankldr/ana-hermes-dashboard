@@ -135,12 +135,12 @@
 .map-fly .spatial-filters.flying { max-height: min(58vh, 480px); overflow: auto; background: rgba(2,15,42,.97); backdrop-filter: blur(12px); border-color: rgba(45,242,255,.32); box-shadow: 0 12px 32px rgba(0,0,0,.6); border-radius: 12px; position: relative; z-index: 432; }
 .map-fly .map-tools.flying { opacity: .96; }
 .map-fly .map-tools.flying input, .map-fly .map-tools.flying button { backdrop-filter: blur(6px); }
-.spatial-kpi.flying { position: absolute; left: 8px; bottom: 8px; right: auto; width: 336px; max-width: 336px; z-index: 315; margin: 0; backdrop-filter: blur(8px); background: rgba(2,15,42,.84); border: 1px solid rgba(45,242,255,.28); border-radius: 9px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 4px; min-height: 52px; align-content: center; }
+.spatial-kpi.flying { position: absolute; left: 8px; bottom: 8px; right: auto; width: 288px; max-width: 288px; z-index: 315; margin: 0; backdrop-filter: blur(8px); background: rgba(2,15,42,.84); border: 1px solid rgba(45,242,255,.28); border-radius: 9px; padding: 3px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 3px; min-height: 50px; align-content: center; }
 .spatial-kpi.flying.collapsed { display: none; }
-.spatial-kpi.flying .kpi { background: rgba(45,242,255,.09); border-color: rgba(45,242,255,.18); padding: 4px 5px; display: flex; flex-direction: column; gap: 0; justify-content: center; min-width: 0; }
+.spatial-kpi.flying .kpi { background: rgba(45,242,255,.09); border-color: rgba(45,242,255,.18); padding: 3px 4px; display: flex; flex-direction: column; gap: 0; justify-content: center; min-width: 0; }
 .spatial-kpi.flying .kpi-label { font-size: 8px; letter-spacing: .04em; font-weight: 700; opacity: .95; }
-.spatial-kpi.flying .kpi-value { font-size: 18px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
-.spatial-kpi.flying .kpi-sub { font-size: 10px; opacity: .90; line-height: 1.2; font-weight:500; }
+.spatial-kpi.flying .kpi-value { font-size: 16px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
+.spatial-kpi.flying .kpi-sub { font-size: 9px; opacity: .90; line-height: 1.2; font-weight:500; }
 
 /* legacy map box moved into .map-wrap */
 #mapBox img.leaflet-tile { filter: brightness(0.85) saturate(0.7); }
@@ -325,7 +325,7 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
    + bar wrap; tinggi dibatasi agar bar tak pernah menutupi peta. */
 .map-bottom-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 318; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; align-content: flex-end; pointer-events: none; max-height: 46%; overflow: hidden; }
 .map-bottom-bar > * { pointer-events: auto; min-width: 0; }
-.map-bottom-bar .spatial-kpi.flying { position: static; width: 336px; max-width: 336px; flex: 0 0 336px; min-width: 0; min-height: 52px; left: auto; right: auto; bottom: auto; gap: 4px; padding: 4px; }
+.map-bottom-bar .spatial-kpi.flying { position: static; width: 288px; max-width: 288px; flex: 0 0 288px; min-width: 0; min-height: 50px; left: auto; right: auto; bottom: auto; gap: 3px; padding: 3px; }
 
 .map-bottom-bar .spatial-insight,
 .map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 120px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }

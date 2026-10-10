@@ -208,9 +208,9 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '  <div id="spatialProgress" class="spatial-progress flying hidden" aria-live="polite"><div class="sp-bar"><div id="spBarFill" class="sp-fill" style="width:0%"></div></div><div id="spLabel" class="sp-label">siap</div></div>'
       + '  <div class="map-bottom-bar">'
       + '    <div id="spatialKpi" class="spatial-kpi flying">'
-      + '      <div class="kpi"><div class="kpi-label">Total petak</div><div class="kpi-value" id="kpiTotal">-</div><div class="kpi-sub" id="kpiTotalSub">memuat</div></div>'
+      + '      <div class="kpi"><div class="kpi-label">Total</div><div class="kpi-value" id="kpiTotal">-</div><div class="kpi-sub" id="kpiTotalSub">memuat</div></div>'
       + '      <div class="kpi"><div class="kpi-label" id="kpi2Label">Bongkor</div><div class="kpi-value warn" id="kpi2">-</div><div class="kpi-sub" id="kpi2Sub">merah</div></div>'
-      + '      <div class="kpi"><div class="kpi-label" id="kpi3Label">Perlu perhatian</div><div class="kpi-value mid" id="kpi3">-</div><div class="kpi-sub" id="kpi3Sub">kuning/oranye</div></div>'
+      + '      <div class="kpi"><div class="kpi-label" id="kpi3Label">Perhatian</div><div class="kpi-value mid" id="kpi3">-</div><div class="kpi-sub" id="kpi3Sub">kuning/oranye</div></div>'
       + '      <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/emas</div></div>'
       + '    </div>'
       + '    <div id="spatialInsight" class="spatial-insight flying"></div>'
@@ -501,11 +501,11 @@ function updateLegend(biz, kat) {
       kpiTotalSub.textContent = per + ' \u00b7 ' + tot + ' ' + ctx;
       kpiTotalSub.title = 'Total polygon untuk filter ' + per + ' · ' + (biz||'petak');
     }
-    let l2='Bongkor', l3='Perlu perhatian', l4='Terpenuhi';
+    let l2='Bongkor', l3='Perhatian', l4='Terpenuhi';
     let v2 = c.merah || 0, v3 = (c.kuning||0)+(c.oranye||0), v4=(c.hijau||0)+(c.emas||0);
     let s2='', s3='', s4='', t2='', t3='', t4='';
     if (biz==='petak' && String(kat).toLowerCase()==='idle') {
-      l2='Idle'; l3='Rasio idle'; l4='Aktif';
+      l2='Idle'; l3='Rasio'; l4='Aktif';
       v2=c.kuning||0; v3=Math.round(tot? (v2/tot*100):0); v4=c.hijau||0;
       s2 = pct(v2) + ' \u00b7 butuh kunjungan'; s3 = v3 + '% idle'; s4 = pct(v4) + ' \u00b7 produktif';
       t2='Petak tanpa aktivitas berjalan — perlu cek lapangan'; t3='Persentase idle dari total'; t4='Ada aktivitas berjalan';
@@ -515,7 +515,7 @@ function updateLegend(biz, kat) {
       s2=pct(v2)+' \u00b7 perlu tambah'; s3=pct(v3)+' \u00b7 cukup'; s4=pct(v4)+' \u00b7 optimal';
       t2='Petak dengan 2 penyadap — cek beban kerja'; t3='3 penyadap'; t4='>3 penyadap — coverage padat';
     } else if (biz==='produksi') {
-      l2='Krisis'; l3='Menuju target'; l4='Lampaui';
+      l2='Krisis'; l3='Menuju'; l4='Lampaui';
       v2=(c.merah||0)+(c.oranye||0); v3=(c.kuning||0)+(c.hijau||0); v4=c.emas||0;
       s2=pct(v2)+' \u00b7 <50% target'; s3=pct(v3)+' \u00b7 50-100%'; s4=pct(v4)+' \u00b7 >100% target';
       t2='Realisasi <50% — intervensi segera'; t3='Progress menuju target RKAP'; t4='Melebihi target — evaluasi sustain';
@@ -525,7 +525,7 @@ function updateLegend(biz, kat) {
       s2=pct(v2)+' \u00b7 tanpa penyadap/>2 bln'; s3=pct(v3)+' \u00b7 0 di periode ini'; s4=pct(v4)+' \u00b7 ada sadap';
       t2='Tanpa penyadap atau >2 bulan tanpa aktivitas — butuh alokasi ulang'; t3='Ada penyadap + aktivitas 2 bln, tapi 0 di periode ini — cek andil'; t4='Aktivitas sadap berjalan — pin cyan/oranye/merah (Pem1/2/3)';
     } else if (biz==='matriks' || biz==='matrik') {
-      l2='Bermasalah'; l3='Kurang'; l4='Optimal';
+      l2='Masalah'; l3='Kurang'; l4='Optimal';
       v2=c.merah||0; v3=(c.kuning||0)+(c.oranye||0); v4=(c.hijau||0)+(c.emas||0);
       s2=pct(v2)+' \u00b7 prioritas 1'; s3=pct(v3)+' \u00b7 perbaikan'; s4=pct(v4)+' \u00b7 sesuai';
       t2='Skor matriks terendah — luas/pohon/produksi bermasalah'; t3='Perlu perbaikan'; t4='Skor optimal';
