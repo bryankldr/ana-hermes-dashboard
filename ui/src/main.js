@@ -438,11 +438,14 @@ function initIntel() {
       <div class="session-selector">
         <select id="sessionSelect" class="session-select"><option value="">Memuat sesi...</option></select>
         <button id="sessionNew" class="session-btn">+ BARU</button>
+        <button id="sessionDel" class="session-btn" title="Hapus sesi terpilih">🗑</button>
         <button id="sessionRefresh" class="session-btn">↻</button>
       </div>
       <div class="panel-body"><div id="intelTerminal" class="intel-terminal"><div class="intel-line dim">Menunggu aktivitas agen...</div></div></div>`;
     document.getElementById('sessionNew').addEventListener('click', () => {
-      api.setSession(null).then(() => {
+      // Arsip sesi aktif ke histori (maks 3) TANPA hapus store — sesi lama
+      // tetap bisa dibuka lagi dari picker; run berikut buat sesi baru.
+      api.post('/api/session/archive', {}).then(() => {
         currentSessionId = null;
         document.getElementById('sessionId').textContent = '—';
         els.stSess.textContent = '—';
@@ -452,6 +455,25 @@ function initIntel() {
       });
     });
     document.getElementById('sessionRefresh').addEventListener('click', refreshSessionSelector);
+    document.getElementById('sessionDel')?.addEventListener('click', async () => {
+      const sel = document.getElementById('sessionSelect');
+      const sid = sel ? sel.value : '';
+      if (!sid) return;
+      if (!confirm('Hapus sesi ANNA ini? Riwayat chat di dalamnya ikut hilang.')) return;
+      try {
+        const r = await api.post('/api/session', { action: 'delete', session_id: sid });
+        if (r && r.ok) {
+          if (currentSessionId === sid) {
+            currentSessionId = (r.sessions && r.sessions[0] && r.sessions[0].id) || null;
+            document.getElementById('sessionId').textContent = currentSessionId || '—';
+            try { localStorage.removeItem('ana_session'); } catch (_) {}
+          }
+          intelLog('🗑 Sesi dihapus', 'session');
+          log('session', 'SESI', 'hapus sesi');
+          refreshSessionSelector();
+        }
+      } catch (_) {}
+    });
     document.getElementById('sessionSelect').addEventListener('change', (e) => {
       const sid = e.target.value;
       if (!sid) return;
@@ -469,9 +491,34 @@ function initIntel() {
 }
 async function refreshSessionSelector() {
   try {
-    const data = await api.getSessions();
+    // Sumber utama: sesi ANNA milik user login (maks 3, persisten).
+    // GET /api/session = {sessions:[{id,title,created,message_count,active}]}.
+    let mine = [];
+    try {
+      const r = await api.get('/api/session');
+      if (r && r.ok && Array.isArray(r.sessions)) mine = r.sessions;
+    } catch (_) {}
     const sel = document.getElementById('sessionSelect');
     if (!sel) return;
+    if (mine.length) {
+      // Tampilkan sesi milik user saja (maks 3) + opsi sesi baru.
+      let html = '<option value=\"\">— Sesi Baru —</option>';
+      for (const s of mine) {
+        const t = s.created ? new Date(s.created * 1000).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+        html += `<option value=\"${esc(s.id)}\" ${s.active ? 'selected' : ''}>${esc(s.title || s.id)} · ${esc(t)}${s.active ? ' ●' : ''}</option>`;
+      }
+      sel.innerHTML = html;
+      const act = mine.find(s => s.active);
+      if (act) {
+        currentSessionId = act.id;
+        const sidEl = document.getElementById('sessionId');
+        if (sidEl) sidEl.textContent = act.id;
+      }
+      return;
+    }
+    const data = await api.getSessions();
+    const sel2 = document.getElementById('sessionSelect');
+    if (!sel2) return;
     const groups = data.groups || {};
     const current = data.current || currentSessionId;
     let html = '<option value="">— Sesi Baru —</option>';
@@ -497,7 +544,7 @@ async function refreshSessionSelector() {
       }
       html += '</optgroup>';
     }
-    sel.innerHTML = html;
+    sel2.innerHTML = html;
   } catch (e) {}
 }
 function intelLog(text, type = 'info') {
@@ -1498,6 +1545,13 @@ function initPanelOptions(layout) {
   btn.addEventListener('click', e => {
     e.stopPropagation();
     menu.classList.toggle('open');
+    // fixed ke viewport: tempel di bawah tombol, kanan sejajar tombol.
+    // Tanpa ini menu nempel top:auto/left:auto viewport (pojok).
+    if (menu.classList.contains('open')) {
+      const r = btn.getBoundingClientRect();
+      menu.style.top = (r.bottom + 6) + 'px';
+      menu.style.left = Math.max(8, r.right - 220) + 'px';
+    }
   });
   document.addEventListener('click', e => {
     if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove('open');
@@ -1604,6 +1658,9 @@ async function init() {
       if (sessEl) sessEl.textContent = [ _auth.user.email, _auth.user.jabatan?.nama_jabatan || _auth.user.jabatan || '', _auth.user.kode_divre?.divre || '', _auth.user.kode_kph?.kph || '' ].filter(Boolean).join(' · ') || _auth.user.email;
       // also expose on state for other panels
       try { state.authUser = _auth.user; window._authUser = _auth.user; } catch {}
+      // SPATIAL MAP: terapkan scope wilayah login (DIVRE/KPH user) ke filter —
+      // initMapPanel jalan sebelum auth selesai, jadi panel tak tahu user saat boot.
+      try { if (typeof window.__spatialApplyUserScope === 'function') window.__spatialApplyUserScope(); } catch {}
       // inject 2FA badge into topControls if not exists (logout button lives
       // next to Reset — see injectLogoutBtn() in the topControls block below)
       const tc = document.getElementById('topControls');

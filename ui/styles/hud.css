@@ -1444,6 +1444,12 @@ html, body {
 
 .panel-options-menu.open {
   display: block;
+  /* Keluar dari stacking context + overflow-x:auto .top-controls:
+     fixed ke viewport, z sejajar .db-menu (9999) — selalu di atas mapPanel. */
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 9999;
 }
 
 .panel-options-head {
