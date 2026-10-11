@@ -15,10 +15,30 @@ import threading
 import time
 
 _LOCK = threading.Lock()
-_STATE = {"state": None, "updated": 0.0}
+# Isolasi per-user (robust): antrean + state + result keyed owner (= user_id
+# login, "" = netral/token-only). Tanpa ini user B mencuri spatial_set milik
+# user A via take_pending global, dan state A ditimpa push B. Pola sama
+# seperti spatial_chart_store._STATE (owner -> state).
+_STATE = {}
 _SEQ = {"n": 0}
-_PENDING = []
+_PENDING = {}
 _RESULTS = {}
+
+
+def _key(owner):
+    try:
+        return str(owner or "")
+    except Exception:
+        return ""
+
+
+def _state_for(owner):
+    k = _key(owner)
+    st = _STATE.get(k)
+    if st is None:
+        st = {"state": None, "updated": 0.0}
+        _STATE[k] = st
+    return st
 
 # Whitelist op — harus cocok dengan method LeafletAdapter di mapControl.js,
 # kecuali op spatial_* yang di-intercept map.js (bukan method _ctl).
@@ -40,8 +60,8 @@ ALLOWED_OPS = frozenset({
 RESULT_TTL = 300  # detik; hasil basi dibuang
 
 
-def push_command(op, args=None):
-    """Enqueue op. Returns (cmd_id, error). error None bila ok."""
+def push_command(op, args=None, owner=""):
+    """Enqueue op ke antrean milik owner. Returns (cmd_id, error)."""
     op = (op or "").strip()
     if op not in ALLOWED_OPS:
         return None, f"op tidak dikenal: {op!r}. allowed: {sorted(ALLOWED_OPS)}"
@@ -51,43 +71,50 @@ def push_command(op, args=None):
         _SEQ["n"] += 1
         cmd = {"id": f"m{_SEQ['n']}", "op": op,
                "args": args or {}, "at": time.time()}
-        _PENDING.append(cmd)
+        _PENDING.setdefault(_key(owner), []).append(cmd)
         _gc_locked()
         return cmd["id"], None
 
 
-def take_pending():
-    """Frontend ambil + kosongkan antrean."""
+def take_pending(owner=""):
+    """Frontend ambil + kosongkan antrean MILIKNYA. Tanpa owner (legacy)
+    = antrean netral saja — tak pernah curi perintah user lain."""
     with _LOCK:
-        out = list(_PENDING)
-        _PENDING.clear()
+        k = _key(owner)
+        out = list(_PENDING.get(k, []))
+        _PENDING[k] = []
         return out
 
 
-def put_result(cmd_id, ok, payload):
+def put_result(cmd_id, ok, payload, owner=""):
     with _LOCK:
-        _RESULTS[str(cmd_id)] = {"ok": bool(ok), "at": time.time(),
-                                 **({"data": payload} if ok else {"error": str(payload)[:300]})}
+        _RESULTS[(str(cmd_id), _key(owner))] = {"ok": bool(ok), "at": time.time(),
+                                                **({"data": payload} if ok else {"error": str(payload)[:300]})}
         _gc_locked()
 
 
-def get_result(cmd_id):
+def get_result(cmd_id, owner=""):
     with _LOCK:
-        return dict(_RESULTS.get(str(cmd_id), {}))
+        r = _RESULTS.get((str(cmd_id), _key(owner)))
+        if r is None and _key(owner):
+            r = _RESULTS.get((str(cmd_id), ""))  # fallback netral (legacy)
+        return dict(r or {})
 
 
-def set_state(state):
+def set_state(state, owner=""):
     if not isinstance(state, dict):
         return False
     with _LOCK:
-        _STATE["state"] = state
-        _STATE["updated"] = time.time()
+        st = _state_for(owner)
+        st["state"] = state
+        st["updated"] = time.time()
         return True
 
 
-def get_state():
+def get_state(owner=""):
     with _LOCK:
-        return {"state": _STATE["state"], "updated": _STATE["updated"]}
+        st = _state_for(owner)
+        return {"state": st["state"], "updated": st["updated"]}
 
 
 def _gc_locked():

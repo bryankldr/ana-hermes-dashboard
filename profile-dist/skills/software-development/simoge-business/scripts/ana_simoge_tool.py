@@ -26,19 +26,183 @@ from simoge_db import run, T  # noqa: E402
 # resolve through this module — named templates only, no SQL, ever.
 
 
+def _my_sid():
+    """Sid sesi Hermes sendiri: env dulu, fallback file .ana_current_sid.
+
+    Sama seperti ana_chart_tool._my_sid: tool jalan via `terminal` di agen
+    Hermes sehingga env dashboard tak ikut. Dashboard tulis sid aktif ke
+    file tiap run. Tak pernah raise."""
+    try:
+        import os as _os
+        import pathlib as _pl
+        s = (_os.environ.get("HERMES_SESSION_ID") or "").strip()
+        if s:
+            return s[:128]
+        for root in _pl.Path(__file__).resolve().parents:
+            cand = root / "ana-hermes-dashboard" / ".ana_current_sid"
+            if cand.exists():
+                parts = (cand.read_text(encoding="utf-8") or "").strip().split()
+                if parts:
+                    return parts[0][:128]
+                break
+    except Exception:
+        pass
+    return ""
+
+
+def _anna_scope():
+    """Scope wilayah user login dari sisi agen.
+
+    Prioritas (anti-campur antar user):
+    1. File scope sesi Hermes sendiri: .ana_scope_<HERMES_SESSION_ID>.json —
+       ditulis dashboard per run (server._anna_scope_write). HERMES_SESSION_ID
+       dipublish resmi ke tools via agent_init._publish_session_id (ContextVar
+       + fallback env). Tiap sesi ANNA = scope user dashboard yang benar.
+    2. Fallback: sesi login dashboard termuda di .ana_sessions.json (1 operator
+       di host yang sama — perilaku lama).
+    Return {} = tanpa scope (DIREKSI / tanpa kode / tak ada sesi).
+    Tak pernah raise — gagal baca = {} (fail-open seperti token-only)."""
+    try:
+        import os as _os
+        import pathlib as _pl
+        sid = (_os.environ.get("HERMES_SESSION_ID") or "").strip() or _my_sid()
+        if sid:
+            for root in _pl.Path(__file__).resolve().parents:
+                cand = root / "ana-hermes-dashboard" / f".ana_scope_{sid}.json"
+                if cand.exists():
+                    try:
+                        import json as _json
+                        d = _json.loads(cand.read_text(encoding="utf-8"))
+                        if isinstance(d, dict):
+                            scope = {}
+                            for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+                                v = d.get(k)
+                                if v is not None and str(v).strip() != "":
+                                    scope[k] = str(v).strip()
+                            tl = d.get("kode_tpg_list")
+                            if isinstance(tl, list) and tl:
+                                scope["kode_tpg_list"] = [str(x) for x in tl if str(x).strip() != ""]
+                            return scope
+                    except Exception:
+                        pass
+                    break
+        import pathlib
+        sess_file = None
+        for root in pathlib.Path(__file__).resolve().parents:
+            cand = root / "ana-hermes-dashboard" / ".ana_sessions.json"
+            if cand.exists():
+                sess_file = cand
+                break
+        if sess_file is None:
+            return {}
+        import json as _json
+        import time as _time
+        db = _json.loads(sess_file.read_text(encoding="utf-8"))
+        if not isinstance(db, dict) or not db:
+            return {}
+        now = _time.time()
+        best, best_seen = None, -1.0
+        for s in db.values():
+            if not isinstance(s, dict):
+                continue
+            try:
+                if now > float(s.get("expires_at", 0)):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            try:
+                seen = float(s.get("last_seen", 0) or 0)
+            except (TypeError, ValueError):
+                seen = 0.0
+            if seen >= best_seen:
+                best, best_seen = s, seen
+        if not best:
+            return {}
+        def _code(v, k):
+            try:
+                if v is None:
+                    return ""
+                if isinstance(v, dict):
+                    c = v.get(k)
+                    return "" if c is None else str(c).strip()
+                if isinstance(v, (list, tuple)):
+                    return ""
+                s = str(v).strip()
+                return "" if s.lower() in ("", "none", "null") else s
+            except Exception:
+                return ""
+        scope = {}
+        for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+            c = _code(best.get(k), k)
+            if c:
+                scope[k] = c
+        try:
+            tp = best.get("kode_tpg")
+            tl = []
+            if isinstance(tp, list):
+                for e in tp:
+                    c = e.get("kode_tpg") if isinstance(e, dict) else e
+                    if c is not None and str(c).strip() != "":
+                        tl.append(str(c).strip())
+            if tl:
+                scope["kode_tpg_list"] = tl
+        except Exception:
+            pass
+        return scope
+    except Exception:
+        return {}
+
+
+def _guard_wilayah(template, params):
+    """Tolak query di luar scope user login (gagal-aman untuk ANNA).
+
+    Return None = lolos; return dict error = tolak dengan pesan penolakan
+    sopan siap ucap ke user. Template wilayah_labels selalu lolos (daftar
+    opsi — server yang menyaring isinya ke scope)."""
+    try:
+        if str(template or "").strip() == "wilayah_labels":
+            return None
+        scope = _anna_scope()
+        if not scope:
+            return None
+        p = params or {}
+        for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+            if scope.get(k):
+                cur = "" if p.get(k) is None else str(p.get(k)).strip()
+                if cur and cur != str(scope[k]).strip():
+                    return {"ok": False, "template": template,
+                            "error": f"di luar wilayah Bapak/Ibu ({k} {cur} bukan wilayah login). Tawarkan data wilayah login."}
+        tl = scope.get("kode_tpg_list") or []
+        if tl:
+            cur = "" if p.get("kode_tpg") is None else str(p.get("kode_tpg")).strip()
+            if cur not in tl:
+                return {"ok": False, "template": template,
+                        "error": "di luar wilayah TPG Bapak/Ibu. Tawarkan data TPG miliknya."}
+        return None
+    except Exception:
+        return None
+
+
 def call_simoge_tool(template: str, params: dict = None) -> dict:
     """
     Execute a SIMOGE business query template.
-    
+
     Args:
         template: Template name (run `simoge_db.py` with no args to list)
         params: Dict of template params (e.g. {tahun: 2026, bulan: 9})
-    
+
     Returns:
         {ok: bool, columns, rows, row_count, elapsed_ms, sql, explanation, error?}
+
+    Scope: query di luar wilayah user login DITOLAK (ok False + pesan
+    penolakan sopan) — ANNA wajib teruskan penolakan itu ke user, bukan
+    mengakali dengan query tanpa filter.
     """
     params = params or {}
     try:
+        denied = _guard_wilayah(template, params)
+        if denied:
+            return denied
         result = run(template, **params)
         return {
             "ok": True,
@@ -300,11 +464,18 @@ def _post_show(url, token, port, body, _retry=True):
     ulang .ana_token di main()) → baca file ulang, ulangi sekali. Tutup race
     restart-di-tengah-call tanpa perlu ANNA tahu soal token."""
     import urllib.request, urllib.error, json as _json
+    _h = {"X-Ana-Token": token,
+          "Content-Type": "application/json",
+          "Origin": f"http://127.0.0.1:{port}"}
+    try:
+        _sid = _my_sid()
+        if _sid:
+            _h["X-Hermes-Session"] = _sid[:128]
+    except Exception:
+        pass
     req = urllib.request.Request(
         url,
-        headers={"X-Ana-Token": token,
-                 "Content-Type": "application/json",
-                 "Origin": f"http://127.0.0.1:{port}"},
+        headers=_h,
         method="POST", data=body)
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
@@ -325,7 +496,16 @@ def show_on_map(template="petak_with_geometry", **params):
     Pakai untuk "tampilkan di peta / tampilkan petak ...".
     Memanggil POST /api/simoge/show_on_map supaya ANA tidak perlu 2 langkah
     dan tidak butuh DB password di proses ANA.
+
+    Scope: filter di luar wilayah login DITOLAK di sini (server tak kenal
+    sesi agen — tool yang jaga). Server juga clamp bila lolos.
     """
+    try:
+        denied = _guard_wilayah(template, params)
+        if denied:
+            return denied
+    except Exception:
+        pass
     import json as _json
 
     try:
@@ -348,8 +528,17 @@ def call_simoge_packet(template: str, params: dict = None) -> dict:
     Wraps POST /api/simoge/packet -> {intent, period, scope, kpi, evidence, row_count}.
     Statistik-only WAJIB pakai ini, bukan call_simoge_tool mentah.
     Fallback: bila server tak terjangkau, build packet minimal lokal.
+
+    Scope: filter di luar wilayah login DITOLAK (server tak kenal sesi agen).
     """
     params = params or {}
+    try:
+        denied = _guard_wilayah(template, params)
+        if denied:
+            return {"intent": template, "params": params, "kpi": {"error": denied.get("error", "")},
+                    "evidence": [], "row_count": 0, "error": denied.get("error", "")}
+    except Exception:
+        pass
     import urllib.request, urllib.error, json as _json
     try:
         ana_port = int(__import__('os').environ.get("ANA_PORT", "8730"))

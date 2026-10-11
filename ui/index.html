@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="ana-token" content="__ANA_TOKEN__">
+  <meta name="ana-directus-url" content="__ANA_DIRECTUS_URL__">
   <meta name="theme-color" content="#020F2A">
   <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -32,14 +33,14 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   </noscript>
   <link rel="stylesheet" href="styles/tokens.css">
-  <link rel="stylesheet" href="styles/hud.css?v=20261004g">
+  <link rel="stylesheet" href="styles/hud.css?v=20261011d">
   <!-- xterm vendored locally (see ui/vendor/): the terminal is the one feature
        that cannot degrade, and a CDN outage would take the whole HUD down. -->
   <link rel="stylesheet" href="vendor/xterm.css">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <!-- ?v= bumped manual tiap ubah CSS/JS: tanpa ini browser pakai cache lama
        dan perbaikan panel chart tak akan terlihat. -->
-  <link rel="stylesheet" href="styles/map.css?v=20261004d">
+  <link rel="stylesheet" href="styles/map.css?v=20261011d">
   <script defer src="vendor/xterm.js"></script>
   <script defer src="vendor/xterm-addon-fit.js"></script>
   <script defer src="vendor/leaflet/leaflet.js"></script>
@@ -165,12 +166,20 @@
     <div class="response-label">RESPONSE</div>
     <div class="response-text" id="responseText">Siap menerima perintah.</div>
   </div>
-  <div class="chat-bar" id="chatBar" data-min-h="41" data-min-w="200">
-    <button id="tplBtn" class="only-asisten" title="Template pertanyaan bisnis">▦</button>
-    <textarea id="chatInput" rows="1" placeholder="Ketik perintah... (Enter kirim, Shift+Enter baris baru)" autocomplete="off"></textarea>
-    <button id="sendBtn" class="btn-send">➤</button>
-    <button id="micBtn" class="btn-mic">🎤</button>
-    <button id="modeBtn" class="btn-mode">ASISTEN</button>
+  <div class="chat-bar" id="chatBar" data-min-h="76" data-min-w="200">
+    <div class="chat-main">
+      <textarea id="chatInput" rows="1" placeholder="Ketik perintah... (Enter kirim, Shift+Enter baris baru)" autocomplete="off"></textarea>
+      <div class="chat-tools">
+        <div class="chat-tools-left">
+          <button id="tplBtn" class="chat-ico only-asisten" title="Template pertanyaan bisnis" aria-label="Template pertanyaan">▦</button>
+        </div>
+        <div class="chat-tools-right">
+          <button id="modeBtn" class="chat-mode" title="Ganti mode asisten/coding">ASISTEN</button>
+          <button id="micBtn" class="chat-ico" title="Voice input" aria-label="Voice input">🎤</button>
+          <button id="sendBtn" class="chat-send" title="Kirim (Enter)" aria-label="Kirim">➤</button>
+        </div>
+      </div>
+    </div>
     <div id="tplPanel" class="tpl-panel only-asisten" hidden></div>
   </div>
 
@@ -188,12 +197,12 @@
 
 </div>
 
-<script type="module" src="src/main.js?v=20261004h"></script>
+<script type="module" src="src/main.js?v=20261011d"></script>
 <script>
 // PWA SW — universal (Chrome/Edge/Firefox/Safari/Samsung). Scope / via Service-Worker-Allowed header.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(()=>{});
+    navigator.serviceWorker.register('/sw.js?v=20261011a', { scope: '/' }).catch(()=>{});
   });
   // Firefox/Safari: expose manual install hint when beforeinstallprompt never fires
   let deferredPrompt = null;

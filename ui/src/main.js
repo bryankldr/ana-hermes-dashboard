@@ -926,10 +926,188 @@ els.chatInput.addEventListener('keydown', e => {
 });
 autosizeChat();
 
-// ═══ TEMPLATE PERTANYAAN (hanya mode asisten via class .only-asisten) ═══
-// Tiap teks mengandung kata kunci router QA_INTENT (ana_chart_tool.py) dan
-// mapping intent-ke-template-peta wiki, jadi ANNA pasti petakan ke template
-// data yang benar. Klik = isi chatInput (user tekan Enter untuk kirim).
+// ═══ TEMPLATE PERTANYAAN per-user (hanya mode asisten via .only-asisten) ═══
+// Sumber kebenaran: GET /api/tpl (default bawaan = TPL_GROUPS di bawah,
+// user baru otomatis dapat salinan; edit milik sendiri via panel Kelola).
+// Klik item = isi chatInput (user tekan Enter untuk kirim).
+async function tplFetch(path, opts = {}) {
+  const r = await fetch(path, { credentials: 'same-origin', headers: api.headers({ 'content-type': 'application/json' }), ...(opts || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j?.error || ('HTTP ' + r.status));
+  return j;
+}
+let _tplGroups = null;   // null = belum dimuat (pakai TPL_GROUPS fallback)
+let _tplEdit = false;    // mode kelola tampil
+let _tplAddG = false;    // form grup baru tampil
+let _tplAddQ = -1;       // index grup yang form tambah-pertanyaan tampil
+function tplGroups() {
+  return Array.isArray(_tplGroups) && _tplGroups.length ? _tplGroups : TPL_GROUPS;
+}
+function tplRender() {
+  const panel = document.getElementById('tplPanel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  const groups = tplGroups();
+  // Bar mode: Lihat vs Kelola + Reset default
+  const bar = document.createElement('div');
+  bar.className = 'tpl-bar';
+  const mkBtn = (label, title, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tpl-bar-btn'; b.textContent = label; b.title = title;
+    b.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
+    return b;
+  };
+  bar.appendChild(mkBtn(_tplEdit ? '✓' : '✎', _tplEdit ? 'Selesai kelola' : 'Kelola template', () => { _tplEdit = !_tplEdit; _tplAddG = false; _tplAddQ = -1; tplRender(); }));
+  if (_tplEdit) {
+    bar.appendChild(mkBtn('+', 'Grup baru', () => { _tplAddG = !_tplAddG; tplRender(); }));
+    bar.appendChild(mkBtn('↺', 'Kembalikan ke bawaan', async () => {
+      if (!confirm('Kembalikan template ke bawaan? Edit Anda hilang.')) return;
+      try {
+        const j = await tplFetch('/api/tpl', { method: 'POST', body: JSON.stringify({ op: 'reset' }) });
+        _tplGroups = j.groups; _tplEdit = false; _tplAddG = false; _tplAddQ = -1; tplRender();
+      } catch (e) { alert('Reset gagal: ' + String(e?.message || e).slice(0, 120)); }
+    }));
+  }
+  panel.appendChild(bar);
+  // Form grup baru inline (tanpa dialog): nama + pertanyaan pertama wajib
+  // (aturan server buang grup kosong).
+  if (_tplEdit && _tplAddG) {
+    const f = document.createElement('div');
+    f.className = 'tpl-form';
+    const nt = document.createElement('input');
+    nt.className = 'tpl-input'; nt.placeholder = 'Nama grup…'; nt.maxLength = 60;
+    const nq = document.createElement('input');
+    nq.className = 'tpl-input'; nq.placeholder = 'Pertanyaan pertama…'; nq.maxLength = 300;
+    const ok = mkBtn('+', 'Simpan grup', async () => {
+      const t = nt.value.trim().slice(0, 60);
+      const first = nq.value.trim().slice(0, 300) || 'Pertanyaan baru — ubah saya';
+      if (!t) { nt.focus(); return; }
+      _tplGroups = [...tplGroups(), { t, q: [first] }];
+      _tplAddG = false;
+      tplRender();
+      await tplSave();
+    });
+    ok.classList.add('mini');
+    f.appendChild(nt); f.appendChild(nq); f.appendChild(ok);
+    panel.appendChild(f);
+    setTimeout(() => nt.focus(), 0);
+  }
+  groups.forEach((g, gi) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'tpl-gwrap';
+    const h = document.createElement('div');
+    h.className = 'tpl-group';
+    if (!_tplEdit) {
+      const ht = document.createElement('span');
+      ht.textContent = g.t;
+      h.appendChild(ht);
+    } else {
+      // Rename grup = input inline, pola sama seperti edit pertanyaan
+      // (change = simpan). Tanpa dialog prompt.
+      const gi2 = document.createElement('input');
+      gi2.className = 'tpl-ginput'; gi2.value = g.t; gi2.maxLength = 60;
+      gi2.title = 'Ubah nama grup — Enter untuk simpan';
+      gi2.setAttribute('aria-label', 'Nama grup');
+      gi2.addEventListener('change', async () => {
+        const t = gi2.value.trim().slice(0, 60);
+        if (!t) { gi2.value = g.t; return; }
+        if (t === g.t) return;
+        _tplGroups = tplGroups().map((x, i) => i === gi ? { ...x, t } : x);
+        tplRender();
+        await tplSave();
+      });
+      h.appendChild(gi2);
+      // Hapus grup KUNCI bila masih ada isi: kosongkan dulu pertanyaannya
+      // satu per satu, baru tombol hapus aktif. Cegah hapus massal tak sengaja.
+      const locked = (g.q || []).length > 0;
+      const del = mkBtn('🗑', locked ? 'Kosongkan dulu pertanyaannya untuk hapus grup' : 'Hapus grup kosong ini', async () => {
+        if (locked) return;
+        if (!confirm('Hapus grup "' + g.t + '"?')) return;
+        _tplGroups = tplGroups().filter((_, i) => i !== gi);
+        if (!_tplGroups.length) { alert('Minimal 1 grup berisi 1 pertanyaan.'); _tplGroups = tplGroups(); return; }
+        tplRender();
+        await tplSave();
+      });
+      del.classList.add('mini');
+      del.classList.add('tpl-del');
+      if (locked) del.disabled = true;
+      h.appendChild(del);
+    }
+    wrap.appendChild(h);
+    (g.q || []).forEach((q, qi) => {
+      if (!_tplEdit) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'tpl-item'; b.textContent = q; b.title = q;
+        b.addEventListener('click', () => { els.chatInput.value = q; autosizeChat(); els.chatInput.focus(); });
+        wrap.appendChild(b);
+      } else {
+        const row = document.createElement('div');
+        row.className = 'tpl-row';
+        const inp = document.createElement('input');
+        inp.className = 'tpl-input'; inp.value = q; inp.title = q;
+        inp.addEventListener('change', async () => {
+          const v = inp.value.trim().slice(0, 300);
+          if (!v) { alert('Pertanyaan kosong — hapus saja bila tak perlu.'); inp.value = q; return; }
+          _tplGroups = tplGroups().map((x, i) => i === gi ? { ...x, q: x.q.map((y, j) => j === qi ? v : y) } : x);
+          tplRender();
+          await tplSave();
+        });
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'tpl-bar-btn mini tpl-del'; del.textContent = '🗑'; del.title = 'Hapus pertanyaan';
+        del.addEventListener('click', async () => {
+          _tplGroups = tplGroups().map((x, i) => i === gi ? { ...x, q: x.q.filter((_, j) => j !== qi) } : x);
+          if (!_tplGroups.every(x => x.q.length)) { alert('Tiap grup wajib berisi minimal 1 pertanyaan.'); _tplGroups = tplGroups(); return; }
+          tplRender();
+          await tplSave();
+        });
+        row.appendChild(inp); row.appendChild(del);
+        wrap.appendChild(row);
+      }
+    });
+    if (_tplEdit) {
+      // Tambah pertanyaan = form inline (tanpa dialog), pola sama grup baru.
+      if (_tplAddQ === gi) {
+        const f = document.createElement('div');
+        f.className = 'tpl-form';
+        const nq = document.createElement('input');
+        nq.className = 'tpl-input'; nq.placeholder = 'Pertanyaan baru…'; nq.maxLength = 300;
+        const ok = mkBtn('+', 'Simpan', async () => {
+          const v = nq.value.trim().slice(0, 300);
+          if (!v) { nq.focus(); return; }
+          _tplGroups = tplGroups().map((x, i) => i === gi ? { ...x, q: [...x.q, v] } : x);
+          _tplAddQ = -1;
+          tplRender();
+          await tplSave();
+        });
+        ok.classList.add('mini');
+        const cancel = mkBtn('✕', 'Batal', () => { _tplAddQ = -1; tplRender(); });
+        cancel.classList.add('mini');
+        f.appendChild(nq); f.appendChild(ok); f.appendChild(cancel);
+        wrap.appendChild(f);
+        setTimeout(() => nq.focus(), 0);
+      } else {
+        const add = mkBtn('+', 'Tambah pertanyaan ke ' + g.t, () => { _tplAddQ = gi; tplRender(); });
+        add.classList.add('wide');
+        wrap.appendChild(add);
+      }
+    }
+    panel.appendChild(wrap);
+  });
+}
+async function tplSave() {
+  try {
+    const j = await tplFetch('/api/tpl', { method: 'POST', body: JSON.stringify({ groups: _tplGroups }) });
+    _tplGroups = j.groups;
+    tplRender();
+  } catch (e) { alert('Simpan gagal: ' + String(e?.message || e).slice(0, 120)); }
+}
+async function tplLoad() {
+  try {
+    const j = await tplFetch('/api/tpl');
+    if (Array.isArray(j.groups) && j.groups.length) _tplGroups = j.groups;
+  } catch (_) { /* offline/anonim: pakai TPL_GROUPS bawaan */ }
+  tplRender();
+}
 const TPL_GROUPS = [
   { t: 'RINGKASAN & LAPORAN', q: [
     'Ringkasan sekarang KPH Banyuwangi Barat bulan ini',
@@ -978,19 +1156,10 @@ const TPL_GROUPS = [
 (function initTpl(){
   const btn = document.getElementById('tplBtn'), panel = document.getElementById('tplPanel');
   if (!btn || !panel) return;
-  for (const g of TPL_GROUPS) {
-    const h = document.createElement('div');
-    h.className = 'tpl-group'; h.textContent = g.t; panel.appendChild(h);
-    for (const q of g.q) {
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'tpl-item'; b.textContent = q; b.title = q;
-      b.addEventListener('click', () => { els.chatInput.value = q; autosizeChat(); els.chatInput.focus(); });
-      panel.appendChild(b);
-    }
-  }
   btn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
   els.sendBtn.addEventListener('click', () => { panel.hidden = true; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
+  tplLoad();
 })();
 
 // ═══ TRANSMIT ═══
@@ -1650,6 +1819,30 @@ async function init() {
   try { startMapBridge({ token: ANA_TOKEN, log }); } catch (_) {}
   // Token basi (server restart) → auto-reload via BOOT_ID poll, tanpa baca token.
   // Auth gate — redirect to /login.html if no Directus cookie session
+  // Handler evict: perangkat ini ditendang login perangkat lain → banner +
+  // tombol ambil alih (login ulang), BUKAN redirect buta. Tanpa ini user
+  // yang kena tendang bingung kenapa tiba-tiba di login.html.
+  try {
+    api.evictedHandler = (info) => {
+      try {
+        let b = document.getElementById('evictBanner');
+        if (!b) {
+          b = document.createElement('div');
+          b.id = 'evictBanner';
+          b.style.cssText = 'position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:9999;max-width:min(480px,calc(100%-24px));background:rgba(2,15,42,.96);border:1px solid #FB7185;border-radius:10px;padding:10px 14px;box-shadow:0 12px 32px rgba(0,0,0,.6);font-size:13px;color:var(--text-main);display:flex;gap:10px;align-items:center;';
+          b.innerHTML = '<span style="flex:1">Akun ini login di perangkat lain — sesi perangkat ini dialihkan. Chat & arsip ANNA tetap aman.</span>';
+          const btn = document.createElement('button');
+          btn.textContent = 'Ambil alih kembali';
+          btn.style.cssText = 'flex:0 0 auto;border:1px solid var(--neon);background:rgba(45,242,255,.12);color:var(--text-header);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;';
+          btn.addEventListener('click', () => { location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search); });
+          b.appendChild(btn);
+          document.body.appendChild(b);
+        }
+        b.style.display = 'flex';
+        try { log('session', 'SESI', 'ditendang perangkat lain — banner tampil'); } catch {}
+      } catch {}
+    };
+  } catch {}
   try {
     const _auth = await requireAuth();
     if (_auth && _auth.user) {

@@ -18,6 +18,11 @@ ui/data/snapshots/
 !ui/data/snapshots/manifest.json
 logs/
 
+# python venv per-project
+.venv/
+venv/
+.env.venv
+
 # runtime lokal — jangan commit
 .ana_session
 .ana_voice
@@ -34,3 +39,13 @@ ui/data/petak_simple.json
 runtime_gateway_backup.py
 runtime_gateway.py.bak_current
 *.bak_current
+*.bak*
+*.bak.pre_cleanup*
+.env.bak*
+
+# Directus cookie sessions (contains refresh tokens)
+.ana_sessions.json
+.ana_scope_*.json
+.ana_archive.json
+.ana_current_sid
+.ana_tpl.json

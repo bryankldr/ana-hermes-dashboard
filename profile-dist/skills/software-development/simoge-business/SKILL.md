@@ -115,6 +115,7 @@ Syarat: urutan `QA_INTENT` specific→umum, `_NEEDS_CODE` minta `kode_evapot`, l
 
 **Multi-chart:** `show_dashboard()` grid 2–3 kolom, max 6 chart+8 KPI. `chart` alias `charts[0]`.
 **Laporan:** `show_report()` N halaman A4, block `para`/`note`/`list`/`kpi`/`table` — bukan canvas. `get_report()` dulu bila user minta tampilkan; jika visible true → `hide_report()` dulu baru `show_report()`.
+**Arsip (simpan/tampilkan/hapus milik user):** `from ana_chart_tool import archive_save, archive_list, archive_show, archive_delete` — server-side per-user, survive restart, maks 20/user. User bilang "simpan chart/laporan ini" → `archive_save("chart")` / `archive_save("report")` (snapshot live saat itu). "Tampilkan arsip X" → `archive_list()` cari judul → `archive_show(id)`. "Hapus arsip X" → `archive_list()` → `archive_delete(id)`. User juga bisa via ikon 🗂 + 💾 di panel (tanpa ANNA). JANGAN klaim "sudah tampil" tanpa cek return `ok: True`; JANGAN klaim "tersimpan" tanpa cek `saved.id`.
 **Presentation:** `run_business_review(tahun,bulan,periode)` susun 6 section, tampil per `present_section(rv,"petak",with_map=True)`. Scope `level="kode_bkph"` default.
 **T3 atomik (2-4 calls bukan 14):** `review` (1 call 6 section) → `laporan act=show` (1 call). Rows di engine, model cuma `kpis`+`narrative`+`evidence`. Target T3 80-200K.
 

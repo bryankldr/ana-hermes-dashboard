@@ -5,5 +5,9 @@
 # Manual: bash scripts/rebuild_tiles_daily.sh
 set -u
 cd "$(dirname "$0")/.." || exit 1
-python3 scripts/export_petak.py --tahun 2026 --out tiles/petak.ndjson && \
-python3 scripts/build_pmtiles.py
+# Pakai .venv bila ada (modul build mapbox-vector-tile + pmtiles hanya di sana).
+# Tanpa ini cron 06:10 gagal ModuleNotFoundError dan pmtiles basi lagi.
+PYBIN="python3"
+[ -x .venv/bin/python ] && PYBIN=".venv/bin/python"
+"$PYBIN" scripts/export_petak.py --tahun 2026 --out tiles/petak.ndjson && \
+"$PYBIN" scripts/build_pmtiles.py

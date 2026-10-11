@@ -30,9 +30,10 @@ function ensureDom(){
     wrap.id = "spatialChartWrap";
     wrap.className = "spatial-chart flying hidden";
     wrap.innerHTML = ''
-      + '<div class="spatial-chart-head">'
+      + '<div class="spatial-chart-head" data-drag="1">'
       + '  <span class="spatial-chart-title" id="spatialChartTitle">Chart</span>'
       + '  <span class="spatial-chart-meta" id="spatialChartMeta"></span>'
+      + '  <button class="spatial-chart-btn" id="spatialChartSave" title="Simpan ke arsip saya">💾</button>'
       + '  <button class="spatial-chart-close" id="spatialChartClose" title="Tutup (ANA bisa tampilkan lagi)">✕</button>'
       + '</div>'
       + '<div class="spatial-chart-kpis" id="spatialChartKpis"></div>'
@@ -366,7 +367,7 @@ async function tick(){
   if (_busy) return;
   _busy = true;
   try{
-    const r = await fetch("/api/spatial/chart", { headers:{ "X-Ana-Token": _token }, cache:"no-store" });
+    const r = await fetch("/api/spatial/chart", { headers:{ "X-Ana-Token": _token }, cache:"no-store", credentials:"same-origin" });
     if (!r.ok) return;
     const j = await r.json();
     if (!j || j.ok===false) return;

@@ -11,6 +11,22 @@ import { bus } from './core/bus.js';
 
 const HOME = { lat: -8.1915, lng: 114.1491, zoom: 11 };
 
+// URL foto aktivitas langsung ke storage Directus server KPHBWB
+// (disinkron aplikasi mobile). Dibaca dari <meta name="ana-directus-url">
+// yang disuntik server dari env DIRECTUS_URL. Publik tanpa kredensial —
+// hanya host. Validasi id mencegah injeksi path via aktivitas_photo.
+function directusAssetUrl(id, width) {
+  try {
+    const s = String(id || '').trim();
+    if (!/^[0-9a-fA-F-]{8,36}$/.test(s)) return '';
+    let base = '';
+    try { base = (document.querySelector('meta[name="ana-directus-url"]')?.content || '').trim().replace(/\/+$/, ''); } catch (_) {}
+    if (!base) base = 'https://sandbox2.kphbwb.web.id';
+    const w = Math.max(80, Math.min(1200, parseInt(width) || 560));
+    return base + '/assets/' + s + '?width=' + w;
+  } catch (_) { return ''; }
+}
+
 // Canonical map state — satu sumber, tidak ada duplikat di map.js.
 export function createMapState() {
   return {
@@ -457,6 +473,8 @@ export class LeafletAdapter {
           `<div style="font-size:9px;opacity:.45;margin-top:4px">${escH(p.kode_evapot||'')}</div>`,
         ].filter(Boolean).join('');
         layer.bindPopup(`<div style="font-family:var(--font-mono,monospace);font-size:11px;line-height:1.35;min-width:220px;max-width:300px">${rows}</div>`);
+        // Hover = nomor petak saja (identitas cepat). Detail di klik (popup).
+        try { layer.bindTooltip('Petak ' + nomor, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
       } catch (_) {}
       layer.on('click', () => { this.select_feature(id); });
       layer.addTo(host);
@@ -569,13 +587,16 @@ _rebuildAktivitasLines() {
     outside++;
     try {
       grp.addLayer(this.L.polyline([[lat, lng], [target.lat, target.lng]], {
+        // Garis penghubung pin→petak WAJIB mencolok (keluhan: tak terlihat).
+        // Jauh (>28m) = oranye tebal putus-putus; dekat = cyan tebal solid.
+        // interactive:true + tooltip jarak agar garis bisa di-hover infonya.
         color: far ? '#F97316' : '#2DF2FF',
-        weight: far ? 1 : 1.2,
-        opacity: far ? 0.5 : 0.7,
-        dashArray: far ? '3,4' : null,
-        interactive: false,
+        weight: far ? 3.5 : 3,
+        opacity: far ? 0.95 : 0.9,
+        dashArray: far ? '7,5' : null,
+        interactive: true,
         lineCap: 'round',
-      }));
+      }).bindTooltip(Math.round(_meters(lat, lng, target.lat, target.lng)) + ' m ke petak', { sticky: true, direction: 'top', offset: [0, -4] }));
       drawn++;
     } catch (_) {}
   }
@@ -677,6 +698,9 @@ set_aktivitas_points(points, opts = {}) {
     const akses = String(r.akses_lokasi || '-');
     const alt = r.altitude != null && String(r.altitude).trim() !== '' ? escH(String(r.altitude).trim()) : '-';
     const tgl = r.tgl_pembaharuan ? escH(String(r.tgl_pembaharuan).slice(0, 10)) : '-';
+    // Jam input dari date_created server (server kirim HH:MM via jam_input).
+    // DB tak punya kolom jam sendiri — tgl_pembaharuan hanya date.
+    const jamTxt = r.jam_input ? escH(String(r.jam_input).slice(0, 5)) : '-';
     const nomor = escH(r.nomor_petak || r.kode_evapot || id);
     const penyadap = r.nama_penyadap ? escH(String(r.nama_penyadap).slice(0, 60)) : '';
     // user_created -> directus_users.first_name/last_name, jabatan -> jabatan.nama_jabatan
@@ -711,9 +735,13 @@ set_aktivitas_points(points, opts = {}) {
       color: stroke, weight: 1.5, opacity: 0.95,
       fillColor: fill, fillOpacity: hasFoto ? 0.92 : 0.65,
     });
-    const fotoSrc = hasFoto ? `/api/aktivitas/photo/${escH(fotoId)}?token=${encodeURIComponent(token)}` : '';
+    const fotoSrc = hasFoto ? directusAssetUrl(String(fotoId).trim(), 560) : '';
+    const fotoFull = hasFoto ? directusAssetUrl(String(fotoId).trim(), 1200) : '';
+    // Portrait 3:4 contain (foto HP tegak, bukan landscape crop) + klik =
+    // lightbox full. Lightbox satu per halaman (id tetap), isi diganti tiap
+    // klik — tanpa ini tiap popup bikin overlay sendiri dan menumpuk.
     const fotoHtml = hasFoto
-      ? `<img src="${fotoSrc}" alt="foto aktivitas" style="width:100%;height:140px;object-fit:cover;border-radius:6px;border:1px solid rgba(45,242,255,.25);background:#03101f" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><div style="display:none;font-size:10px;opacity:.6;padding:8px 0">foto tidak tersedia (sandbox)</div>`
+      ? `<img src="${fotoSrc}" data-full="${fotoFull}" alt="foto aktivitas (klik perbesar)" title="Klik untuk perbesar" style="width:100%;aspect-ratio:3/4;object-fit:contain;border-radius:6px;border:1px solid rgba(45,242,255,.25);background:#010813;cursor:zoom-in" loading="lazy" onclick="window.__anaFotoOpen && window.__anaFotoOpen(this.dataset.full)" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><div style="display:none;font-size:10px;opacity:.6;padding:8px 0">foto tidak termuat — tablet perlu internet ke server KPHBWB</div>`
       : `<div style="font-size:10px;opacity:.55;padding:6px 0;border:1px dashed rgba(45,242,255,.2);border-radius:6px;text-align:center">tidak ada foto</div>`;
     const html = `<div style="font-family:var(--font-mono,monospace);font-size:11px;line-height:1.4;min-width:210px;max-width:270px">`
       + `<div style="font-weight:700;font-size:12px;color:var(--neon,#2DF2FF)">Aktivitas · Petak ${nomor}</div>`
@@ -729,7 +757,7 @@ set_aktivitas_points(points, opts = {}) {
       + `<span style="opacity:.6">Akses</span><span>${escH(akses)}</span>`
       + `<span style="opacity:.6">Alt</span><span>${alt} m</span>`
       + `<span style="opacity:.6">Koordinat</span><span>${lat.toFixed(6)}, ${lng.toFixed(6)}</span>`
-      + `<span style="opacity:.6">Tanggal</span><span>${tgl}</span>`
+      + `<span style="opacity:.6">Tanggal</span><span>${tgl} · ${jamTxt} WIB</span>`
       + `</div>`
       + `<div style="margin-top:6px;font-size:9px;opacity:.5">${escH(r.kode_evapot || '')}</div>`
       + `</div>`;
@@ -737,7 +765,18 @@ set_aktivitas_points(points, opts = {}) {
     // cegah bubble ke polygon di bawahnya
     try { marker.on('click', (e) => { try { e.originalEvent && e.originalEvent.stopPropagation && e.originalEvent.stopPropagation(); } catch (_) {} if (window.L && window.L.DomEvent) try { window.L.DomEvent.stopPropagation(e); } catch (_) {} }); } catch (_) {}
     marker.bindPopup(html, { maxWidth: 280, minWidth: 220 });
-    marker.bindTooltip(`Petak ${nomor} · ${penyadap || '-'} · ${jmlJenis} jenis`, { direction: 'top', offset: [0, -6] });
+    // Hover polygon/pin = nomor petak saja (keluhan: perlu identitas cepat).
+    // Info panjang tetap di klik (popup). Tooltip pin ringkas: nomor + jarak
+    // GPS ke petak bila melenceng (tanpa ini tooltip 3 info, terlalu ramai).
+    let _tipTxt = 'Petak ' + nomor;
+    try {
+      const _ev = String(r.kode_evapot || '').trim();
+      if (_ev && !this._pinInsidePolygon(_ev, lat, lng)) {
+        const _t = this._nearestOnPolygon(_ev, lat, lng);
+        if (_t) _tipTxt += ' · ' + Math.round(_meters(lat, lng, _t.lat, _t.lng)) + ' m';
+      }
+    } catch (_) {}
+    marker.bindTooltip(_tipTxt, { direction: 'top', offset: [0, -6] });
     marker.addTo(this.aktivitasLayer);
     this.aktivitasPoints.set(id, marker);
     added++;
@@ -793,6 +832,15 @@ set_aktivitas_visibility(visible) {
       console.warn('[LeafletAdapter] protomapsL belum dimuat');
       return { ok: false, error: 'protomapsL tidak tersedia' };
     }
+    const tileUrl = token ? (url + '?token=' + encodeURIComponent(token)) : url;
+    // Guard rebuild (Z11 goyang): URL sama + layer hidup = cukup tampilkan,
+    // jangan bangun ulang + fetch Range dari nol. Tiap rebuild = fetch
+    // jaringan baru; lambat/gagal = PMTiles hilang sesaat ("kadang tidak").
+    if (visible && this.pmtilesLayer && this.pmtilesUrl === tileUrl) {
+      try { if (!this.map.hasLayer(this.pmtilesLayer)) this.pmtilesLayer.addTo(this.map); } catch (_) {}
+      this.state.layers['PMTilesPetak'] = true;
+      return { ok: true, visible: true, url: tileUrl, reused: true };
+    }
     // hapus layer lama bila ada
     if (this.pmtilesLayer && this.map.hasLayer(this.pmtilesLayer)) {
       try { this.map.removeLayer(this.pmtilesLayer); } catch (_) {}
@@ -803,25 +851,29 @@ set_aktivitas_visibility(visible) {
       this._emit('MAP_LAYER_CHANGED', { id: 'PMTilesPetak', visible: false });
       return { ok: true, visible: false };
     }
-    const tileUrl = token ? (url + '?token=' + encodeURIComponent(token)) : url;
     this.pmtilesUrl = tileUrl;
 
-    // Satu warna netral: PMTiles hanya untuk Z<=11 (polygon saja, tanpa analisa).
-    // Warna analisa (merah/kuning/hijau) ikut layer GeoJSON yang tampil di Z>=12.
-    // protomapsL.PolygonSymbolizer terima: fill, opacity, stroke, width, strokeOpacity
-    const sym = new window.protomapsL.PolygonSymbolizer({
-      fill: '#22C55E',           // hijau utama petak (consisten legend)
-      opacity: 0.28,
-      stroke: '#FFFFFF',
-      width: 1,
-      strokeOpacity: 0.9,
+    // Warna bisnis per fitur (Evaluasi Petak: presentase bongkor).
+    // Properti warna ditulis export_petak.py ke tiap tile.
+    // Satu symbolizer hijau = seluruh Z<=11 hijau polos (keluhan user).
+    // Sinkron dengan WARNA_STYLE GeoJSON (Z>=12) agar zoom in/out konsisten.
+    // Vendor ini mau filter = FUNGSI (zoom, feature), properti di
+    // feature.props — bukan array ["==",...] (melempar "r.filter is not
+    // a function" dan seluruh layer gagal render).
+    const _mkSym = (fill, op) => new window.protomapsL.PolygonSymbolizer({
+      fill, opacity: op ?? 0.38, stroke: '#FFFFFF', width: 1, strokeOpacity: 0.9,
     });
-
+    const _wf = w => (z, f) => String((f && f.props && f.props.warna) || '').toLowerCase() === w;
     // paintRules: dataLayer 'petak' (nama layer di MVT build_pmtiles.py)
-    const paintRules = [{
-      dataLayer: 'petak',
-      symbolizer: sym,
-    }];
+    const paintRules = [
+      { dataLayer: 'petak', symbolizer: _mkSym('#EF4444'), filter: _wf('merah') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#F97316'), filter: _wf('oranye') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#EAB308', 0.35), filter: _wf('kuning') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.32), filter: _wf('hijau') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#FFD700', 0.40), filter: _wf('emas') },
+      // fallback: fitur tanpa properti warna (tile lama) = hijau seperti dulu
+      { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.28) },
+    ];
 
     // labelRules kosong — label di level zoom tinggi saja (ponytail)
     const labelRules = [];
@@ -856,7 +908,117 @@ set_aktivitas_visibility(visible) {
   }
 }
 
+// Lightbox foto aktivitas: overlay tetap satu per halaman, klik foto/bidang
+// gelap/✕/Escape = tutup. Pasang sekali (guard id) walau adapter dibuat ulang.
+// Zoom: tombol +/−/reset + pinch (touch) + scroll (desktop) + dobel-klik.
+// Transform di img (scale + translate), reset tiap ganti foto / tutup.
+function _ensureFotoLightbox() {
+  try {
+    if (document.getElementById('anaFotoBox')) return;
+    const box = document.createElement('div');
+    box.id = 'anaFotoBox';
+    box.style.cssText = 'position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:rgba(1,6,16,.92);padding:12px';
+    box.innerHTML = '<img id="anaFotoImg" alt="foto aktivitas penuh" style="max-width:min(94vw,720px);max-height:92vh;object-fit:contain;border-radius:8px;border:1px solid rgba(45,242,255,.35);background:#010813;touch-action:none">'
+      + '<div id="anaFotoZoom" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center;background:rgba(2,15,42,.9);border:1px solid rgba(45,242,255,.35);border-radius:20px;padding:6px 10px">'
+      + '<button data-z="out" aria-label="Perkecil" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:transparent;color:#fff;font-size:18px;cursor:pointer">−</button>'
+      + '<span id="anaFotoPct" style="min-width:48px;text-align:center;font-size:12px;color:#fff">100%</span>'
+      + '<button data-z="in" aria-label="Perbesar" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:transparent;color:#fff;font-size:18px;cursor:pointer">+</button>'
+      + '<button data-z="reset" aria-label="Ukuran awal" style="height:32px;border-radius:16px;border:1px solid rgba(45,242,255,.5);background:transparent;color:#fff;font-size:11px;padding:0 12px;cursor:pointer">1:1</button>'
+      + '</div>'
+      + '<button id="anaFotoX" aria-label="Tutup" style="position:absolute;top:14px;right:16px;width:38px;height:38px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:rgba(2,15,42,.9);color:#fff;font-size:18px;cursor:pointer">✕</button>';
+    document.body.appendChild(box);
+    const img = document.getElementById('anaFotoImg');
+    let _z = 1, _x = 0, _y = 0;
+    const apply = () => {
+      try {
+        img.style.transform = 'scale(' + _z + ') translate(' + _x + 'px,' + _y + 'px)';
+        const p = document.getElementById('anaFotoPct');
+        if (p) p.textContent = Math.round(_z * 100) + '%';
+        img.style.cursor = _z > 1 ? 'grab' : '';
+      } catch (_) {}
+    };
+    const reset = () => { _z = 1; _x = 0; _y = 0; apply(); };
+    const close = () => { box.style.display = 'none'; reset(); try { img.removeAttribute('src'); } catch (_) {} };
+    box.addEventListener('click', (e) => { if (e.target === box || e.target.id === 'anaFotoX') close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && box.style.display !== 'none') close(); });
+    try {
+      box.querySelector('#anaFotoZoom').addEventListener('click', (e) => {
+        const b = e.target && e.target.closest ? e.target.closest('[data-z]') : null;
+        if (!b) return;
+        e.stopPropagation();
+        const k = b.getAttribute('data-z');
+        if (k === 'in') _z = Math.min(5, _z * 1.4);
+        else if (k === 'out') { _z = Math.max(1, _z / 1.4); if (_z === 1) { _x = 0; _y = 0; } }
+        else reset();
+        apply();
+      });
+    } catch (_) {}
+    // Scroll desktop = zoom di titik kursor. Pinch tablet = jarak dua jari.
+    try {
+      img.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        _z = Math.max(1, Math.min(5, _z * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+        if (_z === 1) { _x = 0; _y = 0; }
+        apply();
+      }, { passive: false });
+    } catch (_) {}
+    try {
+      let _pinch = 0;
+      img.addEventListener('touchstart', (e) => {
+        if (e.touches && e.touches.length === 2) {
+          const a = e.touches[0], b = e.touches[1];
+          _pinch = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+        }
+      }, { passive: true });
+      img.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches.length === 2 && _pinch > 0) {
+          e.preventDefault();
+          const a = e.touches[0], b = e.touches[1];
+          const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+          _z = Math.max(1, Math.min(5, _z * d / _pinch));
+          _pinch = d;
+          if (_z === 1) { _x = 0; _y = 0; }
+          apply();
+        }
+      }, { passive: false });
+      img.addEventListener('touchend', () => { _pinch = 0; });
+    } catch (_) {}
+    // Seret saat zoom >100% (mouse + satu jari). Dobel-klik = toggle 1x/2.5x.
+    try {
+      let _drag = null;
+      img.addEventListener('pointerdown', (e) => {
+        if (_z <= 1) return;
+        _drag = { x: e.clientX, y: e.clientY, ox: _x, oy: _y };
+        try { img.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      img.addEventListener('pointermove', (e) => {
+        if (!_drag) return;
+        _x = _drag.ox + (e.clientX - _drag.x) / _z;
+        _y = _drag.oy + (e.clientY - _drag.y) / _z;
+        apply();
+      });
+      const _end = () => { _drag = null; };
+      img.addEventListener('pointerup', _end);
+      img.addEventListener('pointercancel', _end);
+      img.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        _z = _z > 1 ? 1 : 2.5; _x = 0; _y = 0;
+        apply();
+      });
+    } catch (_) {}
+    window.__anaFotoOpen = (src) => {
+      if (!src) return;
+      try {
+        reset();
+        img.src = src;
+        box.style.display = 'flex';
+      } catch (_) {}
+    };
+  } catch (_) {}
+}
+
 // Factory: satu pintu buat map.js dan (nanti) MapLibreAdapter.
 export function createLeafletControl(map, opts = {}) {
+  try { _ensureFotoLightbox(); } catch (_) {}
   return new LeafletAdapter(map, opts);
 }

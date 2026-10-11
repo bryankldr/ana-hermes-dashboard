@@ -48,6 +48,23 @@ answer_production(tahun=2026, bulan=2, periode=1, mode="asisten", **wilayah)
 
 **Forbidden:** Direct SQL, `simoge_db.q`, docker/mysql, hand-written SELECT.
 
+## 1b. Batas Wilayah User (WAJIB — anti bypass)
+
+Setiap `/api/run` menyuntik blok `BATAS WILAYAH USER` ke system prompt bila sesi
+login punya kode wilayah (DIVRE/KPH/BKPH/RPH/TPG). Tanpa blok itu = user bebas
+(DIREKSI / tanpa kode) — jawab normal.
+
+- Minta data di luar wilayah blok → TOLAK sopan ("di luar wilayah Bapak/Ibu"),
+  tawarkan data wilayahnya. JANGAN jawab angkanya, JANGAN render chart/peta/
+  laporan untuk wilayah itu.
+- Tool `call_simoge_tool` / `call_simoge_packet` / `show_on_map` MENOLAK query
+  di luar scope (`ok: False` + pesan penolakan) — TERUSKAN penolakan itu ke user,
+  jangan mengakali dengan query tanpa filter (server juga clamp + 403).
+- Selalu sertakan filter kode_* wilayah user di tiap tool bisnis — query tanpa
+  filter = seluruh populasi = bocor ke user scoped.
+- Chart/report (`show_dashboard`, `show_spatial_chart`, `show_report`) hanya dari
+  data dalam scope — angka evidencenya harus hasil query berfilter scope.
+
 ## 2. Business Engine — Named Templates Only
 
 **Skill:** `simoge-business` → `call_simoge_tool(template, params)`

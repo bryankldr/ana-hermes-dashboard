@@ -597,6 +597,13 @@ class HermesGatewayClient:
         Yields gateway events as they arrive (message.delta, tool_use, tool_result, etc.)
         Scoped via _event_handlers to avoid clobbering self.on_event (race if reused).
         Filters by session_id and ignores non-stream noise (sessions.changed, etc.).
+
+        queued: teruskan flag antre gateway (prompt.submit {queued:true}).
+        Gateway mendaftarkan turn sebagai antrean ("run after") — tanpa ini
+        submit kedua ke sesi sibuk jadi barge-in interrupt yang MEMBUNUH turn
+        pertama (kasus uji paralel: u1 diterima lalu hilang tanpa jejak,
+        u2 menunggu 120s). Return RPC {"status"} diekspos via event
+        t="submit" agar pemanggil tahu: streaming (jalan) vs queued (antre).
         """
         queue: asyncio.Queue = asyncio.Queue()
         # Whitelist: only stream-relevant methods enter the queue
@@ -693,6 +700,19 @@ class HermesGatewayClient:
 
             await self.ws.send(json.dumps(request))
 
+            # Status submit diekspos sebagai event pertama: pemanggil tahu
+            # turn-nya jalan ("streaming") atau antre ("queued") — tanpa ini
+            # turn antre terlihat mati 120s lalu timeout.
+            try:
+                _submit_res = await asyncio.wait_for(future, timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("prompt.submit ack timeout — proceeding anyway")
+                _submit_res = None
+            if isinstance(_submit_res, dict):
+                yield {"type": "submit", "session_id": session_id,
+                       "status": _submit_res.get("status", "streaming"),
+                       "result": _submit_res}
+
             # Yield events until we get message.complete or error — 120s per-event (LLM/tool may take long)
             while True:
                 try:
@@ -707,12 +727,6 @@ class HermesGatewayClient:
                     break
                 elif event.get("type") == "error":
                     break
-
-            # Wait for the response (short, server already sent complete)
-            try:
-                await asyncio.wait_for(future, timeout=10.0)
-            except asyncio.TimeoutError:
-                logger.warning("prompt.submit future timeout — proceeding anyway")
         finally:
             # Restore original handler + remove scoped collectors
             _remove_collectors()

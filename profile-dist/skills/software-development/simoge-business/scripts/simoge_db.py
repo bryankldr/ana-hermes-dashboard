@@ -30,12 +30,34 @@ if not os.getenv("SIMOGE_DB_PASSWORD") and not os.getenv("DB_PASSWORD"):
 
 CURRENT_YEAR = datetime.date.today().year
 
+# DB source switch: ANA_DB_SOURCE=local|remote via dashboard db_source.py.
+# Lokal: DB_* · Remote: REMOTE_DB_* via kphbwb-tunnel 127.0.0.1:13307.
+def _db_dict():
+    try:
+        import sys as _sys
+        _root = None
+        for p in pathlib.Path(__file__).resolve().parents:
+            if (p / "ana-hermes-dashboard" / "db_source.py").exists():
+                _root = p / "ana-hermes-dashboard"
+                break
+        if _root and str(_root) not in _sys.path:
+            _sys.path.insert(0, str(_root))
+        import db_source
+        kw = db_source.kwargs()
+        return dict(host=kw["host"], port=kw["port"], user=kw["user"],
+                    password=kw["password"], database=kw["database"])
+    except Exception:
+        pass
+    return dict(
+        host=os.getenv("SIMOGE_DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
+        port=int(os.getenv("SIMOGE_DB_PORT", os.getenv("DB_PORT", "3306"))),
+        user=os.getenv("SIMOGE_DB_USER", os.getenv("DB_USER", "root")),
+        password=os.getenv("SIMOGE_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+        database=os.getenv("SIMOGE_DB_NAME", os.getenv("DB_NAME", "kph_bwb_sandbox2")),
+    )
+
 DB = dict(
-    host=os.getenv("SIMOGE_DB_HOST", os.getenv("DB_HOST", "127.0.0.1")),
-    port=int(os.getenv("SIMOGE_DB_PORT", os.getenv("DB_PORT", "3306"))),
-    user=os.getenv("SIMOGE_DB_USER", os.getenv("DB_USER", "root")),
-    password=os.getenv("SIMOGE_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
-    database=os.getenv("SIMOGE_DB_NAME", os.getenv("DB_NAME", "kph_bwb_sandbox2")),
+    **_db_dict(),
     charset="utf8mb4",
     cursorclass=pymysql.cursors.DictCursor,
     autocommit=True,
@@ -51,6 +73,21 @@ def conn():
     if _conn is None or not _conn.open:
         _conn = pymysql.connect(**DB)
     return _conn
+
+
+def reset_conn():
+    """Tutup koneksi shared agar query berikut baca DB terbaru (switch source)."""
+    global _conn, DB
+    try:
+        if _conn is not None and _conn.open:
+            _conn.close()
+    except Exception:
+        pass
+    _conn = None
+    try:
+        DB.update(_db_dict())
+    except Exception:
+        pass
 
 
 _FORBIDDEN = re.compile(
@@ -178,9 +215,12 @@ def _wilayah_where(kw, alias="p"):
 
 
 def _bbox_sql(bounds):
-    """Filter spatial viewport via idx_geom. bounds=[west,south,east,north]
-    atau string "[w,s,e,n]" (via spatial_set str()). 
-    MBRContains dulu (pakai index), ST_Intersects exact sesudahnya.
+    """Filter spatial viewport. bounds=[west,south,east,north]
+    atau string "[w,s,e,n]" (via spatial_set str()).
+    petak_polygon.polygon = GeoJSON longtext (TANPA kolom geom spasial) —
+    filter via ST_GeomFromGeoJSON(pp.polygon), bukan pp.geom yang tak ada
+    (Unknown column 1054 → panel blank tiap kirim bounds).
+    MBRContains dulu, ST_Intersects exact sesudahnya.
     Return (sql_frag, vals). bounds kosong/invalid = tanpa filter."""
     if isinstance(bounds, str):
         s = bounds.strip()
@@ -205,8 +245,8 @@ def _bbox_sql(bounds):
         return "", []
     poly = ("POLYGON((%s %s, %s %s, %s %s, %s %s, %s %s))")
     vals = [west, south, east, south, east, north, west, north, west, south]
-    frag = (f" AND MBRContains(ST_GeomFromText('{poly}'), pp.geom)"
-            f" AND ST_Intersects(ST_GeomFromText('{poly}'), pp.geom)")
+    frag = (f" AND MBRContains(ST_GeomFromText('{poly}'), ST_GeomFromGeoJSON(pp.polygon))"
+            f" AND ST_Intersects(ST_GeomFromText('{poly}'), ST_GeomFromGeoJSON(pp.polygon))")
     return frag, vals + vals
 
 
@@ -378,7 +418,7 @@ def kph_summary_map(tahun, limit=1000, aggregated_level="kode_kph", bounds=None,
     ncol = _WILAYAH_NAMES[level]
     w, wv = _wilayah_where(kw)
 
-    # Spatial bounds filter via geom index — dua tahap MBRContains+Intersect (idx_geom)
+    # Spatial bounds filter (lihat _bbox_sql: via ST_GeomFromGeoJSON)
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
     
@@ -405,12 +445,13 @@ def kph_summary_map(tahun, limit=1000, aggregated_level="kode_kph", bounds=None,
         name_join = "LEFT JOIN bkph b ON b.kode_bkph = p.kode_bkph"
         name_col = "b.bkph AS nama_wilayah"
     
-    # Use MIN(ST_AsGeoJSON(ST_Centroid(pp.geom))) as representative centroid
+    # Use MIN(ST_AsGeoJSON(ST_Centroid(...))) as representative centroid.
+    # pp.polygon = GeoJSON longtext (tanpa kolom geom) — parse dulu.
     return q(f"""
         SELECT p.{effective_level} AS kode_wilayah, {name_col},
                COUNT(*) AS total_petak,
                ROUND(SUM(p.luas_baku), 2) AS total_luas_ha,
-               MIN(ST_AsGeoJSON(ST_Centroid(pp.geom))) AS centroid,
+               MIN(ST_AsGeoJSON(ST_Centroid(ST_GeomFromGeoJSON(pp.polygon)))) AS centroid,
                SUM(CASE WHEN COALESCE(a.penyadap, 0) = 0 THEN 1 ELSE 0 END) AS bongkor,
                SUM(CASE WHEN COALESCE(a.penyadap, 0) > 0 AND COALESCE(a.luas_andil, 0) < p.luas_baku THEN 1 ELSE 0 END) AS kurang,
                SUM(CASE WHEN COALESCE(a.luas_andil, 0) >= p.luas_baku THEN 1 ELSE 0 END) AS terpenuhi,
@@ -1188,6 +1229,7 @@ def aktivitas_recent(limit=20, **kw):
     # nomor_petak) yang bergantung pada filter wilayah — Left Join supaya petak
     # tanpa RTT tidak killing baris aktivitas.
     cols = """s.id, s.kode_evapot, s.pembaharuan_ke, s.tgl_pembaharuan,
+            DATE_FORMAT(s.date_created, '%%H:%%i') AS jam_input,
             s.latitude, s.longitude, s.altitude,
             s.quare, s.semprot_cas, s.kerok, s.budaya_bersih, s.naik_batok,
             s.aktivitas_photo, f.filename_disk AS foto_file, f.storage AS foto_storage,
@@ -1483,6 +1525,21 @@ def petak_non_rtt(tahun: int, **kw):
 
 
 
+@template("laporan_perencanaan_target_setor_vs_ro_nps")
+def laporan_perencanaan_target_setor_vs_ro_nps(tahun, bulan, periode, **kw):
+    """LAPORAN PERENCANAAN TARGET SETOR VS TARGET RO/NPS per Mandor/KTS x TPG.
+    Kolom (urut MERENCANAKAN terbesar): BKPH, TPG (alias), NAMA (TRIM first_name+last_name), KODE JAB (jabatan.kode_jabatan), TARGET RO/NPS (Kg) = SUM DISTINCT petak.target_rkap * _target_pct /100, MERENCANAKAN (Kg) = SUM rencana_berat periode, GAP % = 100*MERENCANAKAN/TARGET.
+    Periode: P1=1-15, P2=16-akhir bulan. TARGET kumulatif s/d (bulan,periode) via _target_pct. Dedup petak per mandor x TPG."""
+    d0, e1 = period_bounds(tahun, bulan, periode)
+    total_pct = _target_pct(tahun, bulan, periode)
+    w, wv = _wilayah_where(kw, alias="pt")
+    return q(f"""
+        SELECT t.BKPH AS bkph, t.alias AS tpg, TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) AS nama, COALESCE(jb.kode_jabatan, '-') AS kode_jab, ROUND(SUM(d.target_rkap) * %s / 100, 1) AS target_ro_nps_kg, ROUND(SUM(d.merencanakan_kg), 1) AS merencanakan_kg, ROUND(100 * SUM(d.merencanakan_kg) / NULLIF(SUM(d.target_rkap) * %s / 100, 0), 1) AS gap_pct
+        FROM ( SELECT r.user_created, pt.kode_tpg, pt.kode_evapot, MAX(pt.target_rkap) AS target_rkap, SUM(r.rencana_berat) AS merencanakan_kg FROM getah_rencana_aktivitas r JOIN getah_petak pt ON pt.kode_evapot = r.kode_evapot AND pt.tahun_rtt = %s WHERE r.tanggal_rencana BETWEEN %s AND %s{w} GROUP BY r.user_created, pt.kode_tpg, pt.kode_evapot ) d
+        LEFT JOIN getah_daftar_tpg t ON t.kode_tpg = d.kode_tpg LEFT JOIN directus_users u ON u.id = d.user_created LEFT JOIN jabatan jb ON jb.id = u.jabatan
+        GROUP BY t.BKPH, t.alias, u.first_name, u.last_name, jb.kode_jabatan, d.kode_tpg, d.user_created ORDER BY merencanakan_kg DESC
+    """, (total_pct, total_pct, tahun, d0, e1, *wv))
+
 @template("rencana_aktivitas")
 def rencana_aktivitas(tahun, bulan, periode, **kw):
     """Rencana berat getah per periode (getah_rencana_aktivitas.rencana_berat). Scoped wilayah bila filter diberi."""
@@ -1511,12 +1568,12 @@ def wilayah_lookup(nama, **kw):
 
 @template("wilayah_labels")
 def wilayah_labels(**kw):
-    """Distinct wilayah codes + human names (for filter labels). One query per level is cheaper than per-level templates."""
+    """Distinct wilayah codes + human names (for filter labels). Include parent codes for hierarchical filtering."""
     divre = q("SELECT kode_divre, divre FROM divre WHERE kode_divre IS NOT NULL ORDER BY kode_divre")
-    kph = q("SELECT kode_kph, kph, divre FROM kph ORDER BY kode_kph")
-    bkph = q("SELECT kode_bkph, bkph, kph FROM bkph ORDER BY kode_bkph")
-    rph = q("SELECT kode_rph, rph, bkph FROM rph ORDER BY kode_rph")
-    tpg = q("SELECT kode_tpg, nama_tpg, alias, RPH, BKPH FROM getah_daftar_tpg WHERE kode_tpg >= 31211000000 ORDER BY kode_tpg LIMIT 400")
+    kph = q("SELECT kode_kph, kph, kode_divre FROM kph ORDER BY kode_kph")
+    bkph = q("SELECT kode_bkph, bkph, kode_kph FROM bkph ORDER BY kode_bkph")
+    rph = q("SELECT kode_rph, rph, kode_bkph FROM rph ORDER BY kode_rph")
+    tpg = q("SELECT kode_tpg, nama_tpg, alias, kode_rph, kode_bkph FROM getah_daftar_tpg WHERE kode_tpg >= 31211000000 ORDER BY kode_tpg LIMIT 400")
     return {"columns": [], "rows": [{"divre": divre["rows"], "kph": kph["rows"], "bkph": bkph["rows"], "rph": rph["rows"], "tpg": tpg["rows"]}], "row_count": 1, "elapsed_ms": 0, "sql": "wilayah_labels"}
 
 def run(name, **params):

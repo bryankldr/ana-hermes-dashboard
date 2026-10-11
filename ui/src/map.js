@@ -12,6 +12,7 @@ import {
 import { loadBusinessData, fetchWilayahOptions, fetchAktivitasPoints, resolveTemplate } from './businessAdapter.js';
 import { initSpatialChart } from './spatialChart.js';
 import { initSpatialReport } from './spatialReport.js';
+import { initSpatialArchive } from './spatialArchive.js';
 
 const CENTER = [-8.1915, 114.1491];
 const BASE_STYLE = { color: '#2DF2FF', weight: 1, opacity: 0.8, fillColor: '#2DF2FF', fillOpacity: 0.12 };
@@ -43,7 +44,7 @@ export function startMapBridge({ token = '', log = () => {} } = {}) {
     _pushThrottle = Date.now();
     try {
       await fetch('/api/map/state', {
-        method: 'POST', headers: headers(),
+        method: 'POST', headers: headers(), credentials: 'same-origin',
         body: JSON.stringify({ state: _ctl.get_state() }),
       });
     } catch (_) {}
@@ -51,7 +52,7 @@ export function startMapBridge({ token = '', log = () => {} } = {}) {
   const poll = async () => {
     if (!_ctl) return;
     try {
-      const r = await fetch('/api/map/queue', { headers: { 'X-Ana-Token': token } });
+      const r = await fetch('/api/map/queue', { headers: { 'X-Ana-Token': token }, credentials: 'same-origin' });
       if (!r.ok) return;
       const { commands = [] } = await r.json();
       for (const cmd of commands) {
@@ -65,7 +66,7 @@ export function startMapBridge({ token = '', log = () => {} } = {}) {
           } catch (e) { _ok = false; _err = String((e && e.message) || e).slice(0, 200); }
           try {
             await fetch('/api/map/result', {
-              method: 'POST', headers: headers(),
+              method: 'POST', headers: headers(), credentials: 'same-origin',
               body: JSON.stringify(_ok ? { id: cmd.id, ok: true, data: _data || {} } : { id: cmd.id, ok: false, error: _err }),
             });
           } catch (_) {}
@@ -75,7 +76,7 @@ export function startMapBridge({ token = '', log = () => {} } = {}) {
         const fn = _ctl[cmd.op];
         if (typeof fn !== 'function') {
           await fetch('/api/map/result', {
-            method: 'POST', headers: headers(),
+            method: 'POST', headers: headers(), credentials: 'same-origin',
             body: JSON.stringify({ id: cmd.id, ok: false, error: 'op tidak dikenal di adapter: ' + cmd.op }),
           });
           continue;
@@ -104,13 +105,13 @@ export function startMapBridge({ token = '', log = () => {} } = {}) {
         try {
           const data = await fn.apply(_ctl, callArgs);
           await fetch('/api/map/result', {
-            method: 'POST', headers: headers(),
+            method: 'POST', headers: headers(), credentials: 'same-origin',
             body: JSON.stringify({ id: cmd.id, ok: true, data }),
           });
           log('map', 'MAP', 'ANA -> ' + cmd.op);
         } catch (e) {
           await fetch('/api/map/result', {
-            method: 'POST', headers: headers(),
+            method: 'POST', headers: headers(), credentials: 'same-origin',
             body: JSON.stringify({ id: cmd.id, ok: false, error: String(e?.message || e).slice(0, 200) }),
           });
           log('map', 'MAP', 'ANA -> ' + cmd.op + ' gagal: ' + String(e?.message || e).slice(0, 80));
@@ -261,20 +262,26 @@ export function initMapPanel({ log = () => {} } = {}) {
   window.L.control.scale({ position: 'topright' }).addTo(map);
   window.L.control.layers({ 'Satelit': satGroup, 'Gelap': darkGroup }, { 'Petak': petakLayer, 'Label': refLbl }, { position: 'topright' }).addTo(map);
   window.L.control.zoom({ position: 'topright' }).addTo(map);
-  // zoom-badge: angka zoom + tier tepat di bawah skala (urutan: skala → badge → layers → zoom)
+  // zoom-badge: info zoom + tier di SEBELAH KIRI skala, tanpa background
+  // (teks putih + shadow, baca di atas satelit). Urutan kolom:
+  // baris [badge | skala] → layers → zoom.
   (function(){
     try {
       const zb = document.createElement('div');
       zb.id = 'zoomBadge'; zb.className = 'zoom-badge';
       zb.textContent = 'Z' + map.getZoom();
-      // append dulu lalu susun ulang: skala → badge → layers → zoom
       const tr = box.querySelector('.leaflet-top.leaflet-right');
       if (tr) {
-        tr.appendChild(zb);
         const sc = tr.querySelector('.leaflet-control-scale');
         const ly = tr.querySelector('.leaflet-control-layers');
         const zm = tr.querySelector('.leaflet-control-zoom');
-        if (sc && ly && zm) tr.append(sc, zb, ly, zm);
+        const row = document.createElement('div');
+        row.className = 'zs-row';
+        row.appendChild(zb);
+        if (sc) row.appendChild(sc);
+        tr.append(row);
+        if (ly) tr.appendChild(ly);
+        if (zm) tr.appendChild(zm);
       } else box.appendChild(zb);
       window.__anaZoomBadge = zb;
       const upd = () => { try { const z = map.getZoom(); const t = (z <= 11 ? 'PMTiles' : 'GeoJSON'); zb.textContent = 'Z' + z + ' \u00b7 ' + t; zb.dataset.zoom = String(z); } catch(_){} };
@@ -591,6 +598,11 @@ function updateLegend(biz, kat) {
   let _awaitingFeatures = null; // polygon yang dijanjikan server, nunggu MAP_FEATURES_LOADED beneran
   let _awaitingSeq = 0;
   let _renderWatchdog = null;
+  // Retry eksplisit 3x per filter (robust auto-open): blank intermiten pulih
+  // sendiri, bukan 'klik Muat'. Reset tiap ganti filter di reloadBusiness.
+  // Kunci = business+filtKey agar retry filter lama tak bocor ke filter baru.
+  let _retryCount = 0;
+  let _retryKey = '';
   // P1 viewport-loop fix: true saat fit programmatic (first-load / ganti
   // filter) — _pushViewport abaikan moveend yang datang dari fit_all, supaya
   // pan/zoom user tak picu reload berulang + snapback ke extent lama.
@@ -631,7 +643,7 @@ function updateLegend(biz, kat) {
     let executed = false;
     try {
       const tok = document.querySelector('meta[name="ana-token"]')?.content || '';
-      const r = await fetch('/api/map/queue', { headers: { 'X-Ana-Token': tok } });
+      const r = await fetch('/api/map/queue', { headers: { 'X-Ana-Token': tok }, credentials: 'same-origin' });
       if (!r.ok) return false;
       const { commands = [] } = await r.json();
       for (const cmd of commands) {
@@ -642,11 +654,11 @@ function updateLegend(biz, kat) {
               const _d = (typeof _spatialHandler === 'function') ? await _spatialHandler(cmd.op, cmd.args || {}) : { accepted: false, reason: 'panel belum siap' };
               if (cmd.id === mapId) executed = true;
               try {
-                await fetch('/api/map/result', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cmd.id, ok: true, data: _d || {} }) });
+                await fetch('/api/map/result', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ id: cmd.id, ok: true, data: _d || {} }) });
               } catch (_) {}
             } catch (_e) {
               try {
-                await fetch('/api/map/result', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cmd.id, ok: false, error: String((_e && _e.message) || _e).slice(0, 200) }) });
+                await fetch('/api/map/result', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ id: cmd.id, ok: false, error: String((_e && _e.message) || _e).slice(0, 200) }) });
               } catch (_) {}
             }
             continue;
@@ -662,7 +674,7 @@ function updateLegend(biz, kat) {
             try { await fn.call(_ctl, a); } catch (_) {}
           }
           try {
-            await fetch('/api/map/result', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: cmd.id, ok: true, data: { drained: true } }) });
+            await fetch('/api/map/result', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ id: cmd.id, ok: true, data: { drained: true } }) });
           } catch (_) {}
         } catch (_) {}
       }
@@ -671,7 +683,7 @@ function updateLegend(biz, kat) {
       if (executed) {
         try {
           const st = _ctl?.get_state?.();
-          if (st) await fetch('/api/map/state', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: st }) });
+          if (st) await fetch('/api/map/state', { method: 'POST', headers: { 'X-Ana-Token': tok, 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ state: st }) });
         } catch (_) {}
       }
     } catch (_) {}
@@ -687,6 +699,8 @@ function updateLegend(biz, kat) {
     _loading = true; _loadSeq++;
     const mySeq = _loadSeq;
     const st = collectState();
+    // Retry baru untuk filter baru: kunci ganti = hitungan dari nol.
+    try { const _rk = st.business + '|' + _filtKey(st); if (_rk !== _retryKey) { _retryKey = _rk; _retryCount = 0; } } catch (_) {}
     _setProgress(12, 'memuat ' + st.business + ' ' + st.filters.tahun + '-' + String(st.filters.bulan).padStart(2,'0') + (String(st.filters.periode) === '0' ? '-FULL' : '-P' + st.filters.periode) + '…');
     setBusiness(st.business);
     setFilters(st.filters);
@@ -732,6 +746,7 @@ function updateLegend(biz, kat) {
             const _r = await fetch('/api/simoge/show_on_map', {
               method: 'POST',
               headers: { 'X-Ana-Token': _tok2, 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
               body: JSON.stringify({ template: _spatialTemplate, params: _params, drive: false }),
             });
             const _d = await _r.json().catch(() => ({}));
@@ -779,6 +794,11 @@ function updateLegend(biz, kat) {
           // drain langsung: jangan tunggu interval bridge.
           // teruskan _wantIncremental agar pan/zoom diff-by-id (anti flicker).
           try { await _drainBusinessQueue(res.map_id, _wantIncremental); } catch (_) {}
+          // Fix ganti-bisnis blank: enforce tier visibility SETELAH drain,
+          // sebelum cek ok. Tanpa ini polygon baru nempel tapi hidden bila
+          // _tierMode basi (sisa zoom rendah sesi sebelumnya) — count>0
+          // tapi peta kosong, dan watchdog salah hitung 'render gagal'.
+          try { _maybeSwitchTier(map.getZoom()); } catch (_) {}
           // count < features normal: template punya LIMIT, server masih melapor
           // jumlah pre-limit (809) sementara peta hanya bisa gambar 800. Yang
           // penting render terjadi, bukan angkanya persis sama.
@@ -791,6 +811,7 @@ function updateLegend(biz, kat) {
               // berikutnya diff-by-id, bukan clear. Maju sebelum POST membuat
               // data belum render dianggap loaded dan tiap pan re-clear.
               try { _lastLoadedFilt = st.business + '|' + _filtKey(st); } catch (_) {}
+              _retryCount = 0; // sukses render = kuota retry pulih untuk gangguan berikut
               _setProgress(96, 'polygon tampil — ' + cur0 + ' feat');
               _hideProgressSoon(true);
               _firstLoadDone = true;
@@ -821,13 +842,22 @@ function updateLegend(biz, kat) {
             if (_awaitingFeatures !== null && cur < need()) {
               _setProgress(64, 'render terlambat (' + cur + '/' + _awaitingFeatures + ') — cek koneksi atau klik Muat');
             }
-            // fail-hide 3s berikutnya bila tetap tidak tampil
+            // Retry eksplisit maks 3x per filter, lalu fail-hide seperti dulu.
+            // Tanpa counter: blank intermiten = user klik manual selamanya.
             setTimeout(() => {
               const cur2 = (()=>{ try { return _ctl?.get_state?.()?.count || 0; } catch(_){ return 0; } })();
               if (_awaitingFeatures !== null && cur2 < need()) {
-                _awaitingFeatures = null;
-                _hideProgressSoon(false);
-                if (stat) stat.textContent = 'render gagal — klik Muat';
+                if (_retryCount < 3 && !_loading) {
+                  _retryCount++;
+                  _awaitingFeatures = null;
+                  _setProgress(28, 'coba lagi ' + _retryCount + '/3…');
+                  try { log('map', 'MAP', 'auto-retry ' + _retryCount + '/3'); } catch (_) {}
+                  setTimeout(() => { if (!_loading && !_firstLoadDone) reloadBusiness(); }, 900);
+                } else {
+                  _awaitingFeatures = null;
+                  _hideProgressSoon(false);
+                  if (stat) stat.textContent = 'render gagal — klik Muat';
+                }
               }
             }, 3000);
           }, 3000);
@@ -904,14 +934,21 @@ function updateLegend(biz, kat) {
   }
   bizSel?.addEventListener('change', () => { syncKatVisibility(); updateLegend(bizSel.value, katSel?.value || 'semua'); updateHead(); renderChips(); scheduleReload(); });
   katSel?.addEventListener('change', () => { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });
-  [fBulan, fTahun, fPeriode, fPemKe, fDivre, fKph, fBkph, fRph, fTpg].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
+  // Waktu + pembaharuan_ke pakai listener generik; wilayah sudah punya cascade-specific
+  [fBulan, fTahun, fPeriode, fPemKe].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
   fApply?.addEventListener('click', reloadBusiness);
   fReset?.addEventListener('click', function(){
     if (fBulan) fBulan.value=String(d.getMonth()+1);
     if (fTahun) fTahun.value='2026';
     if (fPeriode) fPeriode.value=d.getDate()<=15?'1':'2';
     if (fPemKe) fPemKe.value='';
-    if (fDivre) fDivre.value=''; if (fKph) fKph.value=''; if (fBkph) fBkph.value=''; if (fRph) fRph.value=''; if (fTpg) fTpg.value='';
+    // Respect scope lock: only reset unlocked dropdowns
+    if (fDivre && !fDivre.disabled) fDivre.value='';
+    if (fKph && !fKph.disabled) fKph.value='';
+    if (fBkph && !fBkph.disabled) fBkph.value='';
+    if (fRph && !fRph.disabled) fRph.value='';
+    if (fTpg && !fTpg.disabled) fTpg.value='';
+    try { renderWilayah(); } catch (_) {} // kembalikan opsi anak penuh sesuai scope
     if (katSel) katSel.value='semua'; if (bizSel) bizSel.value='petak';
     _spatialWarna = '';   // reset filter = buang juga subset warna dari ANA
     syncKatVisibility(); updateLegend('petak','semua'); updateHead(); renderChips(); reloadBusiness();
@@ -1070,13 +1107,8 @@ function updateLegend(biz, kat) {
   });
 
   let _wilayahCache = null;
-  function _optHtml(arr) {
-    return (arr||[]).map(function(o){
-      const v = (o && o.value != null) ? String(o.value) : String(o);
-      const l = (o && o.label) ? String(o.label) : String(o);
-      return '<option value="' + esc(v) + '">' + esc(l) + '</option>';
-    }).join('');
-  }
+  // Indeks rantai kode wilayah ("level:value" → {divre,kph,bkph,rph}) untuk renderWilayah.
+
   function _labelWilayah(kind, kode) {
     if (!kode || !_wilayahCache) return String(kode);
     const arr = _wilayahCache[kind] || [];
@@ -1085,37 +1117,290 @@ function updateLegend(biz, kat) {
     if (hit) return hit.label || s;
     return s;
   }
-  // divre/kph juga perlu diisi (sudah ada opsi statis, timpa bila live)
-  fetchWilayahOptions(2026).then(function(opts){
+
+  // ── Filter wilayah terintegrasi user login + cascade dua arah ──
+  // Scope dari KODE user (bukan jabatan): divre/kph/bkph/rph/tpg — SEMUA menang.
+  //  - user divre+kph → DIVRE+KPH dikunci (disabled); BKPH/RPH/TPG HANYA
+  //    se-KPH login — di luar KPH tak ada di menu (fail-closed: opsi tanpa
+  //    rantai terverifikasi ikut dibuang). TPG ikut rantai lewat RPH/BKPH.
+  //  - user divre saja → DIVRE dikunci; KPH/BKPH/RPH/TPG se-DIVRE itu.
+  //  - user bkph/rph/tpg → levelnya dikunci; anak di bawahnya disaring rantai.
+  //  - tanpa kode → semua terbuka.
+  // Server menegakkan hal yang sama (_enforce_wilayah_scope di
+  // /api/simoge/query|packet|show_on_map, cookie sesi ikut via
+  // credentials:same-origin) — curl/devtools tak bisa tamper filter selama
+  // sesi login ada. Frontend = UX, server = kebenaran.
+  // Cascade: pilih anak → induk auto-isi sesuai rantai kode (bila opsinya ada
+  // di menu); pilih induk → opsi anak di luar wilayahnya dibuang. Satu
+  // renderWilayah() jadi sumber kebenaran (murni client-side dari cache —
+  // tanpa fetch per klik).
+  const _WLEVELS = ['divre', 'kph', 'bkph', 'rph', 'tpg'];
+  const _WPARENT_LVL = { kph: 'divre', bkph: 'kph', rph: 'bkph', tpg: 'rph' };
+  const _WCHAIN_KEY = ['divre', 'kph', 'bkph', 'rph'];
+  // Ancestor tiap level untuk saring fail-closed (opsi tanpa rantai
+  // terverifikasi dibuang bila induk efektif terisi).
+  const _WANCESTORS = { kph: ['divre'], bkph: ['kph', 'divre'], rph: ['bkph', 'kph', 'divre'], tpg: ['rph', 'bkph', 'kph', 'divre'] };
+  let _wChain = {};
+  function _userScope() {
+    // Scope dari KODE user login (bukan jabatan): divre/kph/bkph/rph.
+    // Session menyimpan hasil expand (dict) atau mentah (int/str) — semua bisa.
+    const pick = (v, k) => {
+      try {
+        if (v == null) return '';
+        if (typeof v === 'object' && !Array.isArray(v)) {
+          const c = v[k];
+          return (c == null || c === '') ? '' : String(c).trim();
+        }
+        if (Array.isArray(v)) return '';
+        const s = String(v).trim();
+        return (s === '' || s.toLowerCase() === 'none' || s.toLowerCase() === 'null') ? '' : s;
+      } catch (_) { return ''; }
+    };
+    try {
+      const u = window._authUser || {};
+      const scope = {
+        divre: pick(u.kode_divre, 'kode_divre'),
+        kph: pick(u.kode_kph, 'kode_kph'),
+        bkph: pick(u.kode_bkph, 'kode_bkph'),
+        rph: pick(u.kode_rph, 'kode_rph'),
+        tpgList: [],
+      };
+      // User TPG-level: kode_tpg = list M2M [{kode_tpg,...},...] atau mentah.
+      try {
+        const t = u.kode_tpg;
+        if (Array.isArray(t)) for (const e of t) {
+          const c = (e && typeof e === 'object') ? e.kode_tpg : e;
+          if (c != null && String(c).trim() !== '') scope.tpgList.push(String(c).trim());
+        }
+      } catch (_) {}
+      return scope;
+    } catch (_) { return { divre: '', kph: '', bkph: '', rph: '', tpgList: [] }; }
+  }
+  function _buildWIdx() {
+    _wChain = {};
+    try {
+      const O = _wilayahCache || {};
+      const byVal = {};
+      for (const L of _WLEVELS) for (const o of (O[L] || [])) {
+        if (o && o.value != null) byVal[L + ':' + String(o.value)] = o;
+      }
+      const chain = function(L, v) {
+        const o = byVal[L + ':' + String(v)];
+        if (!o) return {};
+        const c = {};
+        const P = function(k) { return (o[k] != null && String(o[k]).trim() !== '') ? String(o[k]).trim() : ''; };
+        if (L === 'kph') { const d = P('kode_divre'); if (d) c.divre = d; }
+        else if (L === 'bkph') { const k = P('kode_kph'); if (k) { c.kph = k; Object.assign(c, chain('kph', k)); } }
+        else if (L === 'rph') { const b = P('kode_bkph'); if (b) { c.bkph = b; Object.assign(c, chain('bkph', b)); } }
+        else if (L === 'tpg') {
+          const r = P('kode_rph'); if (r) { c.rph = r; Object.assign(c, chain('rph', r)); }
+          if (!c.bkph) { const b = P('kode_bkph'); if (b) c.bkph = b; }
+          if (!c.kph && c.bkph) { const up = chain('bkph', c.bkph); if (up.kph) c.kph = up.kph; if (up.divre) c.divre = up.divre; }
+        }
+        return c;
+      };
+      for (const L of _WLEVELS) for (const o of (O[L] || [])) {
+        if (o && o.value != null) _wChain[L + ':' + String(o.value)] = chain(L, o.value);
+      }
+    } catch (_) { _wChain = {}; }
+  }
+  function _chainOf(level, value) {
+    if (value == null || value === '') return {};
+    return _wChain[level + ':' + String(value)] || {};
+  }
+  function _wSel() { return { divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg }; }
+  function _effScope(scope, cur) {
+    // Induk efektif = scope login, kecuali panel memilih yang LEBIH SEMPIT
+    // dan masih di dalam scope itu (mis. KPH dipilih manual di dalam DIVRE).
+    // Aturan: pilihan di LUAR scope tak pernah jadi induk efektif (sudah
+    // dibuang validasi) — jadi BKPH tak bisa "membuka" KPH lain.
+    const eff = { divre: scope.divre || '', kph: '', bkph: '', rph: '' };
+    try {
+      if (cur.divre && (!scope.divre || cur.divre === scope.divre)) eff.divre = cur.divre;
+      if (cur.kph && (!scope.kph || cur.kph === scope.kph)) eff.kph = cur.kph;
+      else if (scope.kph) eff.kph = scope.kph;
+      if (cur.bkph && (!scope.bkph || cur.bkph === scope.bkph)) eff.bkph = cur.bkph;
+      else if (scope.bkph) eff.bkph = scope.bkph;
+      if (cur.rph && (!scope.rph || cur.rph === scope.rph)) eff.rph = cur.rph;
+      else if (scope.rph) eff.rph = scope.rph;
+    } catch (_) {}
+    return eff;
+  }
+  function renderWilayah() {
+    if (!_wilayahCache) return;
+    const SEL = _wSel();
+    const scope = _userScope();
+    const cur = {};
+    for (const L of _WLEVELS) cur[L] = SEL[L] ? String(SEL[L].value || '') : '';
+    // Scope login menang atas nilai panel: divre/kph/bkph/rph/tpg user dipaksa.
+    if (scope.divre) cur.divre = scope.divre;
+    if (scope.kph) cur.kph = scope.kph;
+    if (scope.bkph) cur.bkph = scope.bkph;
+    if (scope.rph) cur.rph = scope.rph;
+    if (scope.tpgList && scope.tpgList.length === 1 && !cur.tpg) cur.tpg = scope.tpgList[0];
+    // validasi top-down: nilai di luar scope/rantai induk dibuang
+    for (const L of _WLEVELS) {
+      const v = cur[L];
+      if (!v) continue;
+      // Fail-closed TPG: user TPG-level hanya boleh TPG miliknya.
+      if (L === 'tpg' && scope.tpgList && scope.tpgList.length && scope.tpgList.indexOf(v) === -1) { cur[L] = ''; continue; }
+      const ch = _chainOf(L, v);
+      let ok = true;
+      // Opsi tanpa rantai yang bisa diverifikasi + di luar scope login = buang.
+      const _scopeHit = { divre: scope.divre, kph: scope.kph, bkph: scope.bkph, rph: scope.rph };
+      for (const sL of ['divre', 'kph', 'bkph', 'rph']) {
+        if (!_scopeHit[sL]) continue;
+        if (L === sL) { if (v !== _scopeHit[sL]) ok = false; }
+        else if (ch[sL] && ch[sL] !== _scopeHit[sL]) ok = false;
+      }
+      if (ok) {
+        let a = _WPARENT_LVL[L];
+        while (a) {
+          if (cur[a] && ch[a] && ch[a] !== cur[a]) { ok = false; break; }
+          a = _WPARENT_LVL[a];
+        }
+      }
+      if (!ok) cur[L] = '';
+    }
+    const eff = _effScope(scope, cur);
+    // bangun ulang opsi per level (batch innerHTML — responsif)
+    for (const L of _WLEVELS) {
+      const sel = SEL[L];
+      if (!sel) continue;
+      const arr = _wilayahCache[L] || [];
+      const list = arr.filter(function(o) {
+        const v = String(o.value);
+        // Fail-closed TPG: menu user TPG-level hanya berisi TPG miliknya.
+        if (L === 'tpg' && scope.tpgList && scope.tpgList.length && scope.tpgList.indexOf(v) === -1) return false;
+        const ch = _chainOf(L, v);
+        // Scope login: level di luar scope dibuang (termasuk tanpa rantai).
+        if (scope.divre && L === 'divre' && v !== scope.divre) return false;
+        if (scope.kph && L === 'kph' && v !== scope.kph) return false;
+        if (scope.bkph && L === 'bkph' && v !== scope.bkph) return false;
+        if (scope.rph && L === 'rph' && v !== scope.rph) return false;
+        // Fail-closed: opsi anak tanpa rantai terverifikasi dibuang bila
+        // induk efektif terisi (tak bisa buktikan ia di dalam wilayah).
+        for (const a of (_WANCESTORS[L] || [])) {
+          if (!eff[a]) continue;
+          if (L === a) continue;
+          if (!ch[a]) return false;
+          if (ch[a] !== eff[a]) return false;
+        }
+        // Pilihan induk di panel (bila bukan scope paksa) tetap menyaring.
+        let a = _WPARENT_LVL[L];
+        while (a) {
+          if (cur[a] && ch[a] && ch[a] !== cur[a]) return false;
+          a = _WPARENT_LVL[a];
+        }
+        return true;
+      });
+      const keep = cur[L] && list.some(function(o) { return String(o.value) === cur[L]; }) ? cur[L] : '';
+      cur[L] = keep;
+      let html = '<option value="">Semua</option>';
+      for (const o of list) html += '<option value="' + esc(String(o.value)) + '">' + esc(o.label || String(o.value)) + '</option>';
+      sel.innerHTML = html;
+      sel.value = keep;
+      // Select yang dipaksa scope = disabled (tak bisa diubah user).
+      const _scopeVal = { divre: scope.divre, kph: scope.kph, bkph: scope.bkph, rph: scope.rph }[L] || '';
+      const pinned = !!_scopeVal && !!keep && keep === _scopeVal;
+      try {
+        sel.disabled = !!pinned;
+        sel.title = pinned ? ('Wilayah login — ' + keep) : '';
+      } catch (_) {}
+    }
+  }
+  let _cascadeAttached = false;
+  function _attachWilayahCascade() {
+    if (_cascadeAttached) return;
+    _cascadeAttached = true;
+    const SEL = _wSel();
+    for (const L of _WLEVELS) {
+      const sel = SEL[L];
+      if (!sel) continue;
+      sel.addEventListener('change', function() {
+        try {
+          const v = String(this.value || '');
+          if (v) {
+            const ch = _chainOf(L, v);
+            const S = _wSel();
+            for (const key of _WCHAIN_KEY) {
+              const t = S[key];
+              // Isi induk dari rantai kode — hanya bila select-nya bisa diubah
+              // DAN opsinya memang ada di menu (menu KPH scope tak muat KPH lain).
+              if (ch[key] && t && !t.disabled) {
+                try {
+                  let has = false;
+                  for (const o of t.options) { if (o.value === ch[key]) { has = true; break; } }
+                  if (has) t.value = ch[key];
+                } catch (_) {}
+              }
+            }
+          }
+          renderWilayah();
+        } catch (e) { try { log('error', 'MAP', 'cascade: ' + e.message); } catch (_) {} }
+        updateHead(); renderChips(); scheduleReload();
+      });
+    }
+  }
+  // Dipanggil main.js setelah requireAuth mengisi window._authUser (initMapPanel
+  // jalan sebelum auth selesai, jadi scope login diterapkan susulan di sini).
+  try {
+    window.__spatialApplyUserScope = function() {
+      try {
+        renderWilayah();
+        try { const st = collectState(); setFilters(st.filters); } catch (_) {}
+        renderChips();
+        if (_autoKicked && !_loading) scheduleReload();
+      } catch (_) {}
+    };
+  } catch (_) {}
+
+  function _applyScopeLock() {
+    // Kompat: scope KODE user sekarang dipasang renderWilayah() (lihat _userScope).
+    // Fungsi lama dipertahankan sebagai no-op agar pemanggil lama tak error.
+    try { renderWilayah(); } catch (_) {}
+  }
+
+  // ── Isi dropdown: bangun indeks rantai → render sesuai scope login → pasang cascade ──
+  // Urutan: fetch → _buildWIdx → renderWilayah (scope kode user) → lock lama
+  // (kompat) → auto-filter lama (kompat) → cascade dua arah → hook reload ANA.
+  function _populateDropdowns(opts) {
     _wilayahCache = opts;
-    // isi DIVRE/KPH juga (sebelumnya statis)
-    if (fDivre && opts.divre?.length) {
-      const cur = fDivre.value;
-      fDivre.innerHTML = '<option value="">Semua</option>' + _optHtml(opts.divre);
-      if (cur) fDivre.value = cur;
-    }
-    if (fKph && opts.kph?.length) {
-      const cur = fKph.value;
-      fKph.innerHTML = '<option value="">Semua</option>' + _optHtml(opts.kph);
-      if (cur) fKph.value = cur;
-    }
-    if (fBkph && opts.bkph?.length) {
-      const cur = fBkph.value;
-      fBkph.innerHTML = '<option value="">Semua</option>' + _optHtml(opts.bkph);
-      if (cur) fBkph.value = cur;
-    }
-    if (fRph && opts.rph?.length) {
-      const cur = fRph.value;
-      fRph.innerHTML = '<option value="">Semua</option>' + _optHtml(opts.rph);
-      if (cur) fRph.value = cur;
-    }
-    if (fTpg && opts.tpg?.length) {
-      const cur2 = fTpg.value;
-      fTpg.innerHTML = '<option value="">Semua</option>' + _optHtml(opts.tpg);
-      if (cur2) fTpg.value = cur2;
-    }
+    _buildWIdx();
+    renderWilayah();
+    try {
+      const st = collectState();
+      setBusiness(st.business);
+      setFilters(st.filters);
+    } catch (_) {}
+  }
+
+  // 1. Ambil opsi wilayah dari server → render sesuai scope login → cascade dua arah.
+  // _applyScopeLock/applyUserWilayahFilter lama tetap jalan (kompat), tapi
+  // renderWilayah() sudah lebih dulu mengunci DIVRE/KPH dari KODE user.
+  fetchWilayahOptions(2026).then(function(opts) {
+    _populateDropdowns(opts);
+
+    // 2. Scope lock & auto-filter lama (kompat, no-op bila scope kode sudah pasang)
+    try { _applyScopeLock(); } catch (_) {}
+    try { applyUserWilayahFilter(); } catch (_) {}
+    renderWilayah();
+
+    // 3. Cascade dua arah baru (satu listener per dropdown, guard ganda)
+    _attachWilayahCascade();
+
     renderChips();
-  }).catch(function(){});
+  }).catch(function(err) {
+    log('error', 'MAP', 'fetchWilayahOptions failed, using defaults: ' + err.message);
+    // Fallback: fetchWilayahOptions sudah return defaults di catch, tapi untuk safety
+    fetchWilayahOptions(2026).then(_populateDropdowns).then(() => {
+      try { _applyScopeLock(); } catch (_) {}
+      try { applyUserWilayahFilter(); } catch (_) {}
+      renderWilayah();
+      _attachWilayahCascade();
+      renderChips();
+    });
+  });
 
   subscribeSpatial(function(snap){
     try {
@@ -1219,6 +1504,8 @@ function updateLegend(biz, kat) {
           }
           elm.value = v;
         }
+        // Cascade + scope login ikut nilai ANA (render ulang opsi anak, buang yang di luar scope)
+        try { renderWilayah(); } catch (_) {}
         syncKatVisibility(); updateHead(); renderChips();
         try { const st = collectState(); setBusiness(st.business); setFilters(st.filters); } catch (_) {}
         try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {}
@@ -1271,6 +1558,8 @@ function updateLegend(biz, kat) {
           }
           elm.value = v;
         }
+        // Cascade + scope login ikut nilai ANA (render ulang opsi anak, buang yang di luar scope)
+        try { renderWilayah(); } catch (_) {}
         syncKatVisibility(); updateHead(); renderChips();
         // Viewport dari server (link 4 ANNA→panel): tak ada dropdown DOM,
         // simpan ke _viewportExtra agar collectState teruskan ke adapter.
@@ -1295,7 +1584,17 @@ function updateLegend(biz, kat) {
   try { initSpatialChart({ token: _tok, log }); } catch (_) {}
   // laporan multi halaman siap cetak (Unduh = window.print, Tutup = POST visible:false)
   try { initSpatialReport({ token: _tok, log }); } catch (_) {}
+  // arsip chart/laporan per-user + drag panel dalam map (drawer 🗂 di toolbar)
+  try { initSpatialArchive({ token: _tok, log }); } catch (_) {}
   updateHead(); renderChips();
+  // ── Apply auto-filter wilayah based on user jabatan ──
+  // Kompat: nilai wilayah user sekarang dipasang renderWilayah() dari KODE
+  // (bukan jabatan). Fungsi lama jadi no-op agar pemanggil lama tak error
+  // (dulu manggil _filterCascade yang sudah diganti mesin render).
+  function applyUserWilayahFilter() {
+    try { renderWilayah(); } catch (_) {}
+  }
+
   // ── single kick: 1x load, watchdog yang retry bila render gagal ──
   let _autoKicked = false;
   function _kickAuto() {

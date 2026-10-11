@@ -31,11 +31,23 @@ IDLE_TIMEOUT = int(os.environ.get("ANA_TIMEOUT", "120"))
 RAW_LOG = os.environ.get("ANA_RAW_LOG", "").strip()
 TOOLSETS = os.environ.get("HERMES_TOOLSETS", "").strip()
 
-# One Hermes subprocess at a time. Hermes session state and profile resources are
-# shared, so foreground runs and /background missions must not overlap. The active
-# process handle lets the browser Escape key stop the backend work, not just the
-# frontend fetch.
+# Eksekusi paralel per-sesi-Hermes: tiap sid punya lock sendiri.
+# Pola resmi Hermes (group_sessions_per_user): Alice dan Bob tak berbagi
+# transcript — maka turn mereka pun tak boleh antre global. EXECUTION_LOCK
+# dipertahankan sebagai fallback bila sid tak diketahui.
 EXECUTION_LOCK = threading.RLock()
+_SES_LOCKS: dict = {}
+_SES_LOCKS_GUARD = threading.Lock()
+
+
+def _ses_lock(sid):
+    key = str(sid or "").strip() or "default"
+    with _SES_LOCKS_GUARD:
+        lk = _SES_LOCKS.get(key)
+        if lk is None:
+            lk = threading.RLock()
+            _SES_LOCKS[key] = lk
+        return lk
 _ACTIVE_PROC = None
 _ACTIVE_LOCK = threading.Lock()
 
@@ -221,14 +233,32 @@ def _run_async(coro):
     return future.result(timeout=30)
 
 
-def _run_async_stream(coro_func, *args, **kwargs):
-    """Run an async generator in the gateway's event loop, yielding results."""
+def _run_async_stream(coro_func, *args, cancel_sid=None, stall_sec=None, **kwargs):
+    """Run an async generator in the gateway's event loop, yielding results.
+
+    cancel_sid (opsional): cek flag cancel milik sesi itu. Tanpa ini, fast-path
+    barge-in membaca _CANCEL_EVENT global — cancel user A memutus stream
+    user B yang sedang jalan paralel.
+
+    stall_sec (opsional): batas detik tanpa event SAMA SEKALI sebelum stream
+    dinyatakan macet (TimeoutError eksplisit). Tanpa ini submit ke sesi yang
+    ditolak gateway diam-diam (session-scoped RPC rejected tanpa respons)
+    menunggu selamanya: thread nyangkut pegang RUN_STATE, semua chat
+    berikutnya 409 "already processing" — persis keluhan user 10:33/10:47
+    (run 10:16 nyangkut, chat tak pernah sampai ANNA).
+    """
     if _GATEWAY_LOOP is None:
         raise RuntimeError("Gateway event loop not running")
     import queue as _queue
+    import time as _time
     q: _queue.Queue = _queue.Queue()
     done = threading.Event()
     error: list[Exception | None] = [None]
+    try:
+        stall = float(stall_sec) if stall_sec else 0.0
+    except (TypeError, ValueError):
+        stall = 0.0
+    last_ev = _time.monotonic()
 
     async def _runner():
         try:
@@ -242,22 +272,63 @@ def _run_async_stream(coro_func, *args, **kwargs):
             done.set()
 
     future = asyncio.run_coroutine_threadsafe(_runner(), _GATEWAY_LOOP)
+    # Status submit gateway ("streaming" vs "queued"): turn antre resmi
+    # BUKAN macet — stall watchdog tak boleh membunuhnya. Tanpa flag ini
+    # turn antre (normal di gateway) dibunuh dashboard setelah 120s hening.
+    _submit_queued = [False]
+    def _cancel_flag():
+        try:
+            if cancel_sid:
+                if _ses_cancelled(cancel_sid, int(_TURN_BY_SES.get(str(cancel_sid).strip() or "default", 0))):
+                    return True
+                # Global fallback HANYA untuk jalur legacy tanpa sid.
+                # Tanpa gate ini, cancel user A memutus stream user B yang
+                # sedang jalan paralel (kasus uji paralel 15:18).
+                if str(cancel_sid).strip() in ("", "default"):
+                    return _CANCEL_EVENT.is_set()
+                return False
+        except Exception:
+            pass
+        return _CANCEL_EVENT.is_set()
     try:
         while True:
             try:
                 event = q.get(timeout=0.1)
+                last_ev = _time.monotonic()
+                try:
+                    if isinstance(event, dict) and event.get("type") == "submit" and str(event.get("status") or "") == "queued":
+                        _submit_queued[0] = True
+                except Exception:
+                    pass
                 yield event
             except _queue.Empty:
                 if done.is_set() and q.empty():
                     break
                 # Barge-in fast path: if cancel flagged, nudge runner and keep draining
-                if _CANCEL_EVENT.is_set():
+                if _cancel_flag():
                     try:
                         future.cancel()
                     except Exception:
                         pass
                     if done.is_set() and q.empty():
                         break
+                # Stall watchdog: gateway menolak submit diam-diam (sesi
+                # detached) = tak ada event sama sekali. Tanpa batas ini
+                # thread menunggu selamanya dan pegang RUN_STATE.
+                # PENGECUALIAN: turn antre resmi (status "queued") memang
+                # hening sampai turn depan selesai — jangan bunuh. Batas
+                # antre ikut ANA_RUN_STALL_SEC x3 (default 360s).
+                _stall_lim = stall * 3 if _submit_queued[0] else stall
+                if _stall_lim and (not done.is_set()) and (_time.monotonic() - last_ev) > _stall_lim:
+                    try:
+                        future.cancel()
+                    except Exception:
+                        pass
+                    error[0] = TimeoutError(
+                        f"gateway stall: no event for {stall:.0f}s "
+                        f"(session detached/ditolak gateway?)")
+                    done.set()
+                    break
                 continue
     finally:
         if not done.is_set():
@@ -309,6 +380,16 @@ def _map_gateway_event(event: dict, started: float, first: bool) -> list:
         sid = event.get("session_id")
         if valid_session(sid):
             events.append(dict(t="session", session_id=sid))
+
+    elif et == "submit":
+        # Status submit dari gateway: "streaming" (turn jalan) vs "queued"
+        # (turn antre, jalan setelah turn aktif selesai). Tanpa event ini
+        # turn antre terlihat mati 120s lalu timeout di sisi dashboard.
+        st = str(event.get("status") or "streaming")
+        if st == "queued":
+            events.append(dict(t="note", message="Menunggu giliran (sesi sibuk) — jawaban menyusul otomatis."))
+        else:
+            events.append(dict(t="note", message="Turn diterima gateway."))
     
     elif et in ("message.delta", "delta", "text"):
         if first:
@@ -396,13 +477,19 @@ def _map_gateway_event(event: dict, started: float, first: bool) -> list:
     return events
 
 
-def _run_hermes_locked(message, session_id=None, system=None):
+def _run_hermes_locked(message, session_id=None, system=None, on_session=None):
     """Internal locked run - yields events compatible with runtime.py.
 
     P0 §19-20: turn_id/response_id + generation guard agar token/suara
     dari generasi yang sudah di-cancel tidak bocor ke turn baru.
+
+    session_id WAJIB eksplisit (sid live milik user peminta, disiapkan
+    server via _GW_LIVE). Jatuh ke global _CURRENT_SESSION_ID hanya bila
+    None (kompat jalur lama/token-only). Sesi baru/resume DILAPORKAN via
+    on_session(sid) — pemanggil (server, yang tahu user_key) yang
+    menyimpan ke slot user. Tanpa callback ini dua user paralel saling
+    timpa _CURRENT_SESSION_ID global (transcript campur).
     """
-    global _CURRENT_SESSION_ID
     started = time.monotonic()
 
     # Get new turn ID for this generation
@@ -424,9 +511,30 @@ def _run_hermes_locked(message, session_id=None, system=None):
         response_id=response_id
     )
     
-    # Use provided session_id or current session
+    # Use provided session_id or current session (kompat: global hanya bila
+    # pemanggil tak kirim sid eksplisit — jalur token-only/lama).
     current_session_id = session_id or _CURRENT_SESSION_ID
-    
+
+    def _report_sid(sid):
+        try:
+            if sid and valid_session(sid):
+                if callable(on_session):
+                    on_session(str(sid))
+                else:
+                    global _CURRENT_SESSION_ID
+                    _CURRENT_SESSION_ID = str(sid)
+        except Exception:
+            pass
+
+    # Turn guard per-sesi: nomor turn + flag cancel milik sid ini, supaya
+    # barge-in/cancel user A tak membatalkan turn user B. Kompat: guard
+    # global (_new_turn_id/_check_cancelled) tetap jalan di bawah.
+    _ses_turn_id = None
+    try:
+        _ses_turn_id, _ = _ses_turn_next(current_session_id or "default")
+    except Exception:
+        pass
+
     # If no valid session, create one
     if not current_session_id or not valid_session(current_session_id):
         result = _run_async(_get_gateway().create_session(title="ANA Dashboard Session"))
@@ -434,7 +542,51 @@ def _run_hermes_locked(message, session_id=None, system=None):
         if not current_session_id:
             yield dict(t="error", message="Failed to create session")
             return
-        _CURRENT_SESSION_ID = current_session_id
+        _report_sid(current_session_id)
+        try:
+            _ses_turn_id, _ = _ses_turn_next(current_session_id)
+        except Exception:
+            pass
+    else:
+        # Sesi detached di gateway = submit ditolak DENGAN error 4001
+        # (submit_prompt_stream) ATAU diam-diam (session-scoped RPC
+        # rejected, 120s stall). Verifikasi live SEBELUM submit via
+        # active_list; bila tak ada → resume stored (konteks kembali),
+        # bila stored pun tak ada → create baru. Tanpa ini run ke sesi
+        # basi 120s lalu error, dan RUN_STATE ditahan selama itu.
+        try:
+            _gw = _get_gateway()
+            _live_ids = set()
+            try:
+                _al = _run_async(_gw.active_sessions())
+                _items = (_al or {}).get("sessions") or []
+                for _s in _items:
+                    if isinstance(_s, dict) and _s.get("id"):
+                        _live_ids.add(str(_s["id"]))
+            except Exception:
+                _live_ids = set()
+            if _live_ids and str(current_session_id) not in _live_ids:
+                _resumed = None
+                try:
+                    _r = _run_async(_gw.resume_session(str(current_session_id)))
+                    _resumed = (_r or {}).get("session_id") or None
+                except Exception:
+                    _resumed = None
+                if _resumed and valid_session(_resumed):
+                    current_session_id = _resumed
+                    _report_sid(current_session_id)
+                else:
+                    _nr = _run_async(_gw.create_session(title="ANA Dashboard Session"))
+                    _nid = (_nr or {}).get("session_id")
+                    if _nid and valid_session(_nid):
+                        current_session_id = _nid
+                        _report_sid(current_session_id)
+                try:
+                    _ses_turn_id, _ = _ses_turn_next(current_session_id)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     # Submit prompt with system prompt if provided
     prompt_text = message
@@ -450,16 +602,46 @@ def _run_hermes_locked(message, session_id=None, system=None):
     try:
         # Use submit_prompt_stream for streaming events
         client = _get_gateway()
-        
+
         # Use the async generator for streaming
+        # queued=True = turn antre resmi di gateway ("run after"), BUKAN
+        # barge-in interrupt. Tanpa ini submit kedua ke sesi sibuk MEMBUNUH
+        # turn pertama (interrupt+redirect), dan tak ada yang selesai.
         async def stream_run():
-            async for event in client.submit_prompt_stream(current_session_id, prompt_text, interrupted=True):
+            async for event in client.submit_prompt_stream(current_session_id, prompt_text, interrupted=True, queued=True):
                 yield event
         
         # Collect events from the async generator
-        for event in _run_async_stream(stream_run):
-            # Check if this turn was cancelled
-            if _check_cancelled(turn_id):
+        # Stall watchdog 120s: submit ke sesi detached ditolak gateway
+        # diam-diam (session-scoped RPC rejected tanpa respons) — tanpa
+        # batas, thread menunggu selamanya, pegang RUN_STATE, dan semua
+        # chat berikutnya 409. TimeoutError di bawah ditangkap except umum
+        # menjadi event error eksplisit ke klien (bukan gantung).
+        _stall_sec = 120.0
+        try:
+            _stall_sec = float(os.environ.get("ANA_RUN_STALL_SEC", "120") or 120.0)
+        except (TypeError, ValueError):
+            _stall_sec = 120.0
+        for event in _run_async_stream(stream_run, cancel_sid=current_session_id, stall_sec=_stall_sec):
+            # Check if this turn was cancelled — per-sesi dulu, global fallback
+            # HANYA untuk jalur legacy tanpa sid. Tanpa gate ini user B mulai
+            # turn (bump _CURRENT_TURN_ID global via _new_turn_id) MEMBUNUH
+            # stream user A yang sedang jalan: _check_cancelled(turnA) True,
+            # generator return diam-diam → klien terima 200 terpotong tanpa
+            # complete/error (kasus uji paralel 15:18: u1 386 bytes buntung).
+            _cancelled = False
+            try:
+                if _ses_turn_id is not None:
+                    _cancelled = _ses_cancelled(current_session_id, _ses_turn_id)
+            except Exception:
+                pass
+            if not _cancelled:
+                try:
+                    if not current_session_id or current_session_id == "default":
+                        _cancelled = _check_cancelled(turn_id)
+                except Exception:
+                    pass
+            if _cancelled:
                 return
             
             mapped = _map_gateway_event(event, started, first)
@@ -483,40 +665,93 @@ def _run_hermes_locked(message, session_id=None, system=None):
             yield dict(t="error", message=str(e)[:300], turn_id=turn_id)
         return
     finally:
-        # Persist session id from this turn so next run reuses it instead of creating new
+        # Persist session id dari turn ini via callback (slot user pemanggil),
+        # bukan global — dua user paralel tak saling timpa.
         if emitted_session and valid_session(emitted_session):
-            _CURRENT_SESSION_ID = emitted_session
+            _report_sid(emitted_session)
 
 
-def run_hermes(message, session_id=None, system=None):
-    """Run Hermes via Gateway, yielding events compatible with runtime.py."""
-    with EXECUTION_LOCK:
-        yield from _run_hermes_locked(message, session_id, system)
+def run_hermes(message, session_id=None, system=None, on_session=None):
+    """Run Hermes via Gateway, yielding events compatible with runtime.py.
+
+    Lock per-sesi-Hermes: dua user beda sesi jalan paralel; satu sesi yang
+    sama tetap antre (RLock) agar turn tak tumpuk dalam satu transcript.
+    on_session(sid) diteruskan ke _run_hermes_locked (slot user, bukan global).
+    """
+    sid_key = (str(session_id).strip() if session_id else "")
+    if sid_key:
+        with _ses_lock(sid_key):
+            yield from _run_hermes_locked(message, session_id, system, on_session=on_session)
+    else:
+        with EXECUTION_LOCK:
+            yield from _run_hermes_locked(message, session_id, system, on_session=on_session)
 
 
 def run_mock(message, session_id=None, system=None):
     yield dict(t="error", message="Hermes Gateway not reachable. Check ANA_GATEWAY_URL and ANA_GATEWAY_TOKEN.")
 
 
-def run(message, session_id=None, system=None):
+def run(message, session_id=None, system=None, on_session=None):
     """Main entry point - matches runtime.py interface."""
     if runtime_kind() != "hermes":
         yield from run_mock(message, session_id, system)
         return
     try:
-        yield from run_hermes(message, session_id, system)
+        yield from run_hermes(message, session_id, system, on_session=on_session)
     except Exception as e:
         yield dict(t="error", message=f"could not start Hermes via Gateway: {e}")
 
 
-# Current turn/generation tracking for cancellation
+# Current turn/generation tracking for cancellation — PER SESI HERMES.
+# Global (_CURRENT_TURN_ID/_CANCEL_EVENT) dipertahankan sebagai fallback
+# kompat, tapi turn baru dicatat per-sid di _TURN_BY_SES + _CANCEL_BY_SES.
+# Tanpa ini: cancel/barge-in user A membatalkan turn user B yang sedang jalan
+# (sesi terisolasi tapi generation guard masih global).
 _CURRENT_TURN_ID = 0
 _CURRENT_RESPONSE_ID = None
 _CURRENT_TTS_ID = None
 _CANCEL_EVENT = threading.Event()
+_TURN_BY_SES: dict = {}
+_CANCEL_BY_SES: dict = {}
+_TURN_GUARD = threading.Lock()
 
 
-def cancel_active():
+def _ses_turn_next(sid):
+    key = str(sid or "").strip() or "default"
+    with _TURN_GUARD:
+        n = int(_TURN_BY_SES.get(key, 0)) + 1
+        _TURN_BY_SES[key] = n
+        ev = _CANCEL_BY_SES.get(key)
+        if ev is None:
+            ev = threading.Event()
+            _CANCEL_BY_SES[key] = ev
+        ev.clear()
+        return n, ev
+
+
+def _ses_cancel(sid):
+    key = str(sid or "").strip() or "default"
+    with _TURN_GUARD:
+        n = int(_TURN_BY_SES.get(key, 0)) + 1
+        _TURN_BY_SES[key] = n
+        ev = _CANCEL_BY_SES.get(key)
+        if ev is None:
+            ev = threading.Event()
+            _CANCEL_BY_SES[key] = ev
+        ev.set()
+        return n
+
+
+def _ses_cancelled(sid, turn_id):
+    key = str(sid or "").strip() or "default"
+    with _TURN_GUARD:
+        cur = int(_TURN_BY_SES.get(key, 0))
+        ev = _CANCEL_BY_SES.get(key)
+        flag = bool(ev and ev.is_set())
+    return turn_id != cur or flag
+
+
+def cancel_active(session_id=None):
     """Cancel the currently running request (best effort) — P0 barge-in.
 
     Sesuai improve_STT_TTS_VAD.md §19-20: setiap turn punya turn_id/response_id,
@@ -524,21 +759,35 @@ def cancel_active():
     Implementasi: bump _CURRENT_TURN_ID + set _CANCEL_EVENT agar token basi
     di-drop via _check_cancelled, lalu coba interupsi gateway secara nyata
     (session.interrupt) + deny approval bila ada tool yang nunggu approval.
+
+    session_id (opsional): target interupsi eksplisit. Bila diisi, gateway
+    diinterupsi pada sesi itu BUKAN _CURRENT_SESSION_ID — tanpa ini, user A
+    menekan cancel bisa menginterupsi turn user B yang sedang jalan
+    (sesi ANNA per-user, tapi target cancel masih global).
     """
     global _CURRENT_TURN_ID, _CURRENT_RESPONSE_ID, _CURRENT_TTS_ID
+    _target_sid = (str(session_id).strip() if session_id else "") or _CURRENT_SESSION_ID
+    # Guard lokal: global (kompat) + per-sesi (isolasi). Cancel tanpa target
+    # = global seperti dulu; cancel dengan target = hanya sesi itu.
     _CANCEL_EVENT.set()
     _CURRENT_TURN_ID += 1
+    if _target_sid:
+        try:
+            _ses_cancel(_target_sid)
+        except Exception:
+            pass
     _CURRENT_RESPONSE_ID = None
     _CURRENT_TTS_ID = None
     # Real interrupt: session.interrupt di gateway (bukan cuma approval deny).
     # Dua jalur dipanggil bersamaan — mana yang didukung gateway akan membatalkan
     # generasi yang sedang berpikir/tool-execution; yang tidak didukung diabaikan.
+    # Target = sesi peminta bila diberikan, supaya cancel user A tak memutus turn user B.
     try:
-        if _GATEWAY_CLIENT and _GATEWAY_LOOP and _CURRENT_SESSION_ID:
+        if _GATEWAY_CLIENT and _GATEWAY_LOOP and _target_sid:
             # session.interrupt — hentikan prompt yang sedang jalan
             try:
                 asyncio.run_coroutine_threadsafe(
-                    _GATEWAY_CLIENT.interrupt_session(_CURRENT_SESSION_ID),
+                    _GATEWAY_CLIENT.interrupt_session(_target_sid),
                     _GATEWAY_LOOP
                 )
             except Exception:
@@ -546,7 +795,7 @@ def cancel_active():
             # approval.respond deny — bila Hermes sedang nunggu approval tool
             try:
                 asyncio.run_coroutine_threadsafe(
-                    _GATEWAY_CLIENT.respond_approval(_CURRENT_SESSION_ID, "deny", all=True),
+                    _GATEWAY_CLIENT.respond_approval(_target_sid, "deny", all=True),
                     _GATEWAY_LOOP
                 )
             except Exception:

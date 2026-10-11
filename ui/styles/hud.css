@@ -575,16 +575,33 @@ html, body {
   position: absolute;
   bottom: 8px; left: 50%;
   transform: translateX(-50%);
-  width: min(400px, calc(100% - 20px));
-  min-height: 41px;
+  width: min(560px, calc(100% - 20px));
+  min-height: 76px;
   z-index: 20;
-  display: flex; gap: 8px;
-  align-items: stretch;
+  display: flex;
   /* Container query, bukan JS: tinggi panel dikontrol LayoutManager lewat drag
      handle, dan resize observer / rAF tidak pernah jalan di tab hidden (sudah
      dibuktikan di panel options). Container query murni CSS, selalu sinkron. */
   container-type: size;
   container-name: chatbar;
+}
+
+/* ── Chatbox modern: kartu 2-baris (teks atas, toolbar bawah) ──
+   Toolbar: template kiri, mode+mic+kirim kanan bawah. ID tombol tetap
+   (tplBtn/modeBtn/micBtn/sendBtn) jadi JS tak berubah. */
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 26, 56, 0.8);
+  border: 1px solid var(--neon-dim);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.chat-main:focus-within {
+  border-color: var(--neon);
+  box-shadow: 0 0 8px var(--neon-dim);
 }
 
 #chatBar textarea {
@@ -604,18 +621,105 @@ html, body {
   resize: none;
   white-space: pre-wrap;
   word-break: break-word;
-  background: rgba(0, 26, 56, 0.8);
-  border: 1px solid var(--neon-dim);
-  border-radius: 3px;
-  /* padding vertikal 8px, bukan 10px: 22.4px (line-height) + 16px + 2px border
-     = 40.4px, muat di panel default 41px sebagai tepat 1 baris. Dengan 10px
-     total 44.4px > 41px, isi jadi terpotong walau overflow disembunyikan. */
-  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  /* padding atas lega (kartu), bawah rapat (rapat ke toolbar) */
+  padding: 10px 14px 4px;
   color: var(--text-body);
   font-family: var(--font-mono);
   font-size: 16px;
   line-height: 1.4;
   outline: none;
+}
+
+/* Toolbar dalam kartu: template kiri, mode+mic+kirim kanan. */
+.chat-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 8px;
+}
+.chat-tools-left, .chat-tools-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Tombol ikon (template, mic): pil kecil transparan. */
+.chat-ico {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: rgba(0, 220, 255, 0.06);
+  border: 1px solid var(--neon-dim);
+  border-radius: 9px;
+  color: var(--text-main);
+  font-size: 17px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chat-ico:hover {
+  color: var(--neon);
+  border-color: var(--neon);
+  background: rgba(0, 220, 255, 0.14);
+}
+.chat-ico.on {
+  color: #ff5d5d;
+  border-color: rgba(255, 93, 93, 0.5);
+  background: rgba(255, 93, 93, 0.12);
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+/* Tombol mode: pil teks kecil, jelas tanpa makan tempat. */
+.chat-mode {
+  flex-shrink: 0;
+  background: rgba(0, 220, 255, 0.08);
+  border: 1px solid var(--neon-dim);
+  border-radius: 8px;
+  padding: 5px 10px;
+  color: var(--neon);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chat-mode:hover {
+  background: rgba(0, 220, 255, 0.2);
+  box-shadow: 0 0 8px var(--neon-dim);
+}
+
+/* Tombol kirim: lingkaran neon kanan bawah, aksi utama. */
+.chat-send {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: rgba(0, 220, 255, 0.15);
+  border: 1px solid var(--neon);
+  border-radius: 50%;
+  color: var(--neon);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chat-send:hover {
+  background: rgba(0, 220, 255, 0.3);
+  box-shadow: 0 0 10px var(--neon-dim);
+  transform: translateY(-1px);
 }
 
 /* Mode 1 baris: panel di-resize ke tinggi minimum (~52px = 1 baris + padding).
@@ -631,11 +735,13 @@ html, body {
 }
 
 #chatBar textarea:focus {
-  border-color: var(--neon);
-  box-shadow: 0 0 8px var(--neon-dim);
+  outline: none;
 }
 
-#chatBar button {
+/* Aturan generik lama disekop ke tombol template saja: tombol chat baru
+   (.chat-ico/.chat-mode/.chat-send) punya gaya sendiri dan spesifisitas
+   class kalah lawan #id — tanpa :not() gaya baru tertimpa yang lama. */
+#chatBar button:not(.chat-ico):not(.chat-mode):not(.chat-send) {
   flex-shrink: 0;
   align-self: flex-end;
   background: rgba(0, 220, 255, 0.1);
@@ -650,7 +756,7 @@ html, body {
   transition: all 0.2s;
 }
 
-#chatBar button:hover {
+#chatBar button:not(.chat-ico):not(.chat-mode):not(.chat-send):hover {
   background: rgba(0, 220, 255, 0.2);
   box-shadow: 0 0 8px var(--neon-dim);
 }
@@ -673,12 +779,128 @@ html, body {
   z-index: 30;
 }
 #tplPanel[hidden] { display: none; }
+/* Bar kelola template per-user: ikon + form inline, compact modern.
+   Pola: bar ikon kecil sticky; grup = kartu; rename grup inline
+   (.tpl-ginput, sama seperti .tpl-input); hapus grup kunci bila isi. */
+.tpl-bar {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 6px;
+  position: sticky;
+  top: 0;
+  background: rgba(2, 15, 42, 0.96);
+  z-index: 1;
+}
+.tpl-bar-btn {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-body);
+  background: rgba(0, 220, 255, 0.06);
+  border: 1px solid var(--neon-dim);
+  border-radius: 6px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.tpl-bar-btn:hover {
+  color: var(--neon);
+  border-color: var(--neon-dim);
+  background: rgba(0, 220, 255, 0.08);
+}
+.tpl-bar-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+/* Hapus = merah redup: beda dari aksi netral, tetap compact. */
+.tpl-del {
+  color: #FDA4AF;
+  border-color: rgba(251, 113, 133, 0.35);
+}
+.tpl-del:hover:not(:disabled) {
+  color: #fff;
+  border-color: #FB7185;
+  background: rgba(251, 113, 133, 0.2);
+}
+.tpl-bar-btn.mini {
+  padding: 3px 7px;
+  font-size: 13px;
+}
+.tpl-bar-btn.wide {
+  width: 100%;
+  margin: 2px 0 4px;
+  padding: 6px 9px;
+  border-style: dashed;
+  border-color: var(--neon-dim);
+  color: var(--text-body);
+  font-size: 14px;
+}
+.tpl-form {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 6px;
+}
+.tpl-gwrap {
+  background: transparent;
+  border: none;
+  border-top: 1px solid rgba(0, 220, 255, 0.14);
+  border-radius: 0;
+  padding: 4px 2px 6px;
+  margin-bottom: 4px;
+}
+.tpl-gwrap:first-of-type { border-top: none; }
 .tpl-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tpl-group span { flex: 1; }
+.tpl-ginput {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neon);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 6px;
+  outline: none;
+}
+.tpl-ginput:hover { border-color: var(--neon-dim); }
+.tpl-ginput:focus {
+  background: rgba(5, 27, 58, 0.8);
+  border-color: var(--neon);
+}
+.tpl-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+.tpl-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-body);
+  background: rgba(5, 27, 58, 0.6);
+  border: 1px solid var(--neon-dim);
+  border-radius: 4px;
+  padding: 5px 7px;
+  outline: none;
+}
+.tpl-input:focus {
+  border-color: var(--neon);
+}
+.tpl-group > span {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.14em;
   color: var(--neon);
-  padding: 8px 4px 4px;
+  padding: 4px 2px 3px;
 }
 .tpl-item {
   display: block;
@@ -686,12 +908,12 @@ html, body {
   text-align: left;
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--text-body);
   background: rgba(5, 27, 58, 0.6);
   border: 1px solid transparent;
   border-radius: 4px;
-  padding: 6px 8px;
+  padding: 5px 7px;
   margin: 2px 0;
   cursor: pointer;
   white-space: normal;

@@ -1,0 +1,17 @@
+# ANA Hermes Dashboard — runtime deps (per-project .venv)
+# dipakai oleh: server.py, auth_local.py, voice.py, gateway_client.py
+# install: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# atau: ./install.sh
+#
+# versi dikunci dari hermes python 3.14.7 yang terbukti jalan (2026-10-09)
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+PyMySQL==1.2.3
+websockets==15.0.1
+edge-tts==7.2.7
+pandas==3.0.6
+mapbox-vector-tile==2.2.0
+pmtiles==3.8.1
+# transitif tapi eksplisit biar reproducible (edge-tts/aiohttp stack)
+certifi==2026.5.20
+aiohttp==3.14.3

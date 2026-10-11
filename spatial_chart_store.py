@@ -23,14 +23,31 @@ State shape:
   }
 
 Thread-safe via Lock. Tidak persist ke disk — session memory.
+
+Scope per-user (robust): _STATE adalah dict owner_key -> state (owner =
+user_id login, "" = token-only). Tanpa ini chart/report global: ANNA yang
+melayani user A push chart wilayah A, user B yang poll belakangan ikut
+melihatnya — bocor lintas wilayah. GET memfilter milik peminta; POST beri
+scope_stamp milik penulis.
 """
 import threading, time
 
 _LOCK = threading.Lock()
-_STATE = {
-    "visible": False, "layout": "single", "title": "", "kpis": [], "charts": [],
-    "chart": None, "narration": "", "evidence": [], "meta": {}, "updated": 0.0,
-}
+_BLANK = {"visible": False, "layout": "single", "title": "", "kpis": [],
+          "charts": [], "chart": None, "narration": "", "evidence": [],
+          "meta": {}, "updated": 0.0, "scope": {}}
+_STATE = {"": dict(_BLANK)}
+
+
+def _for(owner):
+    key = str(owner or "")
+    st = _STATE.get(key)
+    if st is None:
+        st = dict(_BLANK)
+        st["meta"] = {}
+        st["scope"] = {}
+        _STATE[key] = st
+    return st
 
 # type Chart.js native + mapping intent (docs/refaktor/anna_chart.md §12)
 _ALIAS = {
@@ -141,15 +158,31 @@ def _norm_kpi(k):
     }
 
 
-def _hide(meta=None):
+def _hide(meta=None, owner="", scope=None):
     with _LOCK:
-        _STATE.update(visible=False, layout="single", title="", kpis=[], charts=[],
-                      chart=None, narration="", evidence=[],
-                      meta=dict(meta or {}), updated=time.time())
+        _for(owner).update(visible=False, layout="single", title="", kpis=[], charts=[],
+                           chart=None, narration="", evidence=[],
+                           meta=dict(meta or {}), updated=time.time(),
+                           scope=dict(scope or {}))
     return True, None
 
 
-def set_chart(payload: dict):
+def _scope_public(scope):
+    try:
+        out = {}
+        for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+            v = (scope or {}).get(k)
+            if v:
+                out[k] = str(v)
+        tl = (scope or {}).get("kode_tpg_list") or []
+        if tl:
+            out["n_tpg"] = len(tl)
+        return out
+    except Exception:
+        return {}
+
+
+def set_chart(payload: dict, owner="", scope=None):
     """payload = {visible, layout, title, kpis, charts|chart, narration, evidence, meta}."""
     if not isinstance(payload, dict):
         return False, "payload harus object"
@@ -163,11 +196,11 @@ def set_chart(payload: dict):
     # charts_in=None (key tak ada) = "tak ada opinion" -> abaikan, jangan hide.
     # charts_in=None tapi key 'chart'/'charts' HADIR = eksplisit kosong = hide.
     if vis is False:
-        return _hide(meta)
+        return _hide(meta, owner, scope)
     explicit = ("charts" in payload) or ("chart" in payload)
     if charts_in is None:
         if explicit:
-            return _hide(meta)
+            return _hide(meta, owner, scope)
         has_content = bool(payload.get("kpis") or payload.get("title") or payload.get("narration") or payload.get("evidence"))
         if not has_content:
             return True, None                      # tak ada opinion sama sekali
@@ -200,8 +233,9 @@ def set_chart(payload: dict):
             })
 
     layout = "grid" if (len(norm) > 1 or kpis) else "single"
+    st = _for(owner)
     with _LOCK:
-        _STATE.update(
+        st.update(
             visible=True if vis is None else bool(vis),
             layout=layout,
             title=str(payload.get("title") or "")[:120],
@@ -212,20 +246,23 @@ def set_chart(payload: dict):
             evidence=evidence,
             meta=dict(meta or {}),
             updated=time.time(),
+            scope=dict(scope or {}),
         )
     return True, None
 
 
-def get_state():
+def get_state(owner=""):
     with _LOCK:
+        st = _for(owner)
         return {
-            "visible": bool(_STATE["visible"]), "layout": _STATE["layout"],
-            "title": _STATE["title"], "kpis": list(_STATE["kpis"]),
-            "charts": list(_STATE["charts"]), "chart": _STATE["chart"],
-            "narration": _STATE["narration"], "evidence": list(_STATE["evidence"]),
-            "meta": dict(_STATE["meta"]), "updated": float(_STATE["updated"]),
+            "visible": bool(st["visible"]), "layout": st["layout"],
+            "title": st["title"], "kpis": list(st["kpis"]),
+            "charts": list(st["charts"]), "chart": st["chart"],
+            "narration": st["narration"], "evidence": list(st["evidence"]),
+            "meta": dict(st["meta"]), "updated": float(st["updated"]),
+            "scope": _scope_public(st.get("scope")),
         }
 
 
-def clear():
-    return set_chart({"visible": False, "chart": None})
+def clear(owner=""):
+    return set_chart({"visible": False, "chart": None}, owner=owner)

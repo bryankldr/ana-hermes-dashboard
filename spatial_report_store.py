@@ -32,14 +32,27 @@ Block types (hanya ini — cukup untuk dokumen):
 
 Chart TIDAK pakai Chart.js/<canvas> — canvas tak tercetak rapi di PDF. Chart
 dirender sebagai SVG inline: vektor, tajam di layar maupun di kertas, nol dependency.
+
+Scope per-user (robust, sama seperti chart store): _STATE adalah dict
+owner_key -> state. GET milik peminta, POST beri scope_stamp penulis.
 """
 import threading, time
 
 _LOCK = threading.Lock()
-_STATE = {
-    "visible": False, "title": "", "subtitle": "", "pages": [],
-    "evidence": [], "meta": {}, "updated": 0.0,
-}
+_BLANK = {"visible": False, "title": "", "subtitle": "", "pages": [],
+          "evidence": [], "meta": {}, "updated": 0.0, "scope": {}}
+_STATE = {"": dict(_BLANK)}
+
+
+def _for(owner):
+    key = str(owner or "")
+    st = _STATE.get(key)
+    if st is None:
+        st = dict(_BLANK)
+        st["meta"] = {}
+        st["scope"] = {}
+        _STATE[key] = st
+    return st
 
 MAX_PAGES = 30
 MAX_BLOCKS = 20
@@ -167,24 +180,40 @@ def _norm_page(p):
             "blocks": blocks}
 
 
-def _hide(meta=None):
+def _hide(meta=None, owner="", scope=None):
     with _LOCK:
-        _STATE.update(visible=False, title="", subtitle="", pages=[],
-                      evidence=[], meta=dict(meta or {}), updated=time.time())
+        _for(owner).update(visible=False, title="", subtitle="", pages=[],
+                           evidence=[], meta=dict(meta or {}), updated=time.time(),
+                           scope=dict(scope or {}))
     return True, None
 
 
-def set_report(payload: dict):
+def _scope_public(scope):
+    try:
+        out = {}
+        for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+            v = (scope or {}).get(k)
+            if v:
+                out[k] = str(v)
+        tl = (scope or {}).get("kode_tpg_list") or []
+        if tl:
+            out["n_tpg"] = len(tl)
+        return out
+    except Exception:
+        return {}
+
+
+def set_report(payload: dict, owner="", scope=None):
     """payload = {visible, title, subtitle, pages, evidence, meta}."""
     if not isinstance(payload, dict):
         return False, "payload harus object"
     meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
     if payload.get("visible") is False:
-        return _hide(meta)
+        return _hide(meta, owner, scope)
     pages_in = payload.get("pages")
     if pages_in is None:
         if "pages" in payload:          # eksplisit kosong = hide
-            return _hide(meta)
+            return _hide(meta, owner, scope)
         return True, None                # tak ada opinion = biarkan
     if isinstance(pages_in, dict):
         pages_in = [pages_in]
@@ -201,23 +230,26 @@ def set_report(payload: dict):
             evidence.append({"statement": _s(e.get("statement"), 240),
                              "source": _s(e.get("source"), 120),
                              "value": _s(e.get("value"), 40)})
+    st = _for(owner)
     with _LOCK:
-        _STATE.update(visible=True if payload.get("visible") is None else bool(payload["visible"]),
-                      title=_s(payload.get("title"), 160),
-                      subtitle=_s(payload.get("subtitle"), 200),
-                      pages=pages, evidence=evidence,
-                      meta=dict(meta or {}), updated=time.time())
+        st.update(visible=True if payload.get("visible") is None else bool(payload["visible"]),
+                  title=_s(payload.get("title"), 160),
+                  subtitle=_s(payload.get("subtitle"), 200),
+                  pages=pages, evidence=evidence,
+                  meta=dict(meta or {}), updated=time.time(),
+                  scope=dict(scope or {}))
     return True, None
 
 
-def get_state():
+def get_state(owner=""):
     with _LOCK:
-        return {"visible": bool(_STATE["visible"]), "title": _STATE["title"],
-                "subtitle": _STATE["subtitle"], "pages": [dict(p, blocks=list(p["blocks"]))
-                                                         for p in _STATE["pages"]],
-                "evidence": list(_STATE["evidence"]), "meta": dict(_STATE["meta"]),
-                "updated": float(_STATE["updated"])}
+        st = _for(owner)
+        return {"visible": bool(st["visible"]), "title": st["title"],
+                "subtitle": st["subtitle"], "pages": [dict(p, blocks=list(p["blocks"]))
+                                                     for p in st["pages"]],
+                "evidence": list(st["evidence"]), "meta": dict(st["meta"]),
+                "updated": float(st["updated"]), "scope": _scope_public(st.get("scope"))}
 
 
-def clear():
-    return set_report({"visible": False, "pages": []})
+def clear(owner=""):
+    return set_report({"visible": False, "pages": []}, owner=owner)

@@ -19,6 +19,13 @@ The system is designed to eventually contain:
 DIVRE / REGIONAL
 ├── Jawa Timur
 │   ├── KPH
+|   |   ├── BKPH
+|   |   |    ├── RPH
+|   |   |        ├── TPG
+        ├── BKPH
+|   |       ├── RPH
+|   |           ├── TPG
+|   |
 │   ├── KPH
 │   └── ...
 │

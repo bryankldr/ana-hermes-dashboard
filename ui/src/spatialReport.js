@@ -187,7 +187,7 @@ function ensureDom() {
     wrap = document.createElement("div");
     wrap.id = "spatialReportWrap";
     wrap.className = "spatial-report flying hidden";
-    wrap.innerHTML = '<div class="rpt-head"><span class="rpt-head-title" id="rptTitle">LAPORAN</span><span class="rpt-head-meta" id="rptMeta"></span><button class="rpt-btn" id="rptPrint" title="Unduh / cetak (PDF)">Unduh</button><button class="rpt-btn ghost" id="rptClose" title="Tutup (ANA bisa tampilkan lagi)">Tutup</button></div><div class="rpt-body" id="rptBody"></div>';
+    wrap.innerHTML = '<div class="rpt-head" data-drag="1"><span class="rpt-head-title" id="rptTitle">LAPORAN</span><span class="rpt-head-meta" id="rptMeta"></span><button class="rpt-btn" id="rptSave" title="Simpan ke arsip saya">💾</button><button class="rpt-btn" id="rptPrint" title="Unduh / cetak (PDF)">Unduh</button><button class="rpt-btn ghost" id="rptClose" title="Tutup (ANA bisa tampilkan lagi)">Tutup</button></div><div class="rpt-body" id="rptBody"></div>';
     host.appendChild(wrap);
   }
   _wrap = wrap;
@@ -244,7 +244,7 @@ async function tick() {
   if (_busy) return;
   _busy = true;
   try {
-    const r = await fetch("/api/spatial/report", { headers: { "X-Ana-Token": _token }, cache: "no-store" });
+    const r = await fetch("/api/spatial/report", { headers: { "X-Ana-Token": _token }, cache: "no-store", credentials: "same-origin" });
     if (!r.ok) return;
     const j = await r.json();
     if (!j || j.ok === false) return;

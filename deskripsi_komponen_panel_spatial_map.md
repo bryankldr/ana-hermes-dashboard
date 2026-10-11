@@ -142,7 +142,7 @@ Sumber kebenaran `MAP_FEATURES_LOADED`, `mySeq===_loadSeq` anti race, `_pending 
 Header panel (BUSINESS INTELLIGENCE, badge periode YYYY-MM-P, badge mode CODING/ASISTEN)
 Peta (#mapBox Leaflet + kontrol layer Satelit/Gelap + skala)
 Toolbar atas — dropdown EVALUASI Bisnis (spatialBiz), Layer Petak (spatialKat), tombol Filter, KPI, Muat
-Panel Filter (Waktu: bulan/tahun/periode; Wilayah: DIVRE/KPH/BKPH/RPH/TPG + Terapkan/Reset)
+Panel Filter (Waktu: bulan/tahun/periode; Wilayah: DIVRE/KPH/BKPH/RPH/TPG + Terapkan/Reset) (CASCADE)
 Chips filter aktif (spatialChips)
 Pencarian petak (cari no petak + tombol fit ◎)
 Strip KPI — 4 kartu: Total petak, Bongkor, Perlu perhatian, Terpenuhi
@@ -151,3 +151,42 @@ Meta (baru/total polygon + status)
 Legend (warna status + atribusi Esri/Maxar)
 Progress (muncul hanya saat muat)
 Chart (modal tengah, muncul hanya saat ANA tampilkan)
+
+
+
+Daftar 23 panel, sudah tulis ke DB directus_fields.options:
+
+
+value
+id DOM
+nama di Directus / Options
+1	mapPanel	         PANEL SPATIAL MAP
+2	agentPanel	      PANEL AGENT STATUS
+3	statusMatrix	   PANEL SYSTEM MATRIX
+4	workspacePanel	   PANEL WORKSPACE
+5	intelPanel	      PANEL INTELLIGENCE SURFACE
+6	pipelinePanel	   PANEL AGENT PIPELINE
+7	toolsPanel	      PANEL CONNECTED TOOLS
+8	sysTelemetry	   PANEL SYSTEM TELEMETRY
+9	cmdPanel	         PANEL COMMAND MATRIX
+10	voicePicker	      PANEL VOICE CONFIG
+11	briefingPanel	   PANEL PROACTIVE BRIEFING
+12	projectList	      PANEL ACTIVE REPOSITORIES
+13	missionKanban	   PANEL MISSION KANBAN
+14	vaultPanel	      PANEL VAULT STATUS
+15	avdPanel	         PANEL ANDROID AVD
+16	termPanel	      PANEL TERMINAL
+17	eventLog	         PANEL EVENT STREAM
+18	codeViewer	      PANEL CODE VIEWER
+19	topDials	         PANEL SYSTEM DIALS
+20	response	         PANEL RESPONSE
+21	chatBar	         PANEL CHAT
+22	core	            PANEL CORE
+23	bottomTelemetry	PANEL BOTTOM TELEMETRY
+
+Catatan:
+
+topControls bukan panel, dikecualikan.
+Format DB: longtext, JSON array string, misal ["1","2","20"].
+Akun kamu saat ini: ["1"] = hanya SPATIAL MAP.
+NULL = tanpa batas, semua enabled.

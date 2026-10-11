@@ -90,17 +90,27 @@ def _group_by_age(sessions):
     return groups
 
 
-def list_sessions(hermes_base, workdir, valid_session, current):
+def list_sessions(hermes_base, workdir, valid_session, current, allowed=None):
     """Recent Hermes sessions grouped by age. `current` is the live session id.
 
     hermes_base datang dari runtime._hermes_base() yang sudah memuat
     `-p anna` bila PROFILE != default — jadi panel anna tidak pernah
     campur session profil ana. Jangan panggil `hermes sessions` polos.
+
+    allowed (set/list ID atau None): bila diisi, hanya sesi milik user itu
+    yang dikembalikan — tanpa ini judul sesi bocor lintas user (celah 2).
+    None = tak ada filter (kompat token-only).
     """
     empty = {"groups": {"today": [], "yesterday": [], "last_week": [], "older": []},
              "current": current}
     try:
         out = _run(hermes_base + ["sessions", "list", "--limit", "50"], cwd=workdir, timeout=15)
+        allow = None
+        if allowed is not None:
+            try:
+                allow = {str(x) for x in allowed}
+            except TypeError:
+                allow = None
         sessions = []
         for line in out.splitlines():
             line = line.strip()
@@ -110,6 +120,8 @@ def list_sessions(hermes_base, workdir, valid_session, current):
             # last_active is a relative string like "13m ago" — parse by
             # substring, never int(): int("13m") raises ValueError.
             if len(parts) >= 4 and valid_session(parts[-1]):
+                if allow is not None and parts[-1] not in allow:
+                    continue  # bukan milik user peminta — sembunyikan judulnya
                 sessions.append({
                     "id": parts[-1],
                     "title": " ".join(parts[:-3]) or "—",
@@ -138,6 +150,26 @@ def session_ids(hermes_base, workdir):
         if len(parts) >= 4 and parts[-1] and parts[-1][0].isdigit():
             ids.add(parts[-1])
     return ids
+
+
+def delete_session(hermes_base, workdir, sid):
+    """Hapus satu sesi dari store Hermes (`sessions delete --yes`).
+
+    Dipakai /api/session action=delete HANYA untuk sesi origin dashboard
+    yang sudah yatim (tak ada user memegangnya) — honori janji UI
+    "riwayat ikut hilang" sekaligus cegah klaim-ulang pasca-hapus.
+    Sesi adopsi CLI tak pernah disentuh (risiko hapus riwayat CLI user).
+    Return True bila store mengonfirmasi hapus. Tak pernah raise."""
+    import re as _re
+    try:
+        s = str(sid or "").strip()
+        if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}", s):
+            return False
+        r = subprocess.run(hermes_base + ["sessions", "delete", "--yes", s],
+                           cwd=workdir, text=True, capture_output=True, timeout=30)
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def session_transcript(hermes_base, workdir, sid, limit=20):

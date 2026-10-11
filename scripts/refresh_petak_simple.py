@@ -35,6 +35,21 @@ def db_conn(env, retries=2):
     last = None
     for i in range(retries+1):
         try:
+            try:
+                import sys as _sys
+                if str(ROOT) not in _sys.path:
+                    _sys.path.insert(0, str(ROOT))
+                import db_source as _dbsrc
+                _kw = _dbsrc.kwargs()
+                return pymysql.connect(
+                    host=_kw["host"], port=_kw["port"], user=_kw["user"],
+                    password=_kw["password"], database=_kw["database"],
+                    charset="utf8mb4",
+                    cursorclass=pymysql.cursors.DictCursor,
+                    connect_timeout=8,
+                )
+            except ImportError:
+                pass
             return pymysql.connect(
                 host=env.get("DB_HOST","127.0.0.1"),
                 port=int(env.get("DB_PORT","3306")),

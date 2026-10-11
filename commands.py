@@ -223,7 +223,8 @@ Ketik prompt Hermes normal juga bisa. Slash tidak dikenal diteruskan ke Hermes.
 Minta "ganti ke mode asisten/coding" lewat chat juga bisa."""
 
 
-def handle(message, runner=None):
+def handle(message, runner=None, owner=""):
+    _owner = str(owner or "")
     m = _CMD.match(message or "")
     if not m:
         return None
@@ -352,7 +353,7 @@ def handle(message, runner=None):
         if not sub or sub in ("help", "?"):
             return dict(message=None, reply=_MAP_HELP, note="map help")
         if sub == "state":
-            got = _ms.get_state()
+            got = _ms.get_state(owner=_owner)
             st = got.get("state")
             if not st:
                 return dict(message=None, reply="Belum ada state — browser belum push (buka dashboard, tunggu ±5 dtk).", note="map state empty")
@@ -374,7 +375,7 @@ def handle(message, runner=None):
         if sub == "result":
             if not rest:
                 return dict(message=None, reply="Pakai /map result <id>.", note="map result help")
-            r = _ms.get_result(rest)
+            r = _ms.get_result(rest, owner=_owner)
             if not r:
                 return dict(message=None, reply=f"Belum ada hasil untuk {rest} — browser belum eksekusi atau id salah.", note="map result pending")
             if r.get("ok"):
@@ -389,7 +390,7 @@ def handle(message, runner=None):
                 return dict(message=None, reply="Args harus JSON object. Contoh: /map set_view {\"lat\":-8.17,\"lng\":114.12,\"zoom\":13}", note="map bad args")
             if not isinstance(args, dict):
                 return dict(message=None, reply="Args harus JSON object.", note="map bad args")
-        cid, err = _ms.push_command(sub, args)
+        cid, err = _ms.push_command(sub, args, owner=_owner)
         if err:
             return dict(message=None, reply=f"{err}\n\n{_MAP_HELP}", note="map bad op")
         return dict(message=None, reply=f"Perintah {sub} antre sebagai {cid}. Browser eksekusi ±1.5 dtk — cek via /map result {cid}.", note=f"map {cid} queued: {sub}")
@@ -444,7 +445,7 @@ def handle(message, runner=None):
             if low in ("fokus", "focus"):
                 if _ms2 is None:
                     return dict(message=None, reply="Bridge peta tidak tersedia.", note="petak no bridge")
-                cid, err = _ms2.push_command("select_feature", {"id": pid})
+                cid, err = _ms2.push_command("select_feature", {"id": pid}, owner=_owner)
                 if err:
                     return dict(message=None, reply=err, note="petak focus error")
                 return dict(message=None, reply=(
@@ -488,7 +489,7 @@ def handle(message, runner=None):
         cur = {}
         if _ms2 is not None:
             try:
-                cur = _ms2.get_state().get("state") or {}
+                cur = _ms2.get_state(owner=_owner).get("state") or {}
             except Exception:  # noqa: BLE001
                 cur = {}
         r = _si.resolve_entity(arg.strip(), selected=cur.get("selected"), highlighted=cur.get("highlighted"))

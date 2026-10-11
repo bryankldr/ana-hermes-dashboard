@@ -1,0 +1,65 @@
+{
+  "name": "ANA · Autonomous AI HUD",
+  "short_name": "ANA",
+  "description": "ANA HUD — KPHBWB Sandbox · Autonomous AI dashboard",
+  "start_url": "/?pwa=1",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "background_color": "#020F2A",
+  "theme_color": "#020F2A",
+  "lang": "id",
+  "dir": "ltr",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Buka HUD",
+      "url": "/",
+      "description": "Buka ANA HUD"
+    },
+    {
+      "name": "Login",
+      "url": "/login.html",
+      "description": "Masuk ke ANA"
+    }
+  ],
+  "handle_links": "preferred",
+  "launch_handler": {
+    "client_mode": "auto"
+  }
+}

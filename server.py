@@ -89,6 +89,8 @@ import map_store
 import runtime_gateway as runtime
 import services
 import spatial_chart_store
+import spatial_archive_store
+import tpl_store
 import spatial_intel
 import spatial_report_store
 import sysmetrics
@@ -266,6 +268,346 @@ def _simoge_query(template, params):
     call_simoge_tool = _simoge_mod("ana_simoge_tool").call_simoge_tool
     result = call_simoge_tool(template, params)
     return json.loads(json.dumps(result, default=_coerce))
+
+
+def _scope_code(val, key):
+    """Ambil satu kode wilayah dari sesi — bentuk dict/int/str semua bisa.
+    Session menyimpan hasil expand (dict {'kode_kph':31211,...}) atau mentah."""
+    try:
+        if val is None:
+            return ""
+        if isinstance(val, dict):
+            v = val.get(key)
+            return "" if v is None else str(v).strip()
+        if isinstance(val, (list, tuple)):
+            return ""
+        s = str(val).strip()
+        return "" if s.lower() in ("none", "null") else s
+    except Exception:
+        return ""
+
+
+def _wilayah_scope_from_session(handler):
+    """Scope wilayah user login dari cookie sesi. {} = tak ada sesi
+    (pemanggil token-only seperti ANA system — sengaja tanpa scope)."""
+    try:
+        sess = _session_from_cookie(handler)
+    except Exception:
+        return {}
+    if not sess:
+        return {}
+    try:
+        scope = {}
+        dv = _scope_code(sess.get("kode_divre"), "kode_divre")
+        kp = _scope_code(sess.get("kode_kph"), "kode_kph")
+        bk = _scope_code(sess.get("kode_bkph"), "kode_bkph")
+        rp = _scope_code(sess.get("kode_rph"), "kode_rph")
+        if dv:
+            scope["kode_divre"] = dv
+        if kp:
+            scope["kode_kph"] = kp
+        if bk:
+            scope["kode_bkph"] = bk
+        if rp:
+            scope["kode_rph"] = rp
+        # user TPG-level: kode_tpg = list M2M [{kode_tpg,...},...] atau mentah
+        try:
+            tp = sess.get("kode_tpg")
+            tpg_list = []
+            if isinstance(tp, list):
+                for e in tp:
+                    c = e.get("kode_tpg") if isinstance(e, dict) else e
+                    if c is not None and str(c).strip() != "":
+                        tpg_list.append(str(c).strip())
+            if tpg_list:
+                scope["kode_tpg_list"] = tpg_list
+        except Exception:
+            pass
+        return scope
+    except Exception:
+        return {}
+
+
+def _enforce_wilayah_scope(handler, params, template=""):
+    """Paksa params query ke dalam wilayah user login (robust: anti tamper
+    filter via curl/devtools selama sesi login ada). Tanpa sesi = utuh.
+    Return (params_baru, kunci_dipaksa, ditolak, pesan_tolak).
+    User TPG-level (kode_tpg_list): query data WAJIB sebut satu kode_tpg miliknya,
+    selain itu 403 — kalau tidak, query tanpa filter bocorkan semua TPG."""
+    try:
+        scope = _wilayah_scope_from_session(handler)
+    except Exception:
+        return params, [], False, ""
+    if not scope:
+        return params, [], False, ""
+    try:
+        p = dict(params or {})
+    except Exception:
+        return params, [], False, ""
+    tpl = str(template or "").strip()
+    overridden = []
+    for key in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+        if key in scope and scope[key]:
+            cur = "" if p.get(key) is None else str(p.get(key)).strip()
+            if cur != str(scope[key]).strip():
+                if cur != "":
+                    overridden.append(key)
+                p[key] = scope[key]
+    tpg_list = scope.get("kode_tpg_list") or []
+    if tpg_list and tpl != "wilayah_labels":
+        cur = "" if p.get("kode_tpg") is None else str(p.get("kode_tpg")).strip()
+        if cur not in tpg_list:
+            try:
+                _alog(f"wilayah scope DENY tpg di luar login ({cur[:24] or 'kosong'})", "warn")
+            except Exception:
+                pass
+            return p, overridden, True, "di luar wilayah TPG login"
+    if overridden:
+        try:
+            _alog(f"wilayah scope clamp {','.join(overridden)} ke wilayah login", "warn")
+        except Exception:
+            pass
+    return p, overridden, False, ""
+
+
+def _wilayah_chain_check(scope, params):
+    """Validasi silang rantai: kode_bkph/kode_rph/kode_tpg yang disebut di
+    params harus berada di dalam scope login (divre/kph/bkph/rph user).
+    Resolve parent via tabel bkph/rph/getah_daftar_tpg. Fail-closed: kode
+    tak dikenal saat scope aktif = tolak. Return (deny, pesan)."""
+    try:
+        p = params or {}
+        bk = "" if p.get("kode_bkph") is None else str(p.get("kode_bkph")).strip()
+        rp = "" if p.get("kode_rph") is None else str(p.get("kode_rph")).strip()
+        tg = "" if p.get("kode_tpg") is None else str(p.get("kode_tpg")).strip()
+        if not (bk or rp or tg):
+            return False, ""
+        if not any(scope.get(k) for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph")):
+            return False, ""
+        import db_source
+        import pymysql
+        kw = db_source.kwargs()
+        conn = pymysql.connect(**kw)
+        try:
+            with conn.cursor() as cur:
+                if bk:
+                    cur.execute("SELECT kode_divre, kode_kph, kode_bkph FROM bkph WHERE kode_bkph=%s LIMIT 1", (bk,))
+                    r = cur.fetchone()
+                    if r is None:
+                        return True, f"kode_bkph {bk[:16]} tak dikenal"
+                    got = {"kode_divre": r[0], "kode_kph": r[1], "kode_bkph": r[2]}
+                    for k in ("kode_divre", "kode_kph", "kode_bkph"):
+                        if scope.get(k) and got[k] is not None and str(got[k]).strip() != str(scope[k]).strip():
+                            return True, f"bkph {bk[:16]} di luar wilayah login"
+                if rp:
+                    cur.execute("SELECT kode_divre, kode_kph, kode_bkph, kode_rph FROM rph WHERE kode_rph=%s LIMIT 1", (rp,))
+                    r = cur.fetchone()
+                    if r is None:
+                        return True, f"kode_rph {rp[:16]} tak dikenal"
+                    got = {"kode_divre": r[0], "kode_kph": r[1], "kode_bkph": r[2], "kode_rph": r[3]}
+                    for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+                        if scope.get(k) and got[k] is not None and str(got[k]).strip() != str(scope[k]).strip():
+                            return True, f"rph {rp[:16]} di luar wilayah login"
+                if tg:
+                    cur.execute("SELECT kode_divre, kode_kph, kode_bkph, kode_rph FROM getah_daftar_tpg WHERE kode_tpg=%s LIMIT 1", (tg,))
+                    r = cur.fetchone()
+                    if r is None:
+                        return True, f"kode_tpg {tg[:16]} tak dikenal"
+                    got = {"kode_divre": r[0], "kode_kph": r[1], "kode_bkph": r[2], "kode_rph": r[3]}
+                    for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+                        if scope.get(k) and got[k] is not None and str(got[k]).strip() != str(scope[k]).strip():
+                            return True, f"tpg {tg[:16]} di luar wilayah login"
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return False, ""
+    except Exception as e:
+        # DB check gagal = clamp params sudah jalan; tolak hanya bila yakin.
+        try:
+            _alog(f"wilayah chain-check gagal {type(e).__name__} (clamp tetap jalan)", "warn")
+        except Exception:
+            pass
+        return False, ""
+
+
+def _scope_wilayah_labels(data, scope):
+    """Saring daftar wilayah_labels ke wilayah login. Tanpa scope = utuh."""
+    try:
+        if not scope or not isinstance(data, dict):
+            return data
+        rows = data.get("rows")
+        if not rows or not isinstance(rows[0], dict):
+            return data
+        r0 = dict(rows[0])
+        dv = str(scope.get("kode_divre") or "").strip()
+        kp = str(scope.get("kode_kph") or "").strip()
+        bk = str(scope.get("kode_bkph") or "").strip()
+        rp = str(scope.get("kode_rph") or "").strip()
+        if dv:
+            r0["divre"] = [o for o in (r0.get("divre") or []) if str(o.get("kode_divre")) == dv]
+        if kp:
+            r0["kph"] = [o for o in (r0.get("kph") or []) if str(o.get("kode_kph")) == kp]
+        if kp:
+            r0["bkph"] = [o for o in (r0.get("bkph") or []) if str(o.get("kode_kph") or kp) == kp]
+        if bk:
+            r0["bkph"] = [o for o in (r0.get("bkph") or []) if str(o.get("kode_bkph")) == bk]
+        if kp or bk:
+            def _rph_ok(o):
+                if bk and str(o.get("kode_bkph") or "") not in ("", bk):
+                    return False
+                return True
+            r0["rph"] = [o for o in (r0.get("rph") or []) if _rph_ok(o)]
+        if rp:
+            r0["rph"] = [o for o in (r0.get("rph") or []) if str(o.get("kode_rph")) == rp]
+        tpg = r0.get("tpg") or []
+        def _tpg_ok(o):
+            for k, v in (("kode_divre", dv), ("kode_kph", kp), ("kode_bkph", bk), ("kode_rph", rp)):
+                if not v:
+                    continue
+                ov = o.get(k)
+                if ov is None or str(ov).strip() == "":
+                    continue
+                if str(ov).strip() != v:
+                    return False
+            return True
+        if dv or kp or bk or rp:
+            r0["tpg"] = [o for o in tpg if _tpg_ok(o)]
+        data["rows"] = [r0]
+        return data
+    except Exception:
+        return data
+
+
+def _anna_scope_write(hermes_sid, scope, user_id=""):
+    """Tulis scope wilayah untuk satu sesi Hermes: .ana_scope_<sid>.json.
+
+    Tool ANNA (ana_simoge_tool._anna_scope) membaca HERMES_SESSION_ID-nya
+    sendiri (dipublish resmi via agent_init._publish_session_id) lalu baca
+    file ini — tiap sesi Hermes dapat scope user dashboard yang benar,
+    tak peduli berapa user login bersamaan. Idempotent: tulis tiap run.
+    Sekaligus tulis .ana_current_sid (sid sesi aktif run ini) — tool
+    chart/simoge baca file itu sebagai fallback karena env dashboard
+    TIDAK ikut ke proses `terminal` agen Hermes. Tanpa file ini push
+    chart/report 401 (server tak bisa resolve owner) walau scope ada.
+    Tak pernah raise."""
+    try:
+        sid = str(hermes_sid or "").strip()
+        if not sid or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
+            return
+        try:
+            tmp_cur = ROOT / ".ana_current_sid.tmp"
+            tmp_cur.write_text(sid, encoding="utf-8")
+            os.replace(tmp_cur, ROOT / ".ana_current_sid")
+        except OSError:
+            pass
+        data = {}
+        try:
+            uid = str(user_id or "").strip()
+            if uid:
+                data["user_id"] = uid
+            for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+                v = (scope or {}).get(k)
+                if v:
+                    data[k] = str(v).strip()
+            tl = (scope or {}).get("kode_tpg_list") or []
+            if tl:
+                data["kode_tpg_list"] = [str(x) for x in tl]
+        except Exception:
+            pass
+        tmp = ROOT / f".ana_scope_{sid}.json.tmp"
+        try:
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, ROOT / f".ana_scope_{sid}.json")
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+
+def _anna_scope_prune(max_age_sec=86400):
+    """Hapus file .ana_scope_<sid>.json yatim (tak dirujuk sesi ANNA mana pun
+    atau lebih tua dari max_age_sec). Dipanggil saat /api/new, logout, dan
+    switch DB (semua sesi ANNA dibuang di titik itu). Tak pernah raise."""
+    try:
+        with _SESSION_LOCK:
+            live = {str((v or {}).get("id") or "") for v in SESSION.values()}
+        live.discard("")
+        now = time.time()
+        for f in ROOT.glob(".ana_scope_*.json"):
+            try:
+                m = re.fullmatch(r"\.ana_scope_(.+)\.json", f.name)
+                if not m:
+                    continue
+                sid = m.group(1)
+                if sid in live:
+                    continue
+                try:
+                    age = now - f.stat().st_mtime
+                except OSError:
+                    age = max_age_sec + 1
+                if age >= max_age_sec:
+                    try:
+                        f.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def _anna_scope_block(scope):
+    """Blok instruksi scope wilayah untuk system prompt ANNA (/api/run).
+    Tanpa scope (DIREKSI / tanpa kode / token-only) = string kosong."""
+    try:
+        if not scope:
+            return ""
+        parts = []
+        dv = str(scope.get("kode_divre") or "").strip()
+        kp = str(scope.get("kode_kph") or "").strip()
+        bk = str(scope.get("kode_bkph") or "").strip()
+        rp = str(scope.get("kode_rph") or "").strip()
+        tg = list(scope.get("kode_tpg_list") or [])
+        if dv:
+            parts.append(f"DIVRE {dv}")
+        if kp:
+            parts.append(f"KPH {kp}")
+        if bk:
+            parts.append(f"BKPH {bk}")
+        if rp:
+            parts.append(f"RPH {rp}")
+        if tg:
+            _tg_txt = ", ".join(tg[:10]) + (f" (+{len(tg)-10} lain)" if len(tg) > 10 else "")
+            parts.append(f"TPG {_tg_txt}")
+        if not parts:
+            return ""
+        wil = ", ".join(parts)
+        luar = []
+        if dv:
+            luar.append("divre lain")
+        if kp:
+            luar.append("KPH lain")
+        if bk:
+            luar.append("BKPH lain")
+        if rp:
+            luar.append("RPH lain")
+        if tg:
+            luar.append("TPG lain")
+        _luar_txt = ", ".join(luar) if luar else "wilayah lain"
+        return (
+            "## BATAS WILAYAH USER (wajib ditaati)\n"
+            f"User login hanya berhak atas wilayah: {wil}. "
+            "Semua angka/chart/peta/laporan HANYA dari wilayah itu — selalu sertakan "
+            "filter kode_* yang sesuai di setiap pemanggilan tool bisnis "
+            "(call_simoge_tool/call_simoge_packet/show_on_map/answer_production). "
+            f"Jika user meminta data di luar itu ({_luar_txt}), "
+            "TOLAK dengan sopan ('di luar wilayah Bapak/Ibu') dan tawarkan data wilayahnya. "
+            "Jangan mengakali dengan query tanpa filter — tool menolaknya."
+        )
+    except Exception:
+        return ""
 
 
 # == P1 Business Context Packet ==============================================
@@ -626,7 +968,8 @@ def _remember(key, payload):
             _SHOW_CACHE.pop(k, None)
 
 
-def _spatial_sync(template, params, warna_only):
+def _spatial_sync(template, params, warna_only, scope=None, owner=""):
+    _mowner = str(owner or "")
     """Dorong spatial_set agar panel reload ke state yang sama.
 
     Identik dalam _SPATIAL_TTL detik → pakai id yang ada, jangan push lagi.
@@ -642,6 +985,10 @@ def _spatial_sync(template, params, warna_only):
     Tanpa ini handler panel merge di atas DOM usang (map.js _next.filters):
     turn 1 bkph=3121102 menempel di turn 2 yang tanpa filter wilayah → peta
     subset, narasi ANNA populasi penuh (split-brain).
+
+    scope (opsional): wilayah login — filter wilayah ANA di luar scope
+    DIABAIKAN (panel tak boleh disuruh keluar wilayah user). Tanpa scope
+    (token-only) = utuh seperti dulu.
     """
     bizkat = _TEMPLATE_SPATIAL.get(template)
     if not bizkat:
@@ -650,11 +997,30 @@ def _spatial_sync(template, params, warna_only):
     if warna_only and template == "petak_efektivitas_map":
         kat = _WARNA_KATEGORI.get(warna_only, kat)
     filters = {}
+    _scope = dict(scope or {})
+    _tpg_list = _scope.get("kode_tpg_list") or []
     for k in _SPATIAL_FILTER_KEYS:
         v = params.get(k, params.get("kode_" + k, ""))
         # Kontrak penuh solusi A: absen = "" (reset eksplisit di panel),
         # bukan di-skip (skip = warisan filter turn lama menempel).
-        filters[k] = "" if v is None else str(v).strip()
+        s = "" if v is None else str(v).strip()
+        # Scope login: filter wilayah ANA di luar scope dibuang (jangan suruh
+        # panel keluar wilayah user). Berlaku untuk divre/kph/bkph/rph/tpg.
+        if k in ("divre", "kph", "bkph", "rph"):
+            sk = _scope.get("kode_" + k, "")
+            if sk and s and s != str(sk).strip():
+                try:
+                    _alog(f"spatial_set abaikan {k}={s[:16]} di luar scope login", "warn")
+                except Exception:
+                    pass
+                s = ""
+        elif k == "tpg" and _tpg_list and s and s not in _tpg_list:
+            try:
+                _alog(f"spatial_set abaikan tpg={s[:16]} di luar scope login", "warn")
+            except Exception:
+                pass
+            s = ""
+        filters[k] = s
     if kat:
         filters["kategori"] = kat
     # warna tanpa padanan kontrol → teruskan sebagai filter (adapter baca f.warna)
@@ -667,7 +1033,7 @@ def _spatial_sync(template, params, warna_only):
         prev = _SPATIAL_SIG.get(sig)
         if prev and (now - prev[0]) < _SPATIAL_TTL:
             return prev[1]
-    cmd_id, err = map_store.push_command("spatial_set", args)
+    cmd_id, err = map_store.push_command("spatial_set", args, owner=_mowner)
     if err:
         return None
     with _SPATIAL_LOCK:
@@ -678,7 +1044,7 @@ def _spatial_sync(template, params, warna_only):
     return cmd_id
 
 
-def _simoge_show_on_map(template, params, drive_panel=True):
+def _simoge_show_on_map(template, params, drive_panel=True, scope=None, owner=""):
     """One call: query template -> GeoJSON untuk pemanggil + set state peta.
 
     The dashboard owns map delivery; Hermes owns SQL. ANA never hand-writes
@@ -758,7 +1124,7 @@ def _simoge_show_on_map(template, params, drive_panel=True):
     # ── pemanggil ANA: effects lewat state, tanpa menulis peta langsung ──
     if drive_panel and template in _TEMPLATE_SPATIAL:
         try:
-            sp_id = _spatial_sync(template, params, warna_only)
+            sp_id = _spatial_sync(template, params, warna_only, scope=scope, owner=owner)
             if sp_id:
                 out = {"ok": True, "template": template, "row_count": len(rows),
                        "features": len(rows), "spatial_id": sp_id,
@@ -781,7 +1147,7 @@ def _simoge_show_on_map(template, params, drive_panel=True):
         # dibuang kembali ke extent lama. ANNA tetap bisa fit eksplisit via
         # op fit_all / fit_bounds.
         "fit": False,
-    })
+    }, owner=str(owner or ""))
     if err:
         return {"ok": False, "error": err, "features": 0, "warna_counts": warna_counts}
     out = {"ok": True, "template": panel_template or template,
@@ -830,23 +1196,89 @@ def _parse_cookies(header_val: str) -> dict:
             out[k.strip()] = v.strip()
     return out
 
+def _ana_device_id(handler) -> str:
+    """Device UUID persisten per browser dari header X-Ana-Device.
+
+    Generate sekali di localStorage (login.js), kirim tiap request.
+    Validasi ringan: alnum + '-'/'_'/'='/_' maks 64 char — tanpa ini header
+    sampah masuk ke hash dan evict jadi tak deterministik."""
+    try:
+        if handler is None:
+            return ""
+        d = str(handler.headers.get("X-Ana-Device", "") or "").strip()[:64]
+        if d and re.fullmatch(r"[A-Za-z0-9_=\-]{8,64}", d):
+            return d
+        # Navigasi browser (GET / usai login) tak bisa kirim custom header —
+        # baca cermin ana_device (cookie HttpOnly, ditulis saat login, ikut
+        # terkirim otomatis). Tanpa fallback ini tiap navigasi = did kosong =
+        # hash mismatch = 302 login.html = loop login↔dashboard selamanya.
+        try:
+            c = _parse_cookies(handler.headers.get("Cookie", "") or "").get("ana_device", "").strip()[:64]
+            if c and re.fullmatch(r"[A-Za-z0-9_=\-]{8,64}", c):
+                return c
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return ""
+
+
 def _session_from_cookie(handler) -> dict | None:
     raw = handler.headers.get("Cookie","")
     sid = _parse_cookies(raw).get("ana_session","").strip()
     if not sid: return None
     sess = auth_local.get_session(sid)
-    if not sess: return None
+    if not sess:
+        handler._ana_auth_reason = "expired"
+        return None
+    # Soft-revoked (ditendang login perangkat lain) = reason eksplisit agar
+    # frontend tampilkan banner + tombol ambil alih, bukan redirect buta.
+    if sess.get("revoked_by"):
+        handler._ana_auth_reason = "evicted_by_new_device"
+        try:
+            handler._ana_auth_evict = {"device_label": str(sess.get("revoked_label") or "?"),
+                                       "at": float(sess.get("revoked_at") or 0)}
+        except Exception:
+            handler._ana_auth_evict = {}
+        return None
     if time.time() > float(sess.get("expires_at", 0)):
         refreshed,_ = auth_local.refresh_session(sid)
-        if not refreshed: return None
+        if not refreshed:
+            handler._ana_auth_reason = "expired"
+            return None
         sess = refreshed
     ua = handler.headers.get("User-Agent","") or ""
-    if sess.get("device_hash") and sess.get("device_hash") != auth_local.device_hash(ua):
+    if sess.get("device_hash") and sess.get("device_hash") != auth_local.device_hash(ua, "", _ana_device_id(handler)):
+        handler._ana_auth_reason = "evicted_by_new_device"
+        try:
+            handler._ana_auth_evict = {"device_label": str(sess.get("device_label") or "?"),
+                                       "at": float(sess.get("last_seen") or 0)}
+        except Exception:
+            handler._ana_auth_evict = {}
         return None
     auth_local.touch_session(sid)
     return sess
 
-def _set_session_cookie(handler, sid: str):
+
+def _ana_auth_error(handler) -> tuple:
+    """(status, body) 401 dengan reason eksplisit — frontend bedakan aksi:
+    expired → refresh/coba login; evicted_by_new_device → banner + ambil alih;
+    bad_device → login ulang. Tanpa reason semua 401 = redirect buta (frustrasi)."""
+    try:
+        reason = getattr(handler, "_ana_auth_reason", "") or "expired"
+    except Exception:
+        reason = "expired"
+    try:
+        info = getattr(handler, "_ana_auth_evict", {}) or {}
+    except Exception:
+        info = {}
+    if reason == "evicted_by_new_device":
+        return 401, {"error": "evicted_by_new_device",
+                     "message": "Akun ini login di perangkat lain — sesi perangkat ini dialihkan.",
+                     "evict": info}
+    return 401, {"error": "tidak ada sesi", "authenticated": False, "reason": reason}
+
+def _set_session_cookie(handler, sid: str, did: str = ""):
     secure = os.environ.get("ANA_COOKIE_SECURE","0").strip() == "1"
     parts = [f"ana_session={sid}", "Path=/", "HttpOnly", "SameSite=Lax"]
     if secure: parts.append("Secure")
@@ -854,9 +1286,24 @@ def _set_session_cookie(handler, sid: str):
     except: ttl = 28800
     parts.append(f"Max-Age={ttl}")
     handler.send_header("Set-Cookie", "; ".join(parts))
+    # Cermin device_id ke cookie HttpOnly agar NAVIGASI lolos cek device_hash
+    # (dibaca _ana_device_id). HttpOnly juga — JS tak perlu baca, hanya server.
+    try:
+        d = (did or "").strip()[:64]
+        if d and re.fullmatch(r"[A-Za-z0-9_=\-]{8,64}", d):
+            dp = [f"ana_device={d}", "Path=/", "HttpOnly", "SameSite=Lax"]
+            if secure: dp.append("Secure")
+            dp.append(f"Max-Age={ttl}")
+            handler.send_header("Set-Cookie", "; ".join(dp))
+    except Exception:
+        pass
 
 def _clear_session_cookie(handler):
     handler.send_header("Set-Cookie", "ana_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+    try:
+        handler.send_header("Set-Cookie", "ana_device=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+    except Exception:
+        pass
 
 # ── FASE 2: layout store per-user (konsep v3 §3/§5) ──
 # layout_<uid>.json {v:3,locked,disabled,desktop:{layouts},mobile:{layouts}}.
@@ -902,7 +1349,17 @@ def _layout_atomic_write(path: pathlib.Path, data: dict):
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     os.replace(tmp, path)
 
-RUN_LOCK = threading.Lock()
+RUN_STATE = {"active": False, "since": 0.0, "message": ""}
+RUN_STATE_GUARD = threading.Lock()
+# Run paralel per-user: satu user nyangkut TIDAK boleh 409-kan user lain.
+# RUN_STATE global di atas dipertahankan untuk kanal netral/token-only;
+# user login punya slot sendiri di _RUN_BY_USER {user_key: {active,since,message}}.
+# Tanpa ini: user A stall 120s = user B 409 walau sesinya sehat.
+_RUN_BY_USER: dict = {}
+try:
+    RUN_TIMEOUT_SEC = float(os.environ.get("ANA_RUN_TIMEOUT", "300"))
+except ValueError:
+    RUN_TIMEOUT_SEC = 300.0
 MAX_JSON_BODY = 16 * 1024 * 1024
 
 # The Ana persona, appended to every run. Without it, the model answers as a
@@ -1064,28 +1521,116 @@ def set_mode(v):
     except OSError: pass
     return v
 
-# One continuing Hermes conversation until the user hits /new.
-# Extended with metadata for cross-tab sync and TTL.
+# One continuing Hermes conversation per LOGIN USER until /new.
+# Pola resmi Hermes (docs/user-guide/sessions): sesi gateway di-key per-user
+# (agent:main:<platform>:<chat>:<user_id>, group_sessions_per_user=true) —
+# Alice dan Bob tak berbagi transcript. Dashboard ikut pola itu: SESSION
+# adalah dict user_id -> {id, meta}, bukan satu sesi global.
+# Key = user_id sesi cookie login (fallback "" = token-only tanpa cookie).
 # Diakses dari banyak thread (ThreadingHTTPServer tanpa batas thread):
 # _stream_run tulis, /api/session tulis, /api/status baca — lindungi semua.
-SESSION: dict[str, str | None | dict] = {
-    "id": None,
-    "meta": None,  # {"title": str, "created": float, "message_count": int} | None
-}
+SESSION: dict = {}
 _SESSION_LOCK = threading.Lock()
 SESSION_TTL_SEC = int(os.environ.get("ANA_SESSION_TTL", "3600"))  # 1h default
+# Sesi ANNA per user: maks 3 sesi Hermes aktif (histori). Login kembali =
+# lanjutkan sesi terakhir; /new atau pilih sesi = ganti aktif. Logout TIDAK
+# menghapus sesi ANNA (hanya cookie auth) — user hapus manual per sesi.
+_ANNA_MAX_SESSIONS = 3
 
-# Persist session id+meta ke disk agar survive restart server.
+# Live session gateway per user: {user_key: live_sid}.
+# Tanpa ini _CURRENT_SESSION_ID global di runtime_gateway dipakai ulang
+# lintas user — run user B tanpa sesi aktif masuk ke live session user A
+# (transcript campur + rename judul menimpa milik A). Dengan peta ini tiap
+# user selalu kirim sid live MILIKNYA eksplisit; run fresh reset global
+# dulu agar gateway create baru, bukan resume sesi orang.
+_GW_LIVE: dict = {}
+
+# Persist session id+meta per user ke disk agar survive restart server.
 # Tanpa ini SESSION in-memory hilang tiap restart dan chat mulai fresh
 # padahal Hermes masih punya history-nya.
 _SESSION_FILE = ROOT / ".ana_session"
 
-def _session_save():
+
+def _anna_user_key(handler=None) -> str:
+    """Kunci sesi ANNA = user_id cookie login. "" = token-only tanpa cookie
+    (ANNA system/dev — tetap satu sesi netral seperti dulu)."""
     try:
-        sid, meta = SESSION.get("id"), SESSION.get("meta")
-        if sid and runtime.valid_session(sid):
-            _SESSION_FILE.write_text(
-                json.dumps({"id": sid, "meta": meta or {}}), encoding="utf-8")
+        if handler is not None:
+            sess = _session_from_cookie(handler)
+            if sess:
+                uid = str(sess.get("user_id") or "").strip()
+                if uid:
+                    return uid
+    except Exception:
+        pass
+    return ""
+
+
+def _anna_owner_from_request(handler):
+    """(owner_key, scope) untuk state chart/report.
+
+    Cookie diprioritaskan (browser user). Fallback: header X-Hermes-Session
+    dari tool ANNA — resolve HERMES_SESSION_ID -> user_id via file
+    .ana_scope_<sid>.json (ditulis per run, berisi user_id penulis).
+    Tanpa keduanya = ("", {}) kanal netral — push berdata DITOLAK 401,
+    hanya hide/clear yang boleh.
+    Tak pernah raise."""
+    try:
+        uid = _anna_user_key(handler)
+        if uid:
+            return uid, _wilayah_scope_from_session(handler)
+        if handler is not None:
+            try:
+                hdrs = getattr(handler, "headers", {}) or {}
+                sid = ""
+                try:
+                    sid = str(hdrs.get("X-Hermes-Session") or "").strip()
+                except Exception:
+                    sid = ""
+                if sid and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
+                    p = ROOT / f".ana_scope_{sid}.json"
+                    try:
+                        d = json.loads(p.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        d = None
+                    if isinstance(d, dict) and str(d.get("user_id") or "").strip():
+                        scope = {}
+                        for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph"):
+                            v = d.get(k)
+                            if v is not None and str(v).strip() != "":
+                                scope[k] = str(v).strip()
+                        tl = d.get("kode_tpg_list") or []
+                        if tl:
+                            scope["kode_tpg_list"] = [str(x) for x in tl]
+                        return str(d["user_id"]).strip(), scope
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "", {}
+
+
+def _session_save():
+    """Persist SESSION per user ke disk agar survive restart server.
+
+    Simpan entri yang punya sesi AKTIF valid ATAU histori non-kosong —
+    tanpa ini arsip pasca-+BARU (id=None, histori ada) dibuang dari file
+    dan user kehilangan sesi lamanya tiap restart. Tak pernah raise."""
+    try:
+        with _SESSION_LOCK:
+            items = {k: {"id": v.get("id"), "meta": v.get("meta")} for k, v in SESSION.items()}
+        valid = {}
+        for k, e in items.items():
+            try:
+                m = e.get("meta") if isinstance(e.get("meta"), dict) else {}
+                hist = m.get("sessions") or []
+                has_hist = any(isinstance(s, dict) and s.get("id") for s in hist)
+                if (e.get("id") and runtime.valid_session(e["id"])) or has_hist:
+                    valid[k] = e
+            except Exception:
+                continue
+        if valid:
+            _SESSION_FILE.write_text(json.dumps(valid), encoding="utf-8")
         else:
             try:
                 _SESSION_FILE.unlink(missing_ok=True)
@@ -1100,17 +1645,29 @@ def _session_restore():
         d = json.loads(_SESSION_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    if isinstance(d, dict) and runtime.valid_session(d.get("id")):
-        meta = d.get("meta") if isinstance(d.get("meta"), dict) else None
+    if not isinstance(d, dict):
+        return
+    # Format baru: {user_key: {id, meta}}. Format lama: {id, meta} langsung.
+    items = d if all(isinstance(v, dict) and ("id" in v or "meta" in v) for v in d.values()) and "id" not in d else {"": d}
+    for key, ent in items.items():
+        if not isinstance(ent, dict):
+            continue
+        # Muat entri ber-aktif-valid ATAU ber-histori (arsip pasca-+BARU:
+        # id=None tapi histori ada — tanpa ini arsip hilang tiap restart).
+        meta = ent.get("meta") if isinstance(ent.get("meta"), dict) else None
+        hist = (meta.get("sessions") or []) if isinstance(meta, dict) else []
+        has_hist = any(isinstance(s, dict) and s.get("id") for s in hist)
+        if not runtime.valid_session(ent.get("id")) and not has_hist:
+            continue
         if isinstance(meta, dict) and not isinstance(meta.get("created"), (int, float)):
             meta["created"] = time.time()  # file lama tanpa stamp: mulai TTL dari restore
         with _SESSION_LOCK:
-            SESSION["id"] = str(d["id"])
-            SESSION["meta"] = meta
+            SESSION[str(key)] = {"id": (str(ent["id"]) if runtime.valid_session(ent.get("id")) else None), "meta": meta}
 
-def _session_expired() -> bool:
+def _session_expired(key="") -> bool:
     with _SESSION_LOCK:
-        meta = SESSION.get("meta")
+        ent = SESSION.get(key) or {}
+        meta = ent.get("meta")
     if not isinstance(meta, dict) or "created" not in meta:
         return False
     created = meta.get("created")
@@ -1119,42 +1676,243 @@ def _session_expired() -> bool:
     return (time.time() - created) > SESSION_TTL_SEC
 
 
-def _clear_session():
-    with _SESSION_LOCK:
-        SESSION["id"] = None
-        SESSION["meta"] = None
-    _session_save()
+def _clear_session(key=None):
+    """Kosongkan sesi AKTIF milik key, histori tetap (arsip).
+
+    Dipakai /api/session/archive (+BARU) dan /api/new: sesi lama tetap
+    bisa dibuka lagi dari picker; run berikut buat sesi baru. Tanpa
+    semantik arsip ini +BARU = dead-end (sesi lama hilang).
+    key=None (switch DB) = hanguskan SEMUA (satu-satunya kasus global).
+    Tak pernah raise."""
+    try:
+        with _SESSION_LOCK:
+            if key is None:
+                SESSION.clear()
+            else:
+                ent = SESSION.get(key)
+                if isinstance(ent, dict):
+                    ent["id"] = None
+                    SESSION[key] = ent
+                else:
+                    SESSION.pop(key, None)
+        _session_save()
+    except Exception:  # noqa: BLE001
+        try:
+            _session_save()
+        except Exception:
+            pass
     # P0-A: SESSION id/meta cleared but gateway cached _CURRENT_SESSION_ID
     # persisted -> fresh:true reuse old session. Reset both layers here so
     # every caller (fresh, /api/new, /new, TTL, error) gets true isolation.
+    # Per-user: reset gateway hanya bila tak ada sesi user lain yang hidup.
     try:
-        runtime.reset_session()
+        with _SESSION_LOCK:
+            _still = bool(SESSION)
+        if not _still:
+            runtime.reset_session()
     except Exception:  # noqa: BLE001
         pass
 
 
-def _session_get():
+def _session_get(key=""):
+    """Return (sid_aktif, meta_aktif). meta = {title, created, message_count,
+    sessions: [{id, title, created, message_count}]} — histori maks 3."""
     with _SESSION_LOCK:
-        return SESSION.get("id"), SESSION.get("meta")
+        ent = SESSION.get(key) or {}
+        return ent.get("id"), ent.get("meta")
 
 
-def _session_set(sid, meta=None):
+def _session_list(key=""):
+    """Histori sesi ANNA milik user (maks 3, terbaru dulu). Tiap item:
+    {id, title, created, message_count, active}."""
     with _SESSION_LOCK:
-        SESSION["id"] = sid
+        ent = SESSION.get(key) or {}
+        active = ent.get("id")
+        meta = ent.get("meta") if isinstance(ent.get("meta"), dict) else {}
+        out = []
+        for s in (meta.get("sessions") or []):
+            if not isinstance(s, dict) or not s.get("id"):
+                continue
+            out.append({
+                "id": str(s["id"]),
+                "title": str(s.get("title") or "--"),
+                "created": s.get("created") or 0,
+                "message_count": int(s.get("message_count") or 0),
+                "active": str(s["id"]) == str(active),
+            })
+        if active and not any(s["id"] == str(active) for s in out):
+            out.insert(0, {
+                "id": str(active),
+                "title": str(meta.get("title") or "--"),
+                "created": meta.get("created") or 0,
+                "message_count": int(meta.get("message_count") or 0),
+                "active": True,
+            })
+        return out[:_ANNA_MAX_SESSIONS]
+
+
+def _session_hist_push(key, sid, title=None, origin="run"):
+    """Catat sesi ke histori user (maks 3, sid unik, terbaru dulu).
+
+    origin: "run" (sesi lahir dari chat /api/run milik key ini — pemilik
+    penuh) atau "claim" (adopsi ID dari store, mis. sesi CLI). Klaim
+    silang DITOLAK di endpoint (403), jadi claim di sini hanya untuk
+    ID yatim. Origin lama dipertahankan: push ulang entri yang sudah ada
+    (mis. re-select) tak mengubah run jadi claim atau sebaliknya.
+    Tak pernah raise."""
+    try:
+        with _SESSION_LOCK:
+            ent = SESSION.get(key) or {}
+            meta = ent.get("meta") if isinstance(ent.get("meta"), dict) else {}
+            old_origin = ""
+            try:
+                for _s in (meta.get("sessions") or []):
+                    if isinstance(_s, dict) and str(_s.get("id") or "") == str(sid):
+                        old_origin = str(_s.get("origin") or "")
+                        break
+            except Exception:
+                pass
+            hist = [s for s in (meta.get("sessions") or [])
+                    if isinstance(s, dict) and s.get("id") and str(s["id"]) != str(sid)]
+            now = time.time()
+            hist.insert(0, {"id": str(sid), "title": str(title or "--"),
+                            "created": now, "message_count": 0,
+                            "origin": old_origin or str(origin or "run")})
+            meta["sessions"] = hist[:_ANNA_MAX_SESSIONS]
+            ent["meta"] = meta
+            SESSION[key] = ent
+        _session_save()
+    except Exception:
+        pass
+
+
+def _session_owners_snapshot():
+    """{sid: user_key} untuk semua sesi yang dipegang user mana pun.
+
+    Dipakai gerbang klaim: sid yang sudah dipegang user lain DITOLAK
+    untuk diklaim (403), kecuali pemiliknya. Tak pernah raise."""
+    try:
+        with _SESSION_LOCK:
+            out = {}
+            for k, ent in SESSION.items():
+                try:
+                    kk = str(k)
+                    e = ent or {}
+                    if e.get("id"):
+                        out.setdefault(str(e["id"]), kk)
+                    m = e.get("meta") if isinstance(e.get("meta"), dict) else {}
+                    for s in (m.get("sessions") or []):
+                        if isinstance(s, dict) and s.get("id"):
+                            out.setdefault(str(s["id"]), kk)
+                except Exception:
+                    continue
+            return out
+    except Exception:
+        return {}
+
+
+def _session_hist_drop(key, sid):
+    """Hapus satu sesi dari histori user. Return True bila ada yang dibuang."""
+    try:
+        sid = str(sid or "").strip()
+        if not sid:
+            return False
+        with _SESSION_LOCK:
+            ent = SESSION.get(key) or {}
+            meta = ent.get("meta") if isinstance(ent.get("meta"), dict) else {}
+            hist = [s for s in (meta.get("sessions") or [])
+                    if isinstance(s, dict) and str(s.get("id") or "") != sid]
+            dropped = len(hist) != len(meta.get("sessions") or [])
+            meta["sessions"] = hist[:_ANNA_MAX_SESSIONS]
+            if str(ent.get("id") or "") == sid:
+                ent["id"] = hist[0]["id"] if hist else None
+                if not hist:
+                    meta.pop("title", None)
+            ent["meta"] = meta
+            SESSION[key] = ent
+        _session_save()
+        return dropped
+    except Exception:
+        return False
+
+
+def _session_set(sid, meta=None, key=""):
+    with _SESSION_LOCK:
+        ent = SESSION.get(key) or {}
+        old_meta = ent.get("meta") if isinstance(ent.get("meta"), dict) else {}
+        ent["id"] = sid
         if meta is not None:
-            SESSION["meta"] = meta
+            new_meta = dict(meta) if isinstance(meta, dict) else {}
+            # Pertahankan histori sesi (maks 3) + sinkronkan entri aktif.
+            # Origin entri lama dipertahankan (klaim tetap klaim); entri baru
+            # dari run = pemilik penuh.
+            _old_origin = {}
+            try:
+                for _s in (old_meta.get("sessions") or []):
+                    if isinstance(_s, dict) and _s.get("id"):
+                        _old_origin[str(_s["id"])] = str(_s.get("origin") or "run")
+            except Exception:
+                pass
+            hist = [s for s in (old_meta.get("sessions") or [])
+                    if isinstance(s, dict) and s.get("id") and str(s["id"]) != str(sid)]
+            hist.insert(0, {"id": str(sid),
+                            "title": str(new_meta.get("title") or "--"),
+                            "created": new_meta.get("created") or time.time(),
+                            "message_count": int(new_meta.get("message_count") or 0),
+                            "origin": _old_origin.get(str(sid), "run")})
+            new_meta["sessions"] = hist[:_ANNA_MAX_SESSIONS]
+            ent["meta"] = new_meta
+        SESSION[key] = ent
     _session_save()
 
 
-def _session_bump_count():
+def _session_bump_count(key=""):
     # Tiap run selesai = aktivitas: refresh TTL agar chat yang hidup tidak
     # diputus tiap 1 jam. Session idle tetap expired via _session_expired.
     with _SESSION_LOCK:
-        meta = SESSION.get("meta")
+        ent = SESSION.get(key) or {}
+        meta = ent.get("meta")
         if isinstance(meta, dict):
             meta["message_count"] = meta.get("message_count", 0) + 1
             meta["created"] = time.time()
+            try:
+                sid = str(ent.get("id") or "")
+                hist = list(meta.get("sessions") or [])
+                for s in hist:
+                    if isinstance(s, dict) and str(s.get("id") or "") == sid:
+                        s["message_count"] = meta["message_count"]
+                        s["created"] = meta["created"]
+                        break
+                meta["sessions"] = hist[:_ANNA_MAX_SESSIONS]
+            except Exception:
+                pass
+            ent["meta"] = meta
+            SESSION[key] = ent
     _session_save()
+
+def _session_owned_ids(key=""):
+    """Semua ID sesi Hermes milik user: aktif + histori (maks 3).
+
+    Dipakai menutup 3 celah: (1) transcript hanya untuk miliknya, (2)
+    /api/sessions difilter miliknya, (3) pilih sesi ditolak bila ID tak ada
+    di store Hermes (session_ids) DAN bukan miliknya. Key "" (token-only)
+    = pemilik tunggal kanal netral.
+    Tak pernah raise."""
+    try:
+        with _SESSION_LOCK:
+            ent = SESSION.get(key) or {}
+            active = ent.get("id")
+            meta = ent.get("meta") if isinstance(ent.get("meta"), dict) else {}
+            hist = meta.get("sessions") or []
+        out = set()
+        if active:
+            out.add(str(active))
+        for s in hist:
+            if isinstance(s, dict) and s.get("id"):
+                out.add(str(s["id"]))
+        return out
+    except Exception:
+        return set()
 
 def persona():
     try:
@@ -1638,7 +2396,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/auth/me":
             sess = _session_from_cookie(self)
             if not sess:
-                return self._json({"error": "tidak ada sesi", "authenticated": False}, 401)
+                _st, _bd = _ana_auth_error(self)
+                return self._json(_bd, _st)
             try:
                 prof = auth_local.fetch_user_profile_by_id(sess.get("user_id"))
             except Exception as e:
@@ -1672,7 +2431,7 @@ class Handler(BaseHTTPRequestHandler):
                 voice_id=voice.voice_id(),
                 stt="browser",
                 tts="edge",
-                session=_session_get()[0]))
+                session=_session_get(_anna_user_key(self))[0]))
         if p == "/api/voices":
             cur = voice.voice_id()
             return self._json(dict(current=cur, agent_name=voice.agent_name(cur), available=voice.available(), voices=voice.curated_voices()))
@@ -1728,6 +2487,14 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 return self._unauth()
             return self._json(services.load_briefing())
+        if p == "/api/session":
+            # GET = daftar sesi ANNA milik user login (maks 3).
+            if not self._token_ok():
+                return self._unauth()
+            _uk = _anna_user_key(self)
+            cur_id, cur_meta = _session_get(_uk)
+            return self._json({"ok": True, "session": cur_id, "meta": cur_meta,
+                               "sessions": _session_list(_uk)})
         if p == "/api/session/transcript":
             if not self._token_ok():
                 return self._unauth()
@@ -1735,13 +2502,27 @@ class Handler(BaseHTTPRequestHandler):
             sid = (q.get("session_id") or [""])[0].strip()
             if not runtime.valid_session(sid):
                 return self._json({"messages": [], "error": "session_id tidak valid"}, 400)
+            # Celah 1: transcript hanya untuk sesi milik user peminta.
+            # Tanpa ini siapa pun bertoken yang menebak ID bisa baca chat orang.
+            # Tanpa cookie login = 401 eksplisit (bukan 403 yang menyesatkan).
+            _uk = _anna_user_key(self)
+            if _uk == "":
+                return self._json({"messages": [], "error": "login dulu untuk baca transcript"}, 401)
+            if sid not in _session_owned_ids(_uk):
+                return self._json({"messages": [], "error": "bukan sesi milik Anda"}, 403)
             return self._json(services.session_transcript(
                 runtime._hermes_base(), runtime.WORKDIR, sid))
         if p == "/api/sessions":
             if not self._token_ok():
                 return self._unauth()
+            # Celah 2: daftar global difilter ke milik user (judul tak bocor).
+            # Token-only tanpa cookie (ANNA system) = kanal netral, tetap utuh.
+            _uk = _anna_user_key(self)
+            _own = _session_owned_ids(_uk)
+            _allow = None if (_uk == "" and not _own) else _own
             return self._json(services.list_sessions(
-                runtime._hermes_base(), runtime.WORKDIR, runtime.valid_session, _session_get()[0]))
+                runtime._hermes_base(), runtime.WORKDIR, runtime.valid_session, _session_get(_uk)[0],
+                allowed=_allow))
         if p == "/api/vault":
             if not self._token_ok():
                 return self._unauth()
@@ -1767,11 +2548,13 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/map/state":
             if not self._token_ok():
                 return self._unauth()
-            return self._json(map_store.get_state())
+            _ow, _ = _anna_owner_from_request(self)
+            return self._json(map_store.get_state(owner=_ow))
         if p == "/api/map/queue":
             if not self._token_ok():
                 return self._unauth()
-            return self._json({"commands": map_store.take_pending()})
+            _ow, _ = _anna_owner_from_request(self)
+            return self._json({"commands": map_store.take_pending(owner=_ow)})
         if p == "/api/map/result":
             cmd_id = ""
             try:
@@ -1783,15 +2566,35 @@ class Handler(BaseHTTPRequestHandler):
                 return self._unauth()
             if not cmd_id:
                 return self._json({"error": "id required"}, 400)
-            return self._json(map_store.get_result(cmd_id))
+            _ow, _ = _anna_owner_from_request(self)
+            return self._json(map_store.get_result(cmd_id, owner=_ow))
         if p == "/api/spatial/chart":
             if not self._token_ok():
                 return self._unauth()
-            return self._json(dict(ok=True, **spatial_chart_store.get_state()))
+            _ow, _ = _anna_owner_from_request(self)
+            return self._json(dict(ok=True, **spatial_chart_store.get_state(owner=_ow)))
         if p == "/api/spatial/report":
             if not self._token_ok():
                 return self._unauth()
-            return self._json(dict(ok=True, **spatial_report_store.get_state()))
+            _ow, _ = _anna_owner_from_request(self)
+            return self._json(dict(ok=True, **spatial_report_store.get_state(owner=_ow)))
+        if p == "/api/spatial/archive":
+            if not self._token_ok():
+                return self._unauth()
+            _ow, _ = _anna_owner_from_request(self)
+            if not _ow:
+                return self._json({"ok": False, "error": "arsip wajib lewat sesi user login"}, 401)
+            return self._json({"ok": True,
+                               "items": spatial_archive_store.list_archive(owner=_ow)})
+        if p == "/api/tpl":
+            # Template pertanyaan per-user: default bawaan, bisa edit penuh.
+            if not self._token_ok():
+                return self._unauth()
+            _ow, _ = _anna_owner_from_request(self)
+            if not _ow:
+                return self._json({"ok": False, "error": "template wajib lewat sesi user login"}, 401)
+            return self._json({"ok": True,
+                               "groups": tpl_store.list_tpl(owner=_ow)})
         if p.startswith("/api/aktivitas/photo/"):
             # query ?token= allowed so <img> works like terminal-stream
             if not self._token_ok():
@@ -1908,6 +2711,13 @@ class Handler(BaseHTTPRequestHandler):
         data = f.read_bytes()
         if rel == "index.html":
             data = data.replace(b"__ANA_TOKEN__", API_TOKEN.encode())
+            # Base URL foto Directus server (popup pin aktivitas, opsi langsung).
+            # Publik tanpa kredensial — hanya host, bukan secret.
+            try:
+                _durl = (os.environ.get("DIRECTUS_URL") or "https://sandbox2.kphbwb.web.id").strip().rstrip("/")
+            except Exception:
+                _durl = "https://sandbox2.kphbwb.web.id"
+            data = data.replace(b"__ANA_DIRECTUS_URL__", _durl.encode())
         # ── cache policy ──
         # HTML navigations: no-store (must revalidate token), SW: no-cache (update fast)
         # versioned/hashed vendor & styles: immutable 1y, icons/assets: 1y, else 1h
@@ -2063,7 +2873,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 is_2fa = bool(prof.get("tfa_secret"))
             secret = (prof.get("2fa_secret") or "").strip() if isinstance(prof.get("2fa_secret"), str) else ""
-            if is_2fa:
+            # Bypass 2FA uji coba: ANA_TFA_BYPASS=1 lewati gate OTP (password
+            # tetap wajib). Reversibel: unset + restart. JANGAN di produksi.
+            _tfa_bypass = (os.environ.get("ANA_TFA_BYPASS", "").strip().lower()
+                           in ("1", "true", "yes", "on"))
+            if _tfa_bypass and is_2fa:
+                _alog(f"auth login TFA-BYPASS aktif email={email[:32]} ip={ip}", "warn")
+            if is_2fa and not _tfa_bypass:
                 if not otp:
                     _alog(f"auth login 401 otp_required email={email[:32]} ip={ip}", "warn")
                     return self._json({"error": "otp_required", "message": "kode 2FA diperlukan"}, 401)
@@ -2074,15 +2890,31 @@ class Handler(BaseHTTPRequestHandler):
                     _alog(f"auth login 401 otp salah/kadaluarsa email={email[:32]} ip={ip}", "warn")
                     return self._json({"error": "kode 2FA salah atau kadaluarsa"}, 401)
             ua = self.headers.get("User-Agent","") or ""
-            sid, sess, evicted = auth_local.create_session(prof, ua, ip)
+            did = _ana_device_id(self)
+            sid, sess, evicted, evict_info = auth_local.create_session(prof, ua, ip, did)
+            if evicted:
+                # Switch perangkat: batalkan run aktif user ini agar slot
+                # _RUN_BY_USER[user] bebas detik itu juga (tanpa nunggu 300s).
+                # Hanya milik user ini — user lain tak tersentuh.
+                try:
+                    _uk_ev = str(sess.get("user_id") or "").strip()
+                    if _uk_ev:
+                        _sid_ev, _ = _session_get(_uk_ev)
+                        runtime.cancel_active(_sid_ev)
+                        with RUN_STATE_GUARD:
+                            _RUN_BY_USER.pop(_uk_ev, None)
+                        _log_to_file(f"[auth] switch device: user={_uk_ev[:8]} evicted={len(evicted)} run dibatalkan")
+                except Exception:
+                    pass
             _alog(f"auth login 200 ok email={email[:32]} ip={ip} evicted={bool(evicted)}", "info")
             safe = auth_local.sanitize_profile_for_client(prof)
-            body_out = json.dumps({"ok": True, "user": safe, "evicted": bool(evicted)}).encode()
+            body_out = json.dumps({"ok": True, "user": safe, "evicted": bool(evicted),
+                                   "evict": evict_info or {}}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body_out)))
             self.send_header("Cache-Control", "no-store")
-            _set_session_cookie(self, sid)
+            _set_session_cookie(self, sid, did)
             self.end_headers()
             self.wfile.write(body_out)
             return
@@ -2105,7 +2937,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body_out)))
-            _set_session_cookie(self, sid)
+            try:
+                _did_keep = _parse_cookies(raw_ck).get("ana_device", "").strip()[:64]
+            except Exception:
+                _did_keep = ""
+            _set_session_cookie(self, sid, _did_keep)
             self.end_headers()
             self.wfile.write(body_out)
             return
@@ -2114,6 +2950,13 @@ class Handler(BaseHTTPRequestHandler):
             sid = _parse_cookies(raw_ck).get("ana_session","").strip()
             if sid:
                 auth_local.destroy_session(sid)
+            # Logout TIDAK menghapus sesi ANNA: login kembali lanjutkan sesi
+            # terakhir sampai user /new atau pilih sesi lain. Hanya cookie auth
+            # yang dibuang; histori ANNA (maks 3/user) tetap persisten.
+            try:
+                _anna_scope_prune()
+            except Exception:
+                pass
             body_out = json.dumps({"ok": True}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -2261,8 +3104,26 @@ class Handler(BaseHTTPRequestHandler):
             params = body.get("params", {})
             if not isinstance(params, dict):
                 return self._json({"error": "params must be object"}, 400)
+            params, _clamped, _deny, _deny_msg = _enforce_wilayah_scope(self, params, template)
+            if _deny:
+                return self._json({"error": _deny_msg}, 403)
             try:
-                return self._json(_simoge_query(template, params))
+                _scope_now = _wilayah_scope_from_session(self)
+            except Exception:
+                _scope_now = {}
+            try:
+                _deny2, _deny2_msg = _wilayah_chain_check(_scope_now, params)
+            except Exception:
+                _deny2, _deny2_msg = False, ""
+            if _deny2:
+                return self._json({"error": _deny2_msg}, 403)
+            try:
+                data = _simoge_query(template, params)
+                if _clamped:
+                    data["scope_clamped"] = _clamped
+                if template == "wilayah_labels":
+                    data = _scope_wilayah_labels(data, _scope_now)
+                return self._json(data)
             except Exception as e:
                 _dlog(f"simoge/query {template} ERROR {type(e).__name__}: {str(e)[:160]}")
                 if _DEBUG_MAP:
@@ -2276,8 +3137,20 @@ class Handler(BaseHTTPRequestHandler):
             params = body.get("params", {})
             if not isinstance(params, dict):
                 return self._json({"error": "params must be object"}, 400)
+            params, _clamped, _deny, _deny_msg = _enforce_wilayah_scope(self, params, template)
+            if _deny:
+                return self._json({"error": _deny_msg}, 403)
             try:
-                return self._json(_simoge_query_packet(template, params))
+                _deny2, _deny2_msg = _wilayah_chain_check(_wilayah_scope_from_session(self), params)
+            except Exception:
+                _deny2, _deny2_msg = False, ""
+            if _deny2:
+                return self._json({"error": _deny2_msg}, 403)
+            try:
+                data = _simoge_query_packet(template, params)
+                if _clamped:
+                    data["scope_clamped"] = _clamped
+                return self._json(data)
             except Exception as e:
                 _dlog(f"simoge/packet {template} ERROR {type(e).__name__}: {str(e)[:160]}")
                 if _DEBUG_MAP:
@@ -2298,6 +3171,15 @@ class Handler(BaseHTTPRequestHandler):
                 mrr = int(body.get("max_result_rows", 20))
             except Exception:
                 mrr = 20
+            params, _clamped, _deny, _deny_msg = _enforce_wilayah_scope(self, params, template)
+            if _deny:
+                return self._json({"error": _deny_msg}, 403)
+            try:
+                _deny2, _deny2_msg = _wilayah_chain_check(_wilayah_scope_from_session(self), params)
+            except Exception:
+                _deny2, _deny2_msg = False, ""
+            if _deny2:
+                return self._json({"error": _deny2_msg}, 403)
             try:
                 return self._json(_simoge_analyze(template, params, operations, max_result_rows=mrr))
             except Exception as e:
@@ -2311,6 +3193,15 @@ class Handler(BaseHTTPRequestHandler):
             params = body.get("params", {})
             if not isinstance(params, dict):
                 return self._json({"error": "params must be object"}, 400)
+            params, _clamped, _deny, _deny_msg = _enforce_wilayah_scope(self, params, template)
+            if _deny:
+                return self._json({"error": _deny_msg}, 403)
+            try:
+                _deny2, _deny2_msg = _wilayah_chain_check(_wilayah_scope_from_session(self), params)
+            except Exception:
+                _deny2, _deny2_msg = False, ""
+            if _deny2:
+                return self._json({"error": _deny2_msg}, 403)
             try:
                 # drive=True  → pemanggil ANA: efek lewat `spatial_set`, server
                 #   tak push GeoJSON (satu penulis peta = panel).
@@ -2319,8 +3210,16 @@ class Handler(BaseHTTPRequestHandler):
                 # Default True: panel selalu kirim drive:false eksplisit
                 #   (businessAdapter.loadBusinessData), jadi aman. Default False
                 #   bikin show_on_map ANA (tanpa flag) jatuh ke push mentah.
+                # scope = wilayah login: filter wilayah ANA di luar scope tak
+                # diteruskan ke panel via spatial_set (lihat _spatial_sync).
+                try:
+                    _sync_scope = _wilayah_scope_from_session(self)
+                except Exception:
+                    _sync_scope = {}
+                _ow_show, _ = _anna_owner_from_request(self)
                 data = _simoge_show_on_map(template, params,
-                                           drive_panel=bool(body.get("drive", True)))
+                                           drive_panel=bool(body.get("drive", True)),
+                                           scope=_sync_scope, owner=_ow_show)
                 if _DEBUG_MAP and data.get("ok"):
                     _dlog(f"show_on_map {template} feats={data.get('features')} "
                           f"drive={bool(body.get('drive', True))} "
@@ -2341,13 +3240,140 @@ class Handler(BaseHTTPRequestHandler):
             action = (body.get("action") or "status").strip().lower()
             return self._tiles_cron(action, (body.get("schedule") or "").strip())
         if p == "/api/session":
+            # CRUD sesi ANNA milik user login (maks 3, histori persisten).
+            # GET/POST-tanpa-action = daftar; {session_id} = pilih aktif;
+            # {action:"new"} = sesi baru (terbaru digeser, maks 3);
+            # {action:"delete", session_id} = hapus satu miliknya.
+            _uk = _anna_user_key(self)
+            action = (body.get("action") or "").strip().lower()
+            if action == "delete":
+                # Baca origin SEBELUM drop (sesudah drop entrinya hilang).
+                _origin = ""
+                try:
+                    _dsid0 = str(body.get("session_id") or "").strip()
+                    if _dsid0:
+                        with _SESSION_LOCK:
+                            _ent0 = SESSION.get(_uk) or {}
+                            _m0 = _ent0.get("meta") if isinstance(_ent0.get("meta"), dict) else {}
+                            for _s0 in (_m0.get("sessions") or []):
+                                if isinstance(_s0, dict) and str(_s0.get("id") or "") == _dsid0:
+                                    _origin = str(_s0.get("origin") or "run")
+                                    break
+                            if not _origin and str(_ent0.get("id") or "") == _dsid0:
+                                _origin = "run"
+                except Exception:
+                    _origin = ""
+                ok = _session_hist_drop(_uk, body.get("session_id"))
+                try:
+                    _anna_scope_prune()
+                except Exception:
+                    pass
+                # Hapus bertingkat: histori dashboard selalu dibuang; store
+                # Hermes ikut dihapus HANYA bila sesi lahir dari dashboard
+                # (origin "run" via chat /api/run) dan sudah yatim (tak ada
+                # user memegangnya) — honori janji UI "riwayat ikut hilang" +
+                # cegah klaim-ulang pasca-hapus. Sesi adopsi CLI ("claim")
+                # TAK PERNAH disentuh store-nya: itu riwayat CLI user,
+                # dashboard hanya melepas pegangannya.
+                _store_deleted = False
+                try:
+                    _dsid = str(body.get("session_id") or "").strip()
+                    if ok and _dsid and (_origin or "run") == "run":
+                        _mine_now = _session_owned_ids(_uk)
+                        if _dsid not in _mine_now:
+                            _owners = _session_owners_snapshot()
+                            if _dsid not in _owners:
+                                try:
+                                    _store_deleted = bool(services.delete_session(
+                                        runtime._hermes_base(), runtime.WORKDIR, _dsid))
+                                except Exception:
+                                    _store_deleted = False
+                except Exception:
+                    pass
+                return self._json({"ok": True, "deleted": bool(ok),
+                                   "store_deleted": bool(_store_deleted),
+                                   "sessions": _session_list(_uk)})
             sid = body.get("session_id")
             if sid and runtime.valid_session(sid):
-                _session_set(str(sid), {"title": body.get("title", "--"), "created": time.time(), "message_count": 0})
-                cur_id, cur_meta = _session_get()
-                return self._json({"ok": True, "session": cur_id, "meta": cur_meta})
-            _clear_session()
-            return self._json({"ok": True, "session": None})
+                # Klaim sesi baru wajib cookie login VALID. Tanpa ini klaim
+                # dengan cookie mati/asing jatuh ke kunci netral "" dan
+                # mengotori kanal ANNA system (kasus: cookie pra-login).
+                if _uk == "":
+                    raw_ck = ""
+                    try:
+                        raw_ck = self.headers.get("Cookie", "") or ""
+                    except Exception:
+                        raw_ck = ""
+                    if not _parse_cookies(raw_ck).get("ana_session", "").strip():
+                        return self._json({"ok": False, "error": "login dulu sebelum pilih sesi"}, 401)
+                # Wire session_ids(): regex valid != sesi ada di store.
+                # Pilih ID basi/asing: 404 eksplisit, bukan diam-diam jadi
+                # sesi aktif lalu run gagal saat --resume. Store tak bisa
+                # dibaca (None) = fallback accept seperti dulu (fail-open).
+                try:
+                    _known = services.session_ids(runtime._hermes_base(), runtime.WORKDIR)
+                except Exception:
+                    _known = None
+                if _known is not None and str(sid) not in _known and str(sid) not in _session_owned_ids(_uk):
+                    return self._json({"ok": False, "error": "sesi tidak dikenal di store Hermes"}, 404)
+                # Gerbang kepemilikan global: sid yang sudah dipegang user
+                # LAIN tidak boleh diklaim — user hanya boleh pilih miliknya
+                # (atau ID yatim yang belum dipegang siapa pun). Tanpa ini
+                # user B yang tahu ID sesi A bisa klaim + resume + baca
+                # transcript A. Pemilik mengklaim ulang miliknya = boleh.
+                try:
+                    _owners = _session_owners_snapshot()
+                    _holder = _owners.get(str(sid))
+                    if _holder is not None and str(_holder) != str(_uk):
+                        return self._json({"ok": False, "error": "sesi milik user lain"}, 403)
+                except Exception:
+                    pass
+                if action == "new":
+                    _session_hist_push(_uk, str(sid), body.get("title"), origin="claim")
+                else:
+                    # Pilih langsung (tanpa new): pastikan entri histori ada
+                    # dengan origin claim — tanpa ini origin default "run"
+                    # dan hapus nanti keliru menyentuh store CLI user.
+                    try:
+                        _have = str(sid) in _session_owned_ids(_uk)
+                    except Exception:
+                        _have = True
+                    if not _have:
+                        _session_hist_push(_uk, str(sid), body.get("title"), origin="claim")
+                _session_set(str(sid), {"title": body.get("title", "--"), "created": time.time(), "message_count": 0}, key=_uk)
+                cur_id, cur_meta = _session_get(_uk)
+                return self._json({"ok": True, "session": cur_id, "meta": cur_meta,
+                                   "sessions": _session_list(_uk)})
+            if action in ("", "list"):
+                cur_id, cur_meta = _session_get(_uk)
+                return self._json({"ok": True, "session": cur_id, "meta": cur_meta,
+                                   "sessions": _session_list(_uk)})
+            _clear_session(_uk)
+            return self._json({"ok": True, "session": None, "sessions": []})
+
+        if p == "/api/session/archive":
+            # Arsip sesi aktif ke histori (maks 3) TANPA menghapus sesi di
+            # store Hermes. Dipakai tombol +BARU: sesi lama tetap utuh dan
+            # bisa dibuka lagi dari picker; run berikut buat sesi baru.
+            # Tanpa endpoint ini +BARU = setSession(null) yang arsipnya
+            # hilang (dead-end): user tak bisa kembali ke sesi lama.
+            if not self._token_ok():
+                return self._unauth()
+            _uk = _anna_user_key(self)
+            if _uk == "":
+                return self._json({"ok": False, "error": "login dulu"}, 401)
+            try:
+                _aid, _ameta = _session_get(_uk)
+            except Exception:
+                _aid, _ameta = None, None
+            try:
+                if _aid and runtime.valid_session(_aid):
+                    _session_hist_push(_uk, str(_aid),
+                                       (dict(_ameta or {}).get("title") if isinstance(_ameta, dict) else None))
+            except Exception:
+                pass
+            _clear_session(_uk)
+            return self._json({"ok": True, "session": None, "sessions": _session_list(_uk)})
 
         if p == "/api/speak":
             text = (body.get("text") or "").strip()
@@ -2438,6 +3464,15 @@ class Handler(BaseHTTPRequestHandler):
                     auth_local.destroy_all_sessions()
                 except Exception:
                     pass
+                # Sesi ANNA per-user ikut hangus semua (data beda DB) + prune scope.
+                try:
+                    _clear_session(None)
+                except Exception:
+                    pass
+                try:
+                    _anna_scope_prune(0)
+                except Exception:
+                    pass
                 try:
                     for _m in ("simoge_db",):
                         if _m in sys.modules:
@@ -2464,14 +3499,42 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json({"error": str(e)[:200]}, 500)
         if p == "/api/new":
-            runtime.cancel_active()
-            _clear_session()
-            return self._json({"ok": True})
+            # Sesi baru: arsipkan sesi aktif ke histori (maks 3), kosongkan
+            # aktif — run berikut buat sesi Hermes baru. Histori lama tetap
+            # bisa dipilih lagi via /api/session {session_id}.
+            _uk = _anna_user_key(self)
+            try:
+                _sid0, _meta0 = _session_get(_uk)
+            except Exception:
+                _sid0, _meta0 = None, None
+            runtime.cancel_active(_sid0)
+            try:
+                if _sid0 and runtime.valid_session(_sid0):
+                    _session_hist_push(_uk, str(_sid0),
+                                       (dict(_meta0 or {}).get("title") if isinstance(_meta0, dict) else None))
+            except Exception:
+                pass
+            with _SESSION_LOCK:
+                ent = SESSION.get(_uk) or {}
+                ent["id"] = None
+                SESSION[_uk] = ent
+            _session_save()
+            try:
+                _anna_scope_prune()
+            except Exception:
+                pass
+            return self._json({"ok": True, "sessions": _session_list(_uk)})
 
         if p == "/api/cancel":
             # Cancel hanya kill proses aktif — session tetap agar chat berikutnya
             # resume konteks Hermes, bukan mulai fresh diam-diam.
-            stopped = runtime.cancel_active()
+            # Target = sesi Hermes user peminta (bukan sesi global) supaya
+            # cancel user A tak memutus turn user B yang sedang jalan.
+            try:
+                _sid0, _ = _session_get(_anna_user_key(self))
+            except Exception:
+                _sid0 = None
+            stopped = runtime.cancel_active(_sid0)
             return self._json({"ok": True, "stopped": stopped})
         if p == "/api/restart":
             # Restart proses sendiri: respon ok dulu, lalu exec ulang
@@ -2556,7 +3619,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 op = (body.get("op") or "").strip()
                 args = body.get("args", {})
-                cmd_id, err = map_store.push_command(op, args)
+                _ow, _ = _anna_owner_from_request(self)
+                cmd_id, err = map_store.push_command(op, args, owner=_ow)
             except Exception as e:                        # noqa: BLE001
                 return self._json({"error": str(e)[:200]}, 500)
             if err:
@@ -2567,20 +3631,23 @@ class Handler(BaseHTTPRequestHandler):
             # Frontend push state terbaru dari adapter (canonical, satu sumber).
             if not isinstance(body.get("state"), dict):
                 return self._json({"error": "state must be object"}, 400)
-            map_store.set_state(body["state"])
+            _ow, _ = _anna_owner_from_request(self)
+            map_store.set_state(body["state"], owner=_ow)
             return self._json({"ok": True})
         if p == "/api/map/result":
             # Frontend lapor hasil eksekusi perintah antrean.
             cmd_id = str(body.get("id") or "").strip()
             if not cmd_id:
                 return self._json({"error": "id required"}, 400)
-            map_store.put_result(cmd_id, body.get("ok", True), body.get("data", body.get("error", "")))
+            _ow, _ = _anna_owner_from_request(self)
+            map_store.put_result(cmd_id, body.get("ok", True), body.get("data", body.get("error", "")), owner=_ow)
             return self._json({"ok": True})
         # ── spatial intel (directive #1-20): DB=data file, bukan SQL mentah ──
         if p == "/api/spatial/resolve":
             ref = str(body.get("ref") or body.get("id") or "").strip()
             try:
-                cur = (map_store.get_state().get("state") or {})
+                _ow, _ = _anna_owner_from_request(self)
+                cur = (map_store.get_state(owner=_ow).get("state") or {})
                 r = spatial_intel.resolve_entity(
                     ref, selected=cur.get("selected"),
                     highlighted=cur.get("highlighted"))
@@ -2680,27 +3747,187 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 return self._json({"error": "body must be object"}, 400)
             # allow bare {chart:{}} as shorthand hide/show
-            ok, err = spatial_chart_store.set_chart(body)
+            # Robust: push BERDATA wajib lewat sesi user login (cookie) atau
+            # sesi Hermes milik user (header X-Hermes-Session dari tool ANNA).
+            # Tanpa itu DITOLAK 401 — tak ada kanal netral berisi data.
+            # Hide (visible False) tetap boleh netral (clear umum, tak ada data).
+            _ow, _osc = _anna_owner_from_request(self)
+            if not _ow and body.get("visible") is not False and any(
+                    body.get(k) for k in ("charts", "chart", "kpis", "title", "narration", "evidence")):
+                return self._json({"ok": False, "error": "chart berisi data wajib push lewat sesi user login"}, 401)
+            ok, err = spatial_chart_store.set_chart(body, owner=_ow, scope=_osc)
             if not ok:
                 return self._json({"ok": False, "error": err}, 400)
-            return self._json(dict(ok=True, **spatial_chart_store.get_state()))
+            return self._json(dict(ok=True, **spatial_chart_store.get_state(owner=_ow)))
         # ── spatial report (LAPORAN BISNIS multi halaman — full control ANA, session state) ──
         if p == "/api/spatial/report":
             if not self._token_ok():
                 return self._unauth()
             if not isinstance(body, dict):
                 return self._json({"error": "body must be object"}, 400)
-            ok, err = spatial_report_store.set_report(body)
+            _ow, _osc = _anna_owner_from_request(self)
+            if not _ow and body.get("visible") is not False and any(
+                    body.get(k) for k in ("pages", "title", "subtitle", "evidence")):
+                return self._json({"ok": False, "error": "report berisi data wajib push lewat sesi user login"}, 401)
+            ok, err = spatial_report_store.set_report(body, owner=_ow, scope=_osc)
             if not ok:
                 return self._json({"ok": False, "error": err}, 400)
-            return self._json(dict(ok=True, **spatial_report_store.get_state()))
+            return self._json(dict(ok=True, **spatial_report_store.get_state(owner=_ow)))
+        # ── arsip chart/laporan per-user (server-side, survive restart) ──
+        # GET daftar → {"items":[{id,kind,title,saved_at,n_items}]} milik peminta.
+        # POST {"kind","entry_id"?} → simpan snapshot live (tanpa entry_id)
+        #   atau tampilkan kembali (dengan entry_id → timpa state live).
+        # POST {"op":"delete","entry_id"} → hapus milik sendiri (server tak
+        #   punya do_DELETE — hapus mentah 501 — jadi lewat POST).
+        # Isolasi penuh: owner dari sesi login/header sesi; netral DITOLAK
+        # 401 untuk semua op (daftar pun tak ada gunanya tanpa owner).
+        if p == "/api/spatial/archive":
+            if not self._token_ok():
+                return self._unauth()
+            _ow, _osc = _anna_owner_from_request(self)
+            if not _ow:
+                return self._json({"ok": False, "error": "arsip wajib lewat sesi user login"}, 401)
+            if self.command == "GET" or not isinstance(body, dict) or not body:
+                return self._json({"ok": True,
+                                   "items": spatial_archive_store.list_archive(owner=_ow)})
+            if body.get("op") == "move":
+                eid = str(body.get("entry_id") or body.get("id") or "")
+                if not eid:
+                    return self._json({"ok": False, "error": "entry_id required"}, 400)
+                try:
+                    pos = int(body.get("to", 0))
+                except Exception:
+                    pos = 0
+                ok, res = spatial_archive_store.move_archive(
+                    owner=_ow, entry_id=eid, to=pos)
+                if not ok:
+                    return self._json({"ok": False, "error": res}, 404)
+                return self._json({"ok": True, "moved": eid, "items": res})
+            if body.get("op") == "delete":
+                eid = str(body.get("entry_id") or body.get("id") or "")
+                if not eid:
+                    return self._json({"ok": False, "error": "entry_id required"}, 400)
+                if not spatial_archive_store.delete_archive(owner=_ow, entry_id=eid):
+                    return self._json({"ok": False, "error": "arsip tidak ditemukan"}, 404)
+                return self._json({"ok": True, "deleted": eid,
+                                   "items": spatial_archive_store.list_archive(owner=_ow)})
+            if body.get("entry_id") or body.get("id"):
+                st = spatial_archive_store.get_archive(
+                    owner=_ow, entry_id=str(body.get("entry_id") or body.get("id")))
+                if st is None:
+                    return self._json({"ok": False, "error": "arsip tidak ditemukan"}, 404)
+                kind = str(body.get("kind") or "").strip().lower()
+                if not kind:
+                    kind = "report" if st.get("pages") else "chart"
+                if kind == "report":
+                    ok, err = spatial_report_store.set_report(st, owner=_ow, scope=_osc)
+                    if not ok:
+                        return self._json({"ok": False, "error": err}, 400)
+                    return self._json(dict(ok=True, restored="report",
+                                           **spatial_report_store.get_state(owner=_ow)))
+                ok, err = spatial_chart_store.set_chart(st, owner=_ow, scope=_osc)
+                if not ok:
+                    return self._json({"ok": False, "error": err}, 400)
+                return self._json(dict(ok=True, restored="chart",
+                                       **spatial_chart_store.get_state(owner=_ow)))
+            kind = str(body.get("kind") or "").strip().lower()
+            if kind == "report":
+                live = spatial_report_store.get_state(owner=_ow)
+            elif kind == "chart":
+                live = spatial_chart_store.get_state(owner=_ow)
+            else:
+                return self._json({"ok": False, "error": "kind harus chart|report"}, 400)
+            ok, res = spatial_archive_store.save_archive(
+                owner=_ow, kind=kind, title=str(body.get("title") or ""),
+                state=live, scope=_osc)
+            if not ok:
+                return self._json({"ok": False, "error": res}, 400)
+            return self._json({"ok": True, "saved": res,
+                               "items": spatial_archive_store.list_archive(owner=_ow)})
+        if p == "/api/tpl":
+            # Simpan penuh / reset default milik sendiri.
+            if not self._token_ok():
+                return self._unauth()
+            _ow, _ = _anna_owner_from_request(self)
+            if not _ow:
+                return self._json({"ok": False, "error": "template wajib lewat sesi user login"}, 401)
+            if not isinstance(body, dict) or not body:
+                return self._json({"ok": True,
+                                   "groups": tpl_store.list_tpl(owner=_ow)})
+            if str(body.get("op") or "").strip().lower() == "reset":
+                ok, res = tpl_store.reset_tpl(owner=_ow)
+                if not ok:
+                    return self._json({"ok": False, "error": res}, 400)
+                return self._json({"ok": True, "groups": res})
+            ok, res = tpl_store.set_tpl(owner=_ow, groups=body.get("groups"))
+            if not ok:
+                return self._json({"ok": False, "error": res}, 400)
+            return self._json({"ok": True, "groups": res})
         if p == "/api/run":
-            if not RUN_LOCK.acquire(blocking=False):
-                return self._json({"error": "ANA is already processing a request"}, 409)
+            # Browser WAJIB cookie login valid: perangkat yang ditendang
+            # (revoked) DITOLAK 401 dengan reason, walau token-nya benar.
+            # Token-only tanpa cookie = jalur tool internal (ANNA system),
+            # tetap boleh (kanal netral). Tanpa gate ini evict tak ada
+            # gunanya: tablet yang ditendang tetap chat penuh via token.
+            _run_has_cookie = False
             try:
+                _raw_ck = self.headers.get("Cookie", "") or ""
+                _run_has_cookie = bool(_parse_cookies(_raw_ck).get("ana_session", "").strip())
+            except Exception:
+                _run_has_cookie = False
+            if _run_has_cookie and _session_from_cookie(self) is None:
+                _st, _bd = _ana_auth_error(self)
+                return self._json(_bd, _st)
+            # Watchdog anti-409-nyangkut PER-USER: ijin run baru bila user ini
+            # tak ada run aktif ATAU run-nya lewat RUN_TIMEOUT_SEC (300s).
+            # Slot = _RUN_BY_USER[user_key]; kanal netral (""/token-only)
+            # pakai RUN_STATE global seperti dulu. Tanpa slot per-user: satu
+            # run A yang stall menahan SEMUA user lain dengan 409.
+            _run_uk = ""
+            try:
+                _run_uk = _anna_user_key(self)
+            except Exception:
+                _run_uk = ""
+            _run_slot = _RUN_BY_USER.setdefault(str(_run_uk or ""), {"active": False, "since": 0.0, "message": ""}) if _run_uk else RUN_STATE
+            _allow_run = False
+            _stale_msg = ""
+            try:
+                with RUN_STATE_GUARD:
+                    # Flag boolean, BUKAN thread.is_alive(): thread koneksi
+                    # keep-alive server hidup terus walau run sudah selesai —
+                    # cek is_alive selalu True dan semua run 409 selamanya.
+                    _busy = bool(_run_slot.get("active"))
+                    _age = time.time() - float(_run_slot.get("since") or 0.0)
+                    if not _busy:
+                        _allow_run = True
+                    elif _age > RUN_TIMEOUT_SEC:
+                        _stale_msg = str(_run_slot.get("message") or "")[:60]
+                        _allow_run = True
+            except Exception:
+                _allow_run = True
+            if not _allow_run:
+                try:
+                    _log_to_file(f"[run] 409 ditolak: user={str(_run_uk)[:8] or '-'} holder_age={_age:.0f}s msg={str(_run_slot.get('message') or '')[:60]}")
+                except Exception:
+                    pass
+                return self._json({"error": "ANA is already processing a request"}, 409)
+            if _stale_msg:
+                try:
+                    _log_to_file(f"[run] stale run diambil alih (> {RUN_TIMEOUT_SEC:.0f}s): {str(_stale_msg)[:60]}")
+                except Exception:
+                    pass
+            try:
+                with RUN_STATE_GUARD:
+                    _run_slot["active"] = True
+                    _run_slot["since"] = time.time()
+                    _run_slot["message"] = str((body.get("message") or "")[:60]) if isinstance(body, dict) else ""
                 return self._stream_run(body)
             finally:
-                RUN_LOCK.release()
+                try:
+                    with RUN_STATE_GUARD:
+                        _run_slot["active"] = False
+                except Exception:
+                    pass
 
         return self._json({"error": "no such endpoint"}, 404)
 
@@ -2711,7 +3938,20 @@ class Handler(BaseHTTPRequestHandler):
         # response headers were gone, so the client only saw a dropped socket.
         message = (payload.get("message") or "").strip()
         extra = (payload.get("system") or "").strip()
-        system = "\n\n".join(x for x in (persona(), extra) if x) or None
+        # Scope wilayah login → blok instruksi untuk ANNA (per-request, ikut
+        # sesi saat itu). Tanpa sesi = tanpa blok (ANNA system bebas).
+        # ANNA yang taat menolak permintaan di luar wilayah user; yang nakal
+        # tetap dijegal tool-guard (ana_simoge_tool) + enforcement server.
+        try:
+            _run_scope = _wilayah_scope_from_session(self)
+        except Exception:
+            _run_scope = {}
+        _scope_block = ""
+        try:
+            _scope_block = _anna_scope_block(_run_scope)
+        except Exception:
+            _scope_block = ""
+        system = "\n\n".join(x for x in (persona(), _scope_block, extra) if x) or None
         # P0-B: ukur budget konteks per /api/run (static vs dynamic, chars).
         # ponytail: history/schema gateway-side belum terukur di sini; upgrade
         # lanjut = gateway usage + retriever counts saat P1.
@@ -2731,8 +3971,10 @@ class Handler(BaseHTTPRequestHandler):
         fresh = bool(payload.get("fresh"))
         if not message:
             return self._json({"error": "empty message"}, 400)
+        # Sesi ANNA per-user (pola resmi Hermes: key per user_id).
+        _uk = _anna_user_key(self)
         if fresh:
-            _clear_session()
+            _clear_session(_uk)
         _run_initial_mode = get_mode()  # snapshot for auto-restore: asisten→coding→asisten
 
         # -- natural language mode switch ("ganti ke mode asisten/coding", "ubah mode", etc.)
@@ -2765,8 +4007,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         # Check session TTL before running
-        if _session_expired():
-            _clear_session()
+        if _session_expired(_uk):
+            _clear_session(_uk)
 
         def emit(ev):
             self.wfile.write((json.dumps(ev) + "\n").encode())
@@ -2784,12 +4026,13 @@ class Handler(BaseHTTPRequestHandler):
         # -- the command matrix: /new /profile /goal /personality /kanban /mission /background /tools /status /browser
         cmd = commands.handle(
             message,
-            runner=lambda m: runtime.run(m, None, persona()))
+            runner=lambda m: runtime.run(m, None, persona()),
+            owner=_uk)
         if cmd:
             if cmd.get("note"):
                 emit(dict(t="note", message=cmd["note"]))
             if cmd.get("fresh"):
-                _clear_session()
+                _clear_session(_uk)
             if cmd.get("message") is None:
                 # answered locally -- no model call needed
                 emit(dict(t="delta", text=cmd.get("reply", "Done.")))
@@ -2799,25 +4042,105 @@ class Handler(BaseHTTPRequestHandler):
             system = "\n\n".join(x for x in (persona(), extra) if x) or None
 
         try:
-            sid0, _ = _session_get()
+            sid0, _ = _session_get(_uk)
             session_id_raw = payload.get("session_id")
             session_id = (session_id_raw or sid0 or "default")
             if isinstance(session_id, str):
                 session_id = session_id.strip()
             else:
                 session_id = "default"
+            # Isolasi live session per user: gateway punya _CURRENT_SESSION_ID
+            # global yang dipakai ulang bila sid None/tak-valid. Tanpa peta
+            # ini user B tanpa sesi aktif masuk ke live session user A.
+            # Selalu teruskan sid live MILIK user ini eksplisit; bila tak ada
+            # (fresh/arsip) reset global dulu agar gateway create baru.
+            try:
+                if session_id and runtime.valid_session(session_id):
+                    try:
+                        _GW_LIVE[str(_uk)] = str(session_id)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        _GW_LIVE.pop(str(_uk), None)
+                    except Exception:
+                        pass
+                    # Reset global HANYA bila tak ada user lain pegang live
+                    # session — tanpa syarat ini reset memutus turn user lain
+                    # yang sedang jalan (pola sama seperti _clear_session).
+                    try:
+                        _other_live = False
+                        try:
+                            with _SESSION_LOCK:
+                                for _k, _e in SESSION.items():
+                                    try:
+                                        if str(_k) != str(_uk) and (_e or {}).get("id"):
+                                            _other_live = True
+                                            break
+                                    except Exception:
+                                        continue
+                        except Exception:
+                            _other_live = True
+                        if not _other_live and not _GW_LIVE:
+                            runtime.reset_session()
+                    except Exception:
+                        pass
+                    session_id = "default"
+            except Exception:
+                pass
             # voice_metrics removed (rollback)
             _llm_first = False
-            for ev in runtime.run(message, sid0, system):
+            # Penanda sid yang sudah ditulis scope-nya run ini. Scope+current_sid
+            # ditulis SECEPATNYA (event valid pertama, biasanya `status`), BUKAN
+            # menunggu event `session` — tool ANNA jalan di tengah stream dan
+            # butuh .ana_current_sid SUDAH ada saat push chart/report.
+            _scope_sid_written = None
+            # Scope wilayah user ini ditulis ke file per-sesi-Hermes saat sid
+            # emisi tiba (di bawah) — tool ANNA baca HERMES_SESSION_ID-nya
+            # sendiri. Bila run me-reuse sid0 yang sudah ada, tulis sekarang.
+            try:
+                if sid0 and runtime.valid_session(sid0):
+                    _anna_scope_write(sid0, _run_scope, _uk)
+                    _scope_sid_written = str(sid0)
+            except Exception:
+                pass
+            # Callback sesi per-user: sid baru/resume/emitted dari turn ini
+            # disimpan ke slot _GW_LIVE[user] — BUKAN global runtime.
+            # Tanpa ini dua user paralel saling timpa _CURRENT_SESSION_ID.
+            def _on_sid(_sid, _k=str(_uk)):
+                try:
+                    if _sid and runtime.valid_session(_sid):
+                        _GW_LIVE[str(_k)] = str(_sid)
+                except Exception:
+                    pass
+            for ev in runtime.run(message, session_id, system, on_session=_on_sid):
                 # Only remember a real Hermes session, never demo/mock identifiers.
                 sid = ev.get("session_id")
+                # Tulis scope+current_sid pada event valid PERTAMA (status).
+                # Tanpa ini tool yang jalan sebelum event `session` push tanpa
+                # header sesi -> 401 walau scope file sesi itu sendiri ada.
+                try:
+                    if sid and sid != _scope_sid_written and runtime.valid_session(sid):
+                        _anna_scope_write(sid, _run_scope, _uk)
+                        _scope_sid_written = str(sid)
+                except Exception:
+                    pass
                 # Save session when Hermes emits it (from session_id: marker)
                 if ev.get("t") == "session" and runtime.valid_session(sid):
-                    cur_id, cur_meta = _session_get()
-                    if cur_id != str(sid):
-                        _session_set(str(sid))
+                    cur_id, cur_meta = _session_get(_uk)
+                    _is_new = (cur_id != str(sid))
+                    if _is_new:
+                        _session_set(str(sid), key=_uk)
                     if cur_meta is None:
-                        _session_set(str(sid), {"title": "--", "created": time.time(), "message_count": 0})
+                        _session_set(str(sid), {"title": "--", "created": time.time(), "message_count": 0}, key=_uk)
+                    try:
+                        _session_hist_push(_uk, str(sid), None)
+                    except Exception:
+                        pass
+                    try:
+                        _anna_scope_write(sid, _run_scope, _uk)
+                    except Exception:
+                        pass
                 # Only remember a session that actually COMPLETED. Storing it from
                 # `status` (which fires at init) means one broken run poisons every
                 # run after it with --resume <half-born session>.
@@ -2830,11 +4153,15 @@ class Handler(BaseHTTPRequestHandler):
                     if tok:
                         pass  # voice_metrics removed (rollback)
                 if ev.get("t") == "complete" and runtime.valid_session(sid):
-                    _session_set(sid)
-                    _session_bump_count()
+                    _session_set(sid, key=_uk)
+                    _session_bump_count(_uk)
+                    try:
+                        _anna_scope_write(sid, _run_scope, _uk)
+                    except Exception:
+                        pass
                     # voice_metrics removed (rollback) — token metrics stripped
                 if ev.get("t") == "error":
-                    _clear_session()       # drop a bad/stale session so the next run is fresh
+                    _clear_session(_uk)       # drop a bad/stale session so the next run is fresh
                 if ev.get("t") == "delta" and not _llm_first:
                     _llm_first = True
                     # voice_metrics removed (rollback)

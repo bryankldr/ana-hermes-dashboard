@@ -73,10 +73,13 @@
 #mapPanel .panel-body { padding: 0; gap: 0; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .map-wrap.map-full { position: relative; flex: 1; min-height: 300px; border-radius: 8px; overflow: hidden; border: 1px solid var(--neon-border); background: #03101f; display: block; }
 
-/* flying overlays di atas map */
-.map-fly { position: absolute; left: 8px; right: 8px; z-index: 420; pointer-events: auto; }
+/* flying overlays di atas map — toolbar/filter/search SELALU di atas
+   panel konten lain (chart 400, drawer arsip 425, FAB arsip 426):
+   tanpa ini drawer/chart yang terbuka menimpa toolbar+filter+search
+   dan dropdown tak bisa diklik. Leaflet panes 200/top 300 tetap di bawah. */
+.map-fly { position: absolute; left: 8px; right: 8px; z-index: 440; pointer-events: auto; }
 .map-fly .spatial-toolbar, .map-fly .spatial-toolbar * { pointer-events: auto !important; }
-.map-fly .spatial-toolbar { position: relative; z-index: 430; }
+.map-fly .spatial-toolbar { position: relative; z-index: 441; }
 .map-fly .spatial-select, .map-fly .spatial-mini, .map-fly .spatial-btn { pointer-events: auto !important; position: relative; z-index: 431; cursor: pointer; }
 #mapBox { pointer-events: auto; }
 .map-wrap.map-full { pointer-events: auto; }
@@ -132,16 +135,16 @@
 .map-fly .spatial-toolbar.flying .spatial-select { flex: 1 1 150px; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .map-fly .spatial-toolbar.flying .spatial-btn { flex: 0 0 auto; white-space: nowrap; padding: 7px 10px; display: inline-flex; align-items: center; justify-content: center; }
 .map-fly .spatial-toolbar.flying .spatial-btn svg { display: block; }
-.map-fly .spatial-filters.flying { max-height: min(58vh, 480px); overflow: auto; background: rgba(2,15,42,.97); backdrop-filter: blur(12px); border-color: rgba(45,242,255,.32); box-shadow: 0 12px 32px rgba(0,0,0,.6); border-radius: 12px; position: relative; z-index: 432; }
-.map-fly .map-tools.flying { opacity: .96; }
+.map-fly .spatial-filters.flying { max-height: min(58vh, 480px); overflow: auto; background: rgba(2,15,42,.97); backdrop-filter: blur(12px); border-color: rgba(45,242,255,.32); box-shadow: 0 12px 32px rgba(0,0,0,.6); border-radius: 12px; position: relative; z-index: 442; }
+.map-fly .map-tools.flying { opacity: .96; position: relative; z-index: 442; }
 .map-fly .map-tools.flying input, .map-fly .map-tools.flying button { backdrop-filter: blur(6px); }
-.spatial-kpi.flying { position: absolute; left: 8px; bottom: 8px; right: auto; width: 288px; max-width: 288px; z-index: 315; margin: 0; backdrop-filter: blur(8px); background: rgba(2,15,42,.84); border: 1px solid rgba(45,242,255,.28); border-radius: 9px; padding: 3px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 3px; min-height: 50px; align-content: center; }
+.spatial-kpi.flying { position: absolute; left: 8px; bottom: 8px; right: auto; width: 352px; max-width: 352px; z-index: 315; margin: 0; backdrop-filter: blur(8px); background: rgba(2,15,42,.84); border: 1px solid rgba(45,242,255,.28); border-radius: 9px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 4px; min-height: 56px; align-content: center; }
 .spatial-kpi.flying.collapsed { display: none; }
-.spatial-kpi.flying .kpi { background: rgba(45,242,255,.09); border-color: rgba(45,242,255,.18); padding: 3px 4px; display: flex; flex-direction: column; gap: 0; justify-content: center; min-width: 0; }
-.spatial-kpi.flying .kpi-label { font-size: 8px; letter-spacing: .04em; font-weight: 700; opacity: .95; }
-.spatial-kpi.flying .kpi-value { font-size: 16px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
-.spatial-kpi.flying .kpi-sub { font-size: 9px; opacity: .90; line-height: 1.25; font-weight: 500; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 22px; max-height: 22px; }
-.spatial-kpi.flying .kpi { min-height: 48px; max-height: 48px; overflow: hidden; }
+.spatial-kpi.flying .kpi { background: rgba(45,242,255,.09); border-color: rgba(45,242,255,.18); padding: 4px 5px; display: flex; flex-direction: column; gap: 1px; justify-content: center; min-width: 0; }
+.spatial-kpi.flying .kpi-label { font-size: 10px; letter-spacing: .05em; font-weight: 700; color: var(--text-main); opacity: 1; }
+.spatial-kpi.flying .kpi-value { font-size: 19px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
+.spatial-kpi.flying .kpi-sub { font-size: 10px; opacity: .90; line-height: 1.3; font-weight: 500; white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 39px; max-height: 39px; }
+.spatial-kpi.flying .kpi { min-height: 84px; max-height: 84px; overflow: hidden; }
 
 /* legacy map box moved into .map-wrap */
 #mapBox img.leaflet-tile { filter: brightness(0.85) saturate(0.7); }
@@ -249,6 +252,55 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 .spatial-chart-narration { display: none; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--text-main); padding: 7px 10px; border-top: 1px solid var(--neon-border); background: rgba(45,242,255,.05); }
 .spatial-chart-narration:not(:empty) { display: block; }
 
+/* ── ARSIP chart/laporan per-user (spatialArchive.js) ──
+   Drawer 🗂 di dalam .map-wrap (kanan, collapsible), panel digeser via
+   header [data-drag] tapi DIKEPUNG dalam map (clamp di JS). Tombol 💾
+   ikut gaya header masing-masing panel. */
+.spatial-chart-btn { border: 1px solid var(--neon-border); background: rgba(0,0,0,.25); color: var(--text-dim); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 12px; line-height: 1; }
+.spatial-chart-btn:hover { color: var(--neon); border-color: var(--neon); }
+.spatial-chart-head[data-drag], .rpt-head[data-drag] { touch-action: none; user-select: none; }
+.spatial-chart-head[data-drag]:active, .rpt-head[data-drag]:active { cursor: grabbing; }
+.spatial-archive { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(360px, calc(100% - 16px)); max-height: calc(100% - 24px); z-index: 425; display: none; flex-direction: column; background: rgba(2,15,42,.95); backdrop-filter: blur(12px); border: 1px solid rgba(45,242,255,.32); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.55); overflow: hidden; }
+.spatial-archive.open { display: flex; }
+.arch-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid rgba(45,242,255,.22); background: rgba(45,242,255,.06); cursor: grab; touch-action: none; user-select: none; }
+.arch-title-h { font-family: var(--font-disp); font-size: 12px; letter-spacing: .08em; color: var(--text-header); font-weight: 700; flex: 1; }
+.arch-close { border: 1px solid var(--neon-border); background: rgba(0,0,0,.25); color: var(--text-dim); border-radius: 6px; padding: 3px 8px; cursor: pointer; font-size: 11px; }
+.arch-close:hover { color: var(--text-main); border-color: var(--neon); }
+.arch-list { flex: 1 1 auto; min-height: 60px; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.arch-empty { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); text-align: center; padding: 18px 8px; line-height: 1.6; }
+.arch-item { display: flex; gap: 4px; align-items: stretch; }
+.arch-num { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--neon); }
+.arch-grip { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; cursor: grab; touch-action: none; user-select: none; color: var(--text-dim); font-size: 12px; letter-spacing: 1px; }
+.arch-grip:hover { color: var(--neon); }
+.arch-item.dragging { opacity: .85; z-index: 2; }
+.arch-item.dragging .arch-grip { cursor: grabbing; color: var(--neon); }
+.arch-item.drop-before { box-shadow: 0 -2px 0 var(--neon); }
+.arch-item.drop-after { box-shadow: 0 2px 0 var(--neon); }
+.arch-open { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left; background: rgba(45,242,255,.06); border: 1px solid rgba(45,242,255,.20); border-radius: 8px; padding: 6px 8px; cursor: pointer; color: var(--text-main); }
+.arch-open:hover { border-color: var(--neon); background: rgba(45,242,255,.12); }
+.arch-badge { font-family: var(--font-mono); font-size: 8px; letter-spacing: .1em; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--neon-border); color: var(--neon); }
+.arch-badge[data-kind="report"] { color: #FACC15; border-color: rgba(250,204,21,.4); }
+.arch-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.arch-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+.arch-del { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(251,113,133,.45); background: rgba(251,113,133,.12); color: #FDA4AF; border-radius: 8px; padding: 4px 8px; cursor: pointer; }
+.arch-del:hover { color: #fff; border-color: #FB7185; background: rgba(251,113,133,.28); }
+.arch-del svg { display: block; }
+.arch-open.busy, .arch-del.busy { opacity: .5; pointer-events: none; }
+.arch-foot { flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); text-align: center; padding: 5px; border-top: 1px solid rgba(45,242,255,.14); }
+/* ── FAB arsip: tombol flying KECIL di sisi map (kiri/kanan, di atas peta) ──
+   44px, ikon 20px + label ARSIP + badge count. z 426: di atas drawer
+   arsip (425) agar tetap bisa diklik saat drawer terbuka, di bawah
+   toolbar/filter (440+) agar tak menimpa kontrol atas. Sisi via
+   [data-side=right] (default kiri); geser vertikal + dblclick pindah sisi. */
+.spatial-archive-fab { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); z-index: 426; width: 44px; min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 6px 2px; cursor: grab; touch-action: none; user-select: none; background: rgba(2,15,42,.92); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.32); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5); color: var(--text-header); }
+.spatial-archive-fab[data-side="right"] { left: auto; right: 10px; }
+.spatial-archive-fab:hover { border-color: var(--neon); background: rgba(0,220,255,.14); }
+.spatial-archive-fab.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
+.spatial-archive-fab .arch-fab-ico { font-size: 20px; line-height: 1; }
+.spatial-archive-fab .arch-fab-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: var(--neon); font-weight: 700; }
+.spatial-archive-fab .arch-fab-count { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 9px; font-weight: 700; color: #02101f; background: var(--neon); border-radius: 999px; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+#spatialArchiveBtn.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
+
 
 
 .map-legend.flying { position: absolute; right: 8px; bottom: 8px; left: auto; width: min(320px, calc(30% - 6px)); z-index: 318; display: flex; flex-wrap: wrap; align-content: center; gap: 6px 10px; padding: 8px 10px; border-radius: 10px; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.22); box-shadow: 0 6px 20px rgba(0,0,0,.45); min-height: 56px; font-size: 12px; }
@@ -279,15 +331,20 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 
 .leaflet-top { top: 56px; }
 .leaflet-bottom.leaflet-left { bottom: 72px; }
-.leaflet-top.leaflet-right { top: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+/* Kolom kanan: jarak dari tepi agar tak mepet (toolbar atas di kiri). */
+.leaflet-top.leaflet-right { top: 8px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .leaflet-top.leaflet-right .leaflet-control { margin: 0 !important; float: none !important; clear: none !important; }
-/* Kolom kanan-atas desktop: layers → zoom → skala → badge. Satu kolom, gap rata 8px, lebar seragam. */
+/* Baris badge+skala: badge kiri, skala kanan, tanpa background keduanya —
+   teks putih + shadow baca di atas satelit. */
+.zs-row { display: flex; align-items: center; gap: 8px; margin: 0; }
+.zs-row .leaflet-control-scale { margin: 0 !important; }
+/* Kolom kanan: [badge|skala] → layers → zoom. Satu kolom, gap rata. */
 #mapPanel .leaflet-bar { border: 1px solid rgba(45,242,255,.28); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 #mapPanel .leaflet-bar a { width: 30px; height: 30px; line-height: 30px; background: rgba(2,15,42,.88); color: var(--neon); border-bottom: 1px solid rgba(45,242,255,.18); font-family: var(--font-mono); backdrop-filter: blur(10px); }
 #mapPanel .leaflet-bar a:last-child { border-bottom: none; }
 #mapPanel .leaflet-bar a:hover { background: rgba(0,220,255,.14); color: var(--neon); }
-#mapPanel .leaflet-control-scale { margin-top: 2px !important; }
-#mapPanel .leaflet-control-scale-line { background: rgba(2,15,42,.95); border: 1px solid rgba(45,242,255,.45); border-top: none; border-radius: 0 0 6px 6px; color: var(--neon); font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 2px 8px 3px; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.55); text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+#mapPanel .leaflet-control-scale { margin-top: 2px !important; background: none; border: none; box-shadow: none; }
+#mapPanel .leaflet-control-scale-line { background: none; border: none; border-left: 2px solid #fff; border-right: 2px solid #fff; border-bottom: 2px solid #fff; border-radius: 0; color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 1px 6px 2px; text-align: center; box-shadow: none; text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.7); }
 /* opsi layer serasi toolbar/filter */
 #mapPanel .leaflet-control-layers { background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--text-body); font-family: var(--font-mono); font-size: 12px; }
 #mapPanel .leaflet-control-layers-toggle { width: 30px; height: 30px; border-radius: 8px; }
@@ -295,8 +352,9 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 #mapPanel .leaflet-control-layers label { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
 #mapPanel .leaflet-control-layers-separator { border-color: rgba(45,242,255,.18); }
 .leaflet-control-zoom { margin-top: 4px !important; }
-/* Badge zoom info: sejajar kolom kanan, selebar tombol zoom, teks 2 baris rapi. */
-.zoom-badge { margin: 0; min-width: 62px; max-width: 110px; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(45,242,255,.28); background: rgba(2,15,42,.92); backdrop-filter: blur(10px); color: var(--neon); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-align: center; line-height: 1.5; white-space: nowrap; box-shadow: 0 6px 20px rgba(0,0,0,.45); pointer-events: none; }
+/* Badge zoom info: teks saja tanpa background (di kiri skala),
+   sejajar baris skala. */
+.zoom-badge { margin: 0; padding: 0; border: none; background: none; backdrop-filter: none; color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-align: right; line-height: 1.5; white-space: nowrap; box-shadow: none; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.7); }
 
 @media (max-width: 900px){
   .map-bottom-bar { flex-wrap: wrap; align-items: stretch; }
@@ -326,7 +384,7 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
    + bar wrap; tinggi dibatasi agar bar tak pernah menutupi peta. */
 .map-bottom-bar { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 318; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; align-content: flex-end; pointer-events: none; max-height: 46%; overflow: hidden; }
 .map-bottom-bar > * { pointer-events: auto; min-width: 0; }
-.map-bottom-bar .spatial-kpi.flying { position: static; width: 288px; max-width: 288px; flex: 0 0 288px; min-width: 0; min-height: 50px; left: auto; right: auto; bottom: auto; gap: 3px; padding: 3px; }
+.map-bottom-bar .spatial-kpi.flying { position: static; width: 352px; max-width: 352px; flex: 0 0 352px; min-width: 0; min-height: 50px; left: auto; right: auto; bottom: auto; gap: 3px; padding: 3px; }
 
 .map-bottom-bar .spatial-insight,
 .map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 120px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }

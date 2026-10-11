@@ -22,6 +22,31 @@ Data hanya boleh datang dari template DB terverifikasi. Tidak ada angka tebakan.
 """
 import os, json, re, datetime, pathlib, urllib.request, urllib.error, hashlib
 
+# -- sid sesi sendiri -----------------------------------------------------------
+# Tool ANNA jalan via `terminal` di agen Hermes — env HERMES_SESSION_ID milik
+# dashboard TIDAK ikut ke sana. Tanpa sid, push chart/report DITOLAK 401
+# (server tak bisa resolve owner). Solusi: dashboard tulis sid sesi aktif ke
+# .ana_current_sid tiap run; tool baca file itu sebagai fallback bila env
+# kosong. Env tetap prioritas (lebih spesifik per-proses).
+def _my_sid():
+    try:
+        s = (os.environ.get("HERMES_SESSION_ID") or "").strip()
+        if s:
+            return s[:128]
+    except Exception:
+        pass
+    try:
+        for root in pathlib.Path(__file__).resolve().parents:
+            cand = root / "ana-hermes-dashboard" / ".ana_current_sid"
+            if cand.exists():
+                s = (cand.read_text(encoding="utf-8") or "").strip().split()[0:1]
+                if s:
+                    return s[0][:128]
+                break
+    except Exception:
+        pass
+    return ""
+
 # -- transport ----------------------------------------------------------------
 def _resolve():
     try:
@@ -42,10 +67,20 @@ def _resolve():
 
 def _post(payload):
     port, token = _resolve()
+    # Auth sesi Hermes: tool ANNA yang jalan di dalam sesi user dashboard ikut
+    # kirim HERMES_SESSION_ID agar server resolve owner state per-user.
+    # Tanpa header ini push berdata DITOLAK 401 (robust: tak ada kanal netral).
+    headers = {"X-Ana-Token": token, "Content-Type": "application/json",
+               "Origin": f"http://127.0.0.1:{port}"}
+    try:
+        _sid = _my_sid()
+        if _sid:
+            headers["X-Hermes-Session"] = _sid[:128]
+    except Exception:
+        pass
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/spatial/chart",
-        headers={"X-Ana-Token": token, "Content-Type": "application/json",
-                 "Origin": f"http://127.0.0.1:{port}"},
+        headers=headers,
         method="POST", data=json.dumps(payload).encode())
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
@@ -58,9 +93,16 @@ def _post(payload):
 
 def _get():
     port, token = _resolve()
+    headers = {"X-Ana-Token": token, "Origin": f"http://127.0.0.1:{port}"}
+    try:
+        _sid = _my_sid()
+        if _sid:
+            headers["X-Hermes-Session"] = _sid[:128]
+    except Exception:
+        pass
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/spatial/chart",
-        headers={"X-Ana-Token": token, "Origin": f"http://127.0.0.1:{port}"}, method="GET")
+        headers=headers, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
             return json.loads(r.read().decode())
@@ -268,10 +310,17 @@ def get_spatial_chart():
 # Canvas Chart.js tak tercetak rapi di PDF, jadi angka masuk lewat tabel.
 def _report_post(payload):
     port, token = _resolve()
+    headers = {"X-Ana-Token": token, "Content-Type": "application/json",
+               "Origin": f"http://127.0.0.1:{port}"}
+    try:
+        _sid = _my_sid()
+        if _sid:
+            headers["X-Hermes-Session"] = _sid[:128]
+    except Exception:
+        pass
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/spatial/report",
-        headers={"X-Ana-Token": token, "Content-Type": "application/json",
-                 "Origin": f"http://127.0.0.1:{port}"},
+        headers=headers,
         method="POST", data=json.dumps(payload).encode())
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
@@ -303,6 +352,55 @@ def show_report(title="", subtitle="", pages=None, evidence=None, meta=None):
 def hide_report():
     """Tutup laporan. Isi state dibuang, ANNA bisa buka lagi kapan saja."""
     return _report_post({"visible": False, "pages": []})
+
+
+# -- ARSIP chart/laporan per-user (server-side, survive restart) -----------------
+# User simpan snapshot yang tampil, tampilkan kembali kapan pun, atau hapus.
+# Isolasi penuh: owner dari header sesi (tool ini selalu kirim _my_sid).
+def _archive_call(method, payload=None):
+    port, token = _resolve()
+    headers = {"X-Ana-Token": token, "Origin": f"http://127.0.0.1:{port}"}
+    try:
+        _sid = _my_sid()
+        if _sid:
+            headers["X-Hermes-Session"] = _sid[:128]
+    except Exception:
+        pass
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/spatial/archive",
+        headers=headers, method=method, data=data)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode()[:300]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def archive_save(kind, title=""):
+    """Simpan snapshot live (chart|report yang sedang tampil) ke arsip user.
+    Return {"ok": True, "saved": {id,kind,title,...}, "items": [...]}."""
+    return _archive_call("POST", {"kind": kind, "title": title})
+
+
+def archive_list():
+    """Daftar arsip milik user: [{id,kind,title,saved_at,n_items}]."""
+    return _archive_call("GET")
+
+
+def archive_show(entry_id, kind=""):
+    """Tampilkan kembali satu arsip ke panel (timpa state live)."""
+    return _archive_call("POST", {"entry_id": entry_id, "kind": kind})
+
+
+def archive_delete(entry_id):
+    """Hapus satu arsip milik user (via POST op=delete — server tak punya do_DELETE)."""
+    return _archive_call("POST", {"op": "delete", "entry_id": entry_id})
 
 
 def get_report():

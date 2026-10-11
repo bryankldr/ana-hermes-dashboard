@@ -11,8 +11,32 @@ else
   echo "ANA: hermes tak ketemu. pasang: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" >&2; exit 1
 fi
 if [ ! -f .env ]; then cp .env.example .env; echo "ANA: .env dibuat dari example, isi SIMOGE_DB_PASSWORD dulu bila kosong"; fi
-PY=$(echo ~/.hermes/tools/python-*/bin/python3 | head -1); [ -x "$PY" ] || PY=python3
-"$PY" -c "import websockets, edge_tts, pymysql, pandas" 2>/dev/null || "$PY" -m pip install --user websockets edge_tts pymysql pandas
+# hermes session injects PYTHONPATH -> bocorin site-packages (numpy c-ext mismatch). isolate.
+unset PYTHONPATH
+# ── per-project venv (isolated, reproducible). fallback ke hermes tools bila venv belum ada.
+# venv harus satu minor dengan hermes python (3.14) agar numpy c-ext tidak mismatch.
+_hermes_py=$(echo "$HOME/.hermes/tools/python-"*/bin/python3 2>/dev/null | tr ' ' '\n' | head -1)
+[ -x "$_hermes_py" ] || _hermes_py=$(command -v python3)
+if [ -x .venv/bin/python3 ] && .venv/bin/python3 -c "import websockets, edge_tts, pymysql, pandas, argon2" >/dev/null 2>&1; then
+  PY=.venv/bin/python3
+  echo "ANA: venv .venv OK ($PY)" >&2
+else
+  if [ ! -x .venv/bin/python3 ]; then
+    echo "ANA: buat .venv per-project ($_hermes_py)..." >&2
+    "$_hermes_py" -m venv .venv 2>&1 || python3 -m venv .venv 2>&1 || { echo "ANA: venv gagal — butuh python3-venv" >&2; PY="$_hermes_py"; }
+  fi
+  if [ -x .venv/bin/python3 ]; then
+    PY=.venv/bin/python3
+    echo "ANA: install deps ke .venv ($PY)..." >&2
+    "$PY" -m pip install -q -r requirements.txt 2>&1 || "$PY" -m pip install -q -r requirements.txt --break-system-packages 2>&1 || {
+      echo "ANA: pip install gagal" >&2; exit 1
+    }
+    "$PY" -c "import websockets, edge_tts, pymysql, pandas, argon2" 2>/dev/null || { echo "ANA: deps .venv belum lengkap" >&2; exit 1; }
+  else
+    PY="$_hermes_py"; [ -x "$PY" ] || PY=$(command -v python3)
+    "$PY" -c "import websockets, edge_tts, pymysql, pandas, argon2" 2>/dev/null || "$PY" -m pip install --user -q -r requirements.txt 2>&1 || "$PY" -m pip install --user -q -r requirements.txt --break-system-packages 2>&1 || true
+  fi
+fi
 
 DIST="$PWD/profile-dist"
 # fresh install atau update (distribution_owned: SOUL.md, skills, plugins)
