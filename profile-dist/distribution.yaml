@@ -5,27 +5,31 @@ hermes_requires: ">=0.21.5"
 author: bryankldr
 license: MIT
 env_requires:
-  - name: SIMOGE_DB_HOST
-    description: SIMOGE MySQL host
+  - name: DB_HOST
+    description: MariaDB host (internal)
     required: false
     default: 127.0.0.1
-  - name: SIMOGE_DB_PORT
-    description: SIMOGE MySQL port
+  - name: DB_PORT
+    description: MariaDB port
     required: false
     default: "3306"
-  - name: SIMOGE_DB_USER
-    description: SIMOGE MySQL user
+  - name: DB_USER
+    description: MariaDB user
     required: false
     default: root
-  - name: SIMOGE_DB_PASSWORD
-    description: SIMOGE MySQL password
+  - name: DB_PASSWORD
+    description: MariaDB password
     required: true
     default: ""
-  - name: SIMOGE_DB_NAME
-    description: SIMOGE MySQL database
+  - name: DB_NAME
+    description: MariaDB database
     required: false
     default: kph_bwb_sandbox2
-distribution_owned:
-  - SOUL.md
-  - skills
-  - plugins
+  - name: ANA_DB_SOURCE
+    description: DB source switch local|remote
+    required: false
+    default: local
+  - name: ANA_AUTH_REQUIRED
+    description: Require local auth
+    required: false
+    default: "1"

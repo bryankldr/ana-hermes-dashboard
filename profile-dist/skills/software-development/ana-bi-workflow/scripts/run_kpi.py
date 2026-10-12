@@ -3,13 +3,14 @@
 ANNA BI Runner — quick CLI wrapper for answer_production.
 Usage: python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --mode asisten [--kode_bkph 3121101 ...]
 """
+import os
 import sys
 import json
 import argparse
 import re
 
 # Use project venv python path for simoge_db
-PROJECT_ROOT = "/home/bryankldr/PROYEK_2026/ana-hermes-dashboard"
+PROJECT_ROOT = os.environ.get("ANA_WORKDIR", "/home/bryan/ana-hermes-dashboard")
 sys.path.insert(0, f"{PROJECT_ROOT}/profile-dist/skills/software-development/simoge-business/scripts")
 sys.path.insert(0, __file__.replace('run_kpi.py', ''))
 

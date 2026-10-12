@@ -5,7 +5,7 @@
 ```python
 # Production KPI — short (TTS)
 import sys, json
-sys.path.insert(0, '/home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts')
+sys.path.insert(0, '/home/bryan/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts')
 from run_kpi import main
 # ... or just call answer_production directly
 ```
@@ -13,7 +13,7 @@ from run_kpi import main
 ```python
 # Direct function call (recommended for agent)
 import sys
-sys.path.insert(0, '/home/bryankldr/PROYEK_2026/ana-hermes-dashboard/profile-dist/skills/software-development/simoge-business/scripts')
+sys.path.insert(0, '/home/bryan/ana-hermes-dashboard/profile-dist/skills/software-development/simoge-business/scripts')
 from ana_kpi import answer_production
 
 out = answer_production(tahun=2026, bulan=2, periode=1, mode='asisten')
@@ -24,7 +24,7 @@ print(out['narrative'])        # Full 6-section
 ## CLI Wrapper (from skill dir)
 
 ```bash
-cd /home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts
+cd /home/bryan/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts
 python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --mode asisten
 python run_kpi.py --tahun 2026 --bulan 3 --periode 2 --mode coding --output json
 python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --wilayah_nama "Licin" --mode asisten

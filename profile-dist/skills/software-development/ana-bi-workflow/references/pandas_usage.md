@@ -48,7 +48,7 @@ analyze_template('produksi_breakdown_bkph',
 
 ### 5. CLI Test
 ```bash
-cd /home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts
+cd /home/bryan/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts
 python3 -c "
 from ana_pandas_engine import analyze_template
 import json

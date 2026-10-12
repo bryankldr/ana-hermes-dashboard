@@ -6,11 +6,11 @@ version: 1.0.0
 
 # ANA HUD
 
-ANA Live HUD at `~/PROYEK_2026/ana-hermes-dashboard` (canonical) with symlink `~/ana-hermes-dashboard` for compat — formerly `jarvis-hermes-dashboard`. Hermes Agent face on port 8730, profile `default` (display ANA), workdir `~/PROYEK_2026`, permission `bypass` for self-dev. Inherits Hermes tools/skills/memory/browser/MCP/connectors via `hermes chat -Q -q`.
+ANA Live HUD at `~/ana-hermes-dashboard` (canonical; legacy `~/PROYEK_2026/ana-hermes-dashboard`) — formerly `jarvis-hermes-dashboard`. Hermes Agent face on port 8730, profile `anna`, workdir `$ANA_WORKDIR`, permission `normal`. Inherits Hermes tools/skills/memory/browser/MCP/connectors via `hermes chat -Q -q`.
 
 ## When to Use
 
-- Working on the ANA HUD dashboard: adding/changing panels, styles, endpoints, or wiring in `~/PROYEK_2026/ana-hermes-dashboard`.
+- Working on the ANA HUD dashboard: adding/changing panels, styles, endpoints, or wiring in `$ANA_WORKDIR` (default `~/ana-hermes-dashboard`).
 - Switching persona mode (asisten ↔ coding), voice, or session for the HUD.
 - Debugging a HUD symptom: stuck `RUNNING`, empty `HTTP 200`, clipped or invisible panels, lost session, silent voice.
 - Committing, renaming, or pushing the dashboard repo.
@@ -18,7 +18,7 @@ ANA Live HUD at `~/PROYEK_2026/ana-hermes-dashboard` (canonical) with symlink `~
 
 ## Invariants
 
-- Profile ID is `default`, never `ANA` — `HERMES_PROFILE`/`ANA_PROFILE` must be `default`; `ANA` is only display name. Setting it to `ANA` causes `profile ANA not found` on `hermes chat -q`.
+- Profile ID is `anna`, never `ANA`/`default` — `HERMES_PROFILE` must be `anna`; `ANA` is only display name. Setting it to `ANA` causes `profile ANA not found` on `hermes chat -q`.
 - Env prefix is `ANA_*` (`ANA_PORT`, `ANA_WORKDIR`, `ANA_TOKEN`/`X-Ana-Token`, `ANA_PERMISSION`, `ANA_TIMEOUT`, `ANA_MODE`), not `JARVIS_*`.
 - Token rotates per page load via `__ANA_TOKEN__` in `ui/index.html` — refresh page after server restart.
 - Every HUD input (chat bar, Transmit, voice) hits `POST /api/run` with `X-Ana-Token` + `Origin`/`Host` checks — same Hermes session (`SESSION["id"]`) so vault and memory stay consistent.
@@ -151,7 +151,7 @@ Empat panel yang hilangkan "nunggu buta" — dipasang bersama saat user bilang `
 Generate three `.desktop` files — validate with `desktop-file-validate`:
 
 - `~/Desktop/ANA HUD.desktop` + `~/.local/share/applications/ana-hud.desktop` + `~/.config/autostart/ana-hud.desktop`
-- `Exec` must be direct path `~/PROYEK_2026/ana-hermes-dashboard/start.sh` (symlink `~/ana-hermes-dashboard` kept for compat) — `bash -c '...'` with quotes fails validation (reserved `'`).
+- `Exec` must be direct path `~/ana-hermes-dashboard/start.sh` (legacy `~/PROYEK_2026/ana-hermes-dashboard` kept for compat) — `bash -c '...'` with quotes fails validation (reserved `'`).
 - `start.sh` does `exec python3 server.py`; autostart uses `X-GNOME-Autostart-enabled=true`.
 
 ## Session Selector — Grouped Dropdown
@@ -184,7 +184,7 @@ ACP (Agent Context Protocol) is for editors (VS Code/Zed/JetBrains) via stdio �
 - Rename JARVIS→ANA with case-sensitive replace across `server.py`, `runtime.py`, `commands.py`, `voice.py`, `ui/*`, `install.sh`, `start.sh`, `.env` — then `rm -rf __pycache__` and verify `grep -r JARVIS` is 0.
 - `server.py:MODE` defs must appear before `persona()` — otherwise `get_mode()` is undefined at import.
 - `persona.md` Format section must be split per mode — a blanket `No markdown` breaks coding agent output.
-- Killing old server needs `pkill -f "ana-hermes-dashboard.*server.py"` + `fuser -k 8730/tcp` — stale PID leaves port busy.
+- Killing old server needs `pgrep -f "[s]erver\\.py"` + `kill <PID>` (never `pkill -f server.py` — kills own SSH) + `fuser -k 8730/tcp` — stale PID leaves port busy.
 - Commands that answer locally (`/mode`, `/commands`, `/status`) must emit `delta`+`complete` NDJSON without Hermes call — otherwise mode switch waits for model.
 - `server.py:_stream_run` must not call `send_response(200)` before checking natural-language mode switch — double header causes empty `HTTP 200` body and HUD hangs on `RUNNING`. Check `_low`/`_m` first, then send single header per branch.
 - `server.py` `POST /api/voice` and `/api/voice-preview` handlers mutate `.env` and call ElevenLabs — use `re.match` for voice_id so `import re` must be at top of `server.py`.
@@ -200,7 +200,7 @@ ACP (Agent Context Protocol) is for editors (VS Code/Zed/JetBrains) via stdio �
 
 ## Version Control
 
-Repo: `git` at `~/PROYEK_2026/ana-hermes-dashboard`, branch `main`. Always-on rules:
+Repo: `git` at `~/ana-hermes-dashboard` (legacy `~/PROYEK_2026/ana-hermes-dashboard`), branch `main`. Always-on rules:
 
 - **Split commits by intent, not by file type.** Pure refactor (module/CSS split, zero behavior change) in its own commit; features in the next. One giant commit over weeks of mixed work cannot be reverted granularly.
 - **Check `git config user.name` / `user.email` before the first commit** — unset identity aborts the commit with no partial state, but it wastes a full `git add` cycle.
@@ -218,7 +218,7 @@ Dead-file pitfall: creating `ui/src/**/*.js` support files without adding the ma
 
 ## Dashboard Location
 
-- Canonical: `~/PROYEK_2026/ana-hermes-dashboard`, symlink `~/ana-hermes-dashboard` for compat. `ANA_WORKDIR=~/PROYEK_2026`, `ANA_PERMISSION=bypass` for self-dev. Fase 3 integrations (himalaya, google-workspace) are on-demand.
+- Canonical: `~/ana-hermes-dashboard` (legacy `~/PROYEK_2026/ana-hermes-dashboard`). `ANA_WORKDIR=~/ana-hermes-dashboard`, `ANA_PERMISSION=normal`. Fase 3 integrations (himalaya, google-workspace) are on-demand.
 - GitHub: `git@github.com:bryankldr/ana-hermes-dashboard.git` (private, SSH auth, `git user.name=bryankldr` / `user.email=bryankldr@gmail.com`). Squashed to one clean commit — history contains no JARVIS.
 
 ## Server Architecture (post-refactor, 2026-09-29)

@@ -16,7 +16,7 @@ ANA can propose and implement changes to itself: persona, skills, tools, HUD, in
 ## Change Types
 
 ### Persona
-- Edit `~/PROYEK_2026/ana-hermes-dashboard/persona.md`
+- Edit `$ANA_WORKDIR/persona.md` (default `~/ana-hermes-dashboard/persona.md`)
 - Propose tone/style changes, wait approval
 - Never change core identity (ANA, Indonesia, direct)
 
@@ -26,7 +26,7 @@ ANA can propose and implement changes to itself: persona, skills, tools, HUD, in
 - Propose skill from repeated user patterns
 
 ### Tools/HUD
-- Edit `~/PROYEK_2026/ana-hermes-dashboard/` files
+- Edit `$ANA_WORKDIR/` files (default `~/ana-hermes-dashboard/`)
 - Propose feature, wait approval, implement, verify
 
 ### Integrations

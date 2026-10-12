@@ -7,7 +7,7 @@ auth step hands back a recipe instead.
 ## 1. Preflight (run before staging anything)
 
 ```bash
-cd ~/PROYEK_2026/ana-hermes-dashboard
+cd ~/ana-hermes-dashboard
 git branch -vv                     # branch + upstream
 git remote -v                      # confirm the repo still carries the OLD brand name
 git config user.name  || echo "UNSET"   # unset identity aborts the first commit

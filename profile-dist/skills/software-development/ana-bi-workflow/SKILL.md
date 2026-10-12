@@ -86,8 +86,8 @@ login punya kode wilayah (DIVRE/KPH/BKPH/RPH/TPG). Tanpa blok itu = user bebas
 **Only via `terminal` with absolute PYTHONPATH — never `execute_code`:**
 ```bash
 # terminal tool, workdir = ANA_WORKDIR (ana-hermes-dashboard)
-PYTHONPATH=/home/bryankldr/PROYEK_2026/ana-hermes-dashboard/profile-dist/skills/software-development/simoge-business/scripts:$PYTHONPATH \
-  python3 /home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts/ana_kpi.py tahun=2026 bulan=2 periode=1 mode=asisten
+PYTHONPATH=$ANA_WORKDIR/profile-dist/skills/software-development/simoge-business/scripts:$PYTHONPATH \
+  python3 $HOME/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts/ana_kpi.py tahun=2026 bulan=2 periode=1 mode=asisten
 # For batch probe (find latest complete period) loop P1/P2 backwards; parse JSON with python3 -c "import json,sys; d=json.load(sys.stdin); print(d['kpi']['production']['actual_kg'])"
 # Pipes into another interpreter are blocked in some panels — redirect to /tmp/*.json then read_file if needed.
 ```
@@ -123,7 +123,7 @@ PYTHONPATH=/home/bryankldr/PROYEK_2026/ana-hermes-dashboard/profile-dist/skills/
 
 **Alias wilayah (critical):** Resolve operator language → official filter BEFORE calling engine. See `alias_wilayah` concept.
 
-**Vault = `~/anna_brain/Anna's brain/` (118 .md, ANNA-KNOWLEDGE/entities,concepts,queries,raw/articles) — jangan pernah buka `ana_journal`.** Direct file access via `search_files(target='content', pattern, path=vault)` → `read_file`; jangan pakai Obsidian REST API/connector. Detail strategi, struktur, key files, anti-pattern di `references/vault_access.md`.
+**Vault = `$OBSIDIAN_VAULT_PATH` (default `~/MAX-research/vaults/anna/`) (118 .md, ANNA-KNOWLEDGE/entities,concepts,queries,raw/articles) — jangan pernah buka `ana_journal`.** Direct file access via `search_files(target='content', pattern, path=vault)` → `read_file`; jangan pakai Obsidian REST API/connector. Detail strategi, struktur, key files, anti-pattern di `references/vault_access.md`.
 
 **ANNA Wiki (system prompt) = LLM Wiki (Karpathy pattern) — sudah loaded, zero-token lookup.** Workflow token-efisien: ① cek ANNA Wiki dulu (gratis) ② butuh detail/schema → `search_files`/`read_file` vault (tool-call only) ③ kirim ke LLM hanya extracted fact (1–2 kalimat), bukan full file. Wiki = compiled knowledge (cross-ref, contradictions flagged); vault = source of truth untuk konfirmasi dan update.
 

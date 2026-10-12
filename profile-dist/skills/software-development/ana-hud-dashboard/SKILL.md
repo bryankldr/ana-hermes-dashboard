@@ -14,7 +14,7 @@ metadata:
 # ANA HUD Dashboard - Project Skill
 
 ## Project Location
-**Portable root** — gunakan `$ANA_WORKDIR` (set via `.env` di tiap mesin) atau fallback `$HOME/PROYEK_2026/ana-hermes-dashboard`.
+**Portable root** — gunakan `$ANA_WORKDIR` (set via `.env` di tiap mesin) atau fallback `$HOME/ana-hermes-dashboard`.
 
 > ⚠️ **CRITICAL**: Jangan hardcode `/home/bryankldr/...` di skill/config/script. Resolve via `ANA_WORKDIR` env atau `Path(__file__).resolve().parents`.
 
@@ -39,7 +39,7 @@ node --check ui/src/main.js # Validate JS syntax
 ```
 ANA_PORT=8730
 ANA_TOKEN=<generate via: openssl rand -hex 32>
-ANA_WORKDIR=/abs/path/to/ana-hermes-dashboard  # override bila bukan $HOME/PROYEK_2026/
+ANA_WORKDIR=/abs/path/to/ana-hermes-dashboard  # override bila bukan $HOME/ana-hermes-dashboard/
 ```
 
 ## Git Workflow

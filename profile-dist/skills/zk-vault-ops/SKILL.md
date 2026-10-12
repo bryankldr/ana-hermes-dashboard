@@ -13,13 +13,13 @@ metadata:
 
 # ZK Vault Ops
 
-Umbrella for Obsidian + Hermes workflows with `anna` vault (`$OBSIDIAN_VAULT_PATH` fallback `$HOME/anna_brain/Anna's brain`) as canonical ZK via `OBSIDIAN_VAULT_PATH`.
+Umbrella for Obsidian + Hermes workflows with `anna` vault (`$OBSIDIAN_VAULT_PATH`, default `$HOME/MAX-research/vaults/anna`) as canonical ZK via `OBSIDIAN_VAULT_PATH`.
 
 ## When to Use
 
 - User says "integrasikan obsidian", "setup vault ZK", "vault terdeteksi N", or names multiple `~/.../Vault` paths.
 - Syncing Hermes `state.db` sessions into Fleeting notes or building a sessions index.
-- Consolidating Hermes profiles (`default` vs `ana-agent`) to a single canonical profile.
+- Consolidating Hermes profiles (legacy `default`/`ana-agent`) to single canonical profile `anna`.
 - Creating or maintaining the `obsidian-daily-sync` cron job for vault maintenance.
 
 ## 1. Multi-vault discovery → single default
@@ -38,7 +38,7 @@ Umbrella for Obsidian + Hermes workflows with `anna` vault (`$OBSIDIAN_VAULT_PAT
 
 ## 3. Project MOC — link, don't move
 
-- Keep projects on disk (`/home/.../PROYEK_2026/<project>`); create MOC in `50 Projects/<project>.md` with frontmatter `path:` and wikilinks. Never move project files into vault.
+- Keep projects on disk (`$HOME/<project>`, e.g. `$HOME/ana-hermes-dashboard`); create MOC in `50 Projects/<project>.md` with frontmatter `path:` and wikilinks. Never move project files into vault.
 - Capture stack, structure, and standing decisions (e.g., drum nomor, baseUrl single source) in MOC.
 
 ## 4. read_file dedup pitfall
@@ -65,7 +65,7 @@ Umbrella for Obsidian + Hermes workflows with `anna` vault (`$OBSIDIAN_VAULT_PAT
 ## 8. ANA HUD over the same Hermes profile (fork of JARVIS)
 
 - ANA (`~/ana-hermes-dashboard`, fork of `Itsme23476/jarvis-hermes-dashboard`) is a face on the active Hermes profile — not a second agent. It inherits tools, skills, memory, browser automation, MCP servers, and third-party integrations from the active profile.
-- `HERMES_PROFILE` in `~/ana-hermes-dashboard/.env` must be the profile **ID** (`default`), not the display name (`ANA`). Using the display name makes every `/api/run` fail with `Profile 'ana' does not exist` — set `HERMES_PROFILE=default` and restart `python3 server.py`.
+- `HERMES_PROFILE` in `~/ana-hermes-dashboard/.env` must be the profile **ID** (`anna`), not the display name (`ANA`). Using the display name makes every `/api/run` fail with `Profile 'ANA' does not exist` — set `HERMES_PROFILE=anna` and restart `python3 server.py`.
 - `persona.md` is read per-request; editing `## Bahasa` needs no restart. Slash replies (`/commands`, `/status`, `/tools`, `/personality`, `/goal`, etc.) are hardcoded in `commands.py` and bypass the LLM — patch `commands.py` strings to Indonesian separately or voice clicks stay English despite persona.
 - Rebrand JARVIS→ANA: `mv ~/jarvis-hermes-dashboard ~/ana-hermes-dashboard`, replace `JARVIS/Jarvis/jarvis` → `ANA/Ana/ana` in `server.py`, `runtime.py`, `commands.py`, `voice.py`, `ui/index.html`, `ui/app.js`, `install.sh`, `start.sh`, `README.md`, `persona.md`; rename env vars `JARVIS_*` → `ANA_*` (`ANA_PORT=8730`, `ANA_TOKEN`, header `X-Ana-Token`, boundary `----ana`), title `ANA · Hermes Mission Control`, delete `__pycache__`, `grep -r JARVIS` must be 0.
 - Chat extension (preserve voice): add `💬 Chat` button beside `VOICE` in `ui/index.html` missionbar and `chatbar` (`#chatInput`+`#chatSend`) inside `RESPONSE` panel footer; wire `sendFromChat()`/`autoChatSize()` in `ui/app.js` to same `POST /api/run` with `X-Ana-Token` — same Hermes stream/TTS, second input surface only. Style `.chatbar`/`#chatInput`/`.ctl.chat` in `ui/styles.css`. Refresh browser, no server restart needed for static assets.

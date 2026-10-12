@@ -8,7 +8,7 @@ if [ -z "${ANA_PORT:-}" ] && [ -f .env ]; then
 fi
 export ANA_PORT="${ANA_PORT:-8730}"
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
+export PATH="/usr/local/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
 # hermes session injects PYTHONPATH pointing to its own venv (3.14 site-packages).
 # itu bocorin numpy c-ext ke .venv bila minor version beda -> ImportError _multiarray_umath.
 # isolate: .venv harus murni.
