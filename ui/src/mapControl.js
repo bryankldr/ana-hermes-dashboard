@@ -94,6 +94,7 @@ export class LeafletAdapter {
     this.pmtilesUrl = null;
     this._tierMode = null; // 'pmtiles' = polygon GeoJSON hidden (Z<=11), 'geojson'/null = shown
     this._aktivitasSig = null; // signature rows terakhir (skip rebuild bila data sama)
+    this._penyadapDetailByEvapot = new Map(); // kode_evapot -> [{n,l,p}] cache L+P
     this.highlightStyle = opts.highlightStyle || {
       color: '#FFD23F', weight: 2, opacity: 1,
       fillColor: '#FFD23F', fillOpacity: 0.3,
@@ -103,6 +104,27 @@ export class LeafletAdapter {
     map.on('moveend', () => this._syncCamera('MAP_MOVED'));
     map.on('zoomend', () => this._syncCamera('MAP_ZOOM_CHANGED'));
     map.on('click', e => this._emit('MAP_CLICK', { lat: e.latlng.lat, lng: e.latlng.lng }));
+    // popupopen WAJIB di level map, bukan per-layer: set_features bikin
+    // L.geoJSON GROUP (bukan single layer) — handler popupopen di group tak
+    // pernah fire. Baca kode_evapot dari [data-pemdetail] di konten popup.
+    // getElement() tak selalu ada (versi Leaflet) — fallback query dokumen.
+    map.on('popupopen', (e) => {
+      try {
+        let key = null;
+        try {
+          const el = e && e.popup && e.popup.getElement ? e.popup.getElement() : null;
+          const det = el && el.querySelector ? el.querySelector('[data-pemdetail]') : null;
+          if (det) key = det.getAttribute('data-pemdetail');
+        } catch (_) {}
+        if (!key) {
+          try {
+            const det = document.querySelector('.leaflet-popup-content [data-pemdetail]');
+            if (det) key = det.getAttribute('data-pemdetail');
+          } catch (_) {}
+        }
+        if (key) this._fillPenyadapDetail(key, e && e.popup);
+      } catch (_) {}
+    });
   }
 
   _emit(type, data = {}) {
@@ -378,6 +400,83 @@ export class LeafletAdapter {
   //
   // ponytail: polygon + Point centroid (kph_summary_map zoom<=10).
   // Line/MultiLine butuh styling terpisah — tambahkan saat ANA push garis.
+  // Detail L+P per penyadap untuk popup petak (lazy-load + cache).
+  // rows: {nama_penyadap, luas_andil, jml_pohon} dari petak_penyadap.
+  // Render ulang daftar: nama + "L x.xx ha · P nnn" di kanan tiap baris.
+  async _fillPenyadapDetail(evapotKey, popup) {
+    try {
+      if (!evapotKey) return;
+      let rows = this._penyadapDetailByEvapot.get(evapotKey);
+      if (!rows) {
+        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const res = await fetch('/api/simoge/query', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },
+          body: JSON.stringify({ template: 'petak_penyadap', params: { kode_evapot: evapotKey } }),
+        });
+        if (!res.ok) throw new Error('http ' + res.status);
+        const data = await res.json();
+        rows = (data.rows || []).map(r => ({
+          n: String(r.nama_penyadap || '').trim(),
+          l: r.luas_andil != null ? Number(r.luas_andil) : null,
+          p: r.jml_pohon != null ? Number(r.jml_pohon) : null,
+        })).filter(r => r.n);
+        this._penyadapDetailByEvapot.set(evapotKey, rows);
+      }
+      if (!rows.length) return;
+      const byName = new Map(rows.map(r => [r.n.toLowerCase(), r]));
+      const escH = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const paint = (root) => {
+        try {
+          // Cari via loop + getAttribute, BUKAN selector "[data-pemlist=key]":
+          // kode_evapot diawali angka ("2111…") bikin CSS.escape + querySelector
+          // gagal diam-diam (paint return false, popup tetap "memuat L·P…").
+          const lists = root && root.querySelectorAll ? [...root.querySelectorAll('[data-pemlist]')] : [];
+          const list = lists.find(el => el.getAttribute('data-pemlist') === evapotKey);
+          if (!list) return false;
+          const items = [...list.children];
+          for (const div of items) {
+            const nm = (div.textContent || '').replace(/^•\s*/, '').trim().toLowerCase();
+            const d = byName.get(nm);
+            if (!d) continue;
+            const lp = (d.l != null && Number.isFinite(d.l) ? `L ${d.l.toFixed(1)} ha` : 'L -')
+              + ' · ' + (d.p != null && Number.isFinite(d.p) ? `P ${d.p}` : 'P -');
+            // Aman XSS: nama + L/P lewat escH() dulu (L/P angka via toFixed).
+            div.innerHTML = `<span>• ${escH(div.textContent.replace(/^•\s*/, '').trim())}</span> <span style="opacity:.65;font-size:11px;float:right">${escH(lp)}</span>`;
+          }
+          const dets = root.querySelectorAll ? [...root.querySelectorAll('[data-pemdetail]')] : [];
+          const det = dets.find(el => el.getAttribute('data-pemdetail') === evapotKey);
+          if (det) { det.style.display = 'none'; det.textContent = ''; }
+          return true;
+        } catch (_) { return false; }
+      };
+      // Popup Leaflet: konten di DOM popup (bila masih terbuka) + pesan update
+      // agar render saat fetch selesai walau user sudah buka duluan.
+      let done = false;
+      try {
+        const el = popup && popup.getElement ? popup.getElement() : null;
+        if (el && paint(el)) done = true;
+      } catch (_) {}
+      if (!done) {
+        try {
+          const popups = document.querySelectorAll('.leaflet-popup-content');
+          for (const pc of popups) { if (paint(pc)) { done = true; break; } }
+        } catch (_) {}
+      }
+      // JANGAN panggil popup.update() sesudah edit DOM langsung — update()
+      // me-render ulang konten dari string asli dan MENGHAPUS hasil paint
+      // (itu sebabnya popup stuck "memuat L·P…" walau fetch 200 + paint jalan).
+    } catch (_) {
+      // gagal = biarkan nama saja; jangan rusak popup
+      try {
+        const dets = [...document.querySelectorAll('.leaflet-popup-content [data-pemdetail]')];
+        const det = dets.find(el => el.getAttribute('data-pemdetail') === evapotKey);
+        if (det) det.textContent = '';
+      } catch (_) {}
+    }
+  }
+
   set_features(geojson, opts = {}) {
     const host = this._overlayHost();
     const feats = Array.isArray(geojson) ? geojson : (geojson?.features || []);
@@ -412,22 +511,43 @@ export class LeafletAdapter {
         const wkey = String(p.warna || '').toLowerCase();
         const wcol = (LeafletAdapter.WARNA_STYLE[wkey] || {}).fillColor || '#2DF2FF';
         const wtxt = p.warna ? `<span style="color:${wcol}">●</span> ${escH(p.warna)}` + (p.kategori ? ` (${escH(p.kategori)})` : (p.status ? ` (${escH(p.status)})` : '')) : '';
-        const wilayahLine = [p.bkph_nama && `BKPH ${escH(p.bkph_nama)}`, p.rph_nama && `RPH ${escH(p.rph_nama)}`, p.tpg_nama && `TPG ${escH(p.tpg_nama)}`].filter(Boolean).join(' · ');
-        const kodeLine = [p.kode_bkph && `BKPH ${escH(p.kode_bkph)}`, p.kode_rph && `RPH ${escH(p.kode_rph)}`, p.kode_tpg && `TPG ${escH(p.kode_tpg)}`].filter(Boolean).join(' · ');
-        const penyadapLine = p.penyadap_nama ? `Penyadap: ${escH(String(p.penyadap_nama).slice(0, 90))}${String(p.penyadap_nama).length>90?'…':''}` : '';
+        // Wilayah: label + nama DB polos ("BKPH : GLENMORE"). DB tak simpan
+        // prefix (cek: getah_petak.bkph='GLENMORE'), kode wilayah (kode_bkph/
+        // kode_rph/kode_tpg) sengaja tak tampil — permintaan user.
+        const wilayahRows = [p.bkph_nama && `<span style="opacity:.75">BKPH</span><span>: ${escH(p.bkph_nama)}</span>`, p.rph_nama && `<span style="opacity:.75">RPH</span><span>: ${escH(p.rph_nama)}</span>`, p.tpg_nama && `<span style="opacity:.75">TPG</span><span>: ${escH(p.tpg_nama)}</span>`].filter(Boolean).join('');
+        const wilayahLine = wilayahRows ? `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 8px;font-size:13px;margin-top:4px">${wilayahRows}</div>` : '';
+        // Penyadap: nama langsung (GROUP_CONCAT), L+P lazy-load per popup.
+        // Payload 809 fitur tak dibawa (hemat), fetch petak_penyadap saat
+        // popupopen via kode_evapot — cache _penyadapDetailByEvapot.
+        const penyadapList = p.penyadap_nama ? String(p.penyadap_nama).split(',').map(s => s.trim()).filter(Boolean) : [];
+        const evapotKey = String(p.kode_evapot || '').trim();
+        // Tombol Perbesar + daftar penyadap HANYA untuk bisnis yang kolomnya
+        // ada (petak efektivitas + matriks bawa penyadap_nama). Produksi
+        // (rkap_map) dan aktivitas tak punya kolom itu — tanpa gate, modal
+        // detail andil/mandor campur ke bisnis yang tak relevan.
+        const penyadapLine = penyadapList.length
+          ? `<div style="margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px"><div style="font-size:11px;opacity:.6;margin-bottom:3px">Penyadap (${penyadapList.length})</div><div data-pemlist="${escH(evapotKey)}" style="font-size:12px;line-height:1.5;max-height:${penyadapList.length > 6 ? '108px' : 'none'};overflow-y:${penyadapList.length > 6 ? 'auto' : 'visible'};padding-right:4px">${penyadapList.map(n => `<div>• ${escH(n)}</div>`).join('')}</div><div style="font-size:10px;opacity:.5;margin-top:2px" data-pemdetail="${escH(evapotKey)}">memuat L·P…</div></div>`
+          : '';
         let extraRows = '';
         if (p.pencapaian_pct !== undefined && (p.target_periode !== undefined || p.realisasi !== undefined)) {
           const pct = p.pencapaian_pct != null ? escH(String(p.pencapaian_pct)) + '%' : '-';
           const tgt = p.target_periode != null ? escH(String(p.target_periode)) : '-';
           const rea = p.realisasi != null ? escH(String(p.realisasi)) : '-';
           const eff = (p.kategori_efektivitas || p.kategori) ? escH(String(p.kategori_efektivitas || p.kategori)) : '';
-          extraRows += `<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:10px;margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px">`
+          // Gap = target − realisasi (kurang berapa kg lagi). Konteks bisnis produksi.
+          const _t = Number(p.target_periode), _r = Number(p.realisasi);
+          const gap = (Number.isFinite(_t) && Number.isFinite(_r))
+            ? (_t - _r > 0 ? `kurang ${(_t - _r).toFixed(1)} kg` : `lampaui ${(_r - _t).toFixed(1)} kg`) : '-';
+          // Tombol Perbesar produksi: modal setoran + tren + mandor/KTS.
+          const prodBtn = evapotKey ? `<button data-prodopen="${escH(evapotKey)}" data-kodetpg="${escH(String(p.kode_tpg || ''))}" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid rgba(45,242,255,.5);background:rgba(45,242,255,.1);color:#fff;font-size:13px;font-weight:700;cursor:pointer" onclick="window.__anaProduksiOpen && window.__anaProduksiOpen(this.dataset.prodopen, this.dataset.kodetpg ? Number(this.dataset.kodetpg) : null)">⤢ Perbesar — detail produksi</button>` : '';
+          extraRows += `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px;margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px">`
             + (eff ? `<span style="opacity:.6">Efektivitas</span><span>${eff}</span>` : '')
             + `<span style="opacity:.6">Target periode</span><span>${tgt} kg</span>`
             + `<span style="opacity:.6">Realisasi</span><span>${rea} kg</span>`
             + `<span style="opacity:.6">Pencapaian</span><b>${pct}</b>`
+            + `<span style="opacity:.6">Gap</span><span>${escH(gap)}</span>`
             + (p.jumlah_pohon_petak != null ? `<span style="opacity:.6">Pohon petak/andil</span><span>${escH(String(p.jumlah_pohon_petak))} / ${escH(String(p.jml_pohon_andil ?? p.jml_pohon ?? '-'))} ${p.pohon_pct != null ? '('+escH(String(p.pohon_pct))+'%)' : ''}</span>` : '')
-            + `</div>`;
+            + `</div>${prodBtn}`;
         } else if (p.jumlah_aktivitas !== undefined || p.aktivitas_prev !== undefined || p.aktivitas_2bulan !== undefined || p.andil_aktif !== undefined) {
           const ak = p.jumlah_aktivitas ?? p.aktivitas_periode_ini ?? '-';
           const ap = p.aktivitas_prev ?? p.aktivitas_periode_lalu ?? '-';
@@ -440,21 +560,30 @@ export class LeafletAdapter {
           const inconsistent = (Number(p.jumlah_aktivitas ?? p.aktivitas_periode_ini ?? 0) > 0 && Number(p.jumlah_penyadap ?? 0) === 0) || (Number(p.jumlah_aktivitas ?? 0) > 0 && Number(p.jumlah_andil ?? 0) === 0);
           const warnHtml = inconsistent ? `<div style="margin-top:6px;padding:5px 7px;border:1px solid rgba(239,68,68,.55);background:rgba(239,68,68,.12);border-radius:6px;font-size:9px;line-height:1.35"><b style="color:#FCA5A5">⚠ Data inkonsisten</b> — ada ${escH(String(p.jumlah_aktivitas ?? p.aktivitas_periode_ini ?? '?'))} aktivitas pada periode ini tapi <b>tanpa penyadap/andil terdaftar</b> untuk petak ini. Perlu cek ulang <code>getah_andil</code> / mutasi penyadap.</div>` : '';
           const q = p.status || p.kategori ? `<span style="opacity:.6">Status</span><span>${escH(String(p.status || p.kategori))}</span>` : '';
-          extraRows += `<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:10px;margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px">`
+          // Tren: berjalan vs lalu (naik/turun) — konteks bisnis aktivitas.
+          const _ak = Number(p.jumlah_aktivitas ?? p.aktivitas_periode_ini ?? NaN);
+          const _ap = Number(p.aktivitas_prev ?? p.aktivitas_periode_lalu ?? NaN);
+          const tren = (Number.isFinite(_ak) && Number.isFinite(_ap))
+            ? (_ak > _ap ? ` <b style="color:#86EFAC">▲ naik</b>` : _ak < _ap ? ` <b style="color:#FCA5A5">▼ turun</b>` : ` <span style="opacity:.6">— stabil</span>`) : '';
+          // Tombol Perbesar aktivitas: modal detail pelaku + mandor/KTS.
+          // Periode dibaca dari window.__spatialMapState saat modal dibuka
+          // (bukan saat popup dibangun) agar selalu periode tampil.
+          const aktBtn = evapotKey ? `<button data-aktopen="${escH(evapotKey)}" data-kodetpg="${escH(String(p.kode_tpg || ''))}" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid rgba(45,242,255,.5);background:rgba(45,242,255,.1);color:#fff;font-size:13px;font-weight:700;cursor:pointer" onclick="window.__anaAktivitasOpen && window.__anaAktivitasOpen(this.dataset.aktopen, this.dataset.kodetpg ? Number(this.dataset.kodetpg) : null)">⤢ Perbesar — detail aktivitas</button>` : '';
+          extraRows += `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px;margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px">`
             + q
             + `<span style="opacity:.6">Penyadap</span><span>${escH(String(jp))}</span>`
             + `<span style="opacity:.6">Andil</span><span>${escH(String(ja))} (aktif ${escH(String(aa))} &middot; idle ${escH(String(ai))} &middot; bongkor ${escH(String(ab))})</span>`
-            + `<span style="opacity:.6">Aktivitas berjalan</span><b>${escH(String(ak))}</b>`
+            + `<span style="opacity:.6">Aktivitas berjalan</span><b>${escH(String(ak))}${tren}</b>`
             + `<span style="opacity:.6">Aktivitas lalu</span><span>${escH(String(ap))}</span>`
             + `<span style="opacity:.6">Aktivitas 2 bln</span><span>${escH(String(a2))}</span>`
-            + `</div>` + warnHtml + `<div style="font-size:9px;opacity:.5;margin-top:4px">Petak BONGKOR &ne; Andil BONGKOR &middot; andil bongkor &gt;2 bln tanpa aktivitas</div>`;
+            + `</div>` + warnHtml + `<div style="font-size:11px;opacity:.55;margin-top:4px">Petak BONGKOR &ne; Andil BONGKOR &middot; andil bongkor &gt;2 bln tanpa aktivitas</div>${aktBtn}`;
         } else {
           const la = p.luas_andil ?? '-';
           const lb = p.luas_baku ?? '-';
           const cov = (p.luas_andil != null && p.luas_baku) ? (Number(p.luas_andil)/Number(p.luas_baku)*100).toFixed(1)+'%' : '';
           const jp = p.jumlah_penyadap ?? '-';
           const gap = (p.luas_andil != null && p.luas_baku) ? (Number(p.luas_baku)-Number(p.luas_andil)).toFixed(2) : '';
-          extraRows += `<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:10px;margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px">`
+          extraRows += `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px;margin-top:6px;border-top:1px solid rgba(45,242,255,.18);padding-top:6px">`
             + `<span style="opacity:.6">Penyadap</span><span>${escH(String(jp))}</span>`
             + `<span style="opacity:.6">Luas baku</span><span>${escH(String(lb))} ha</span>`
             + `<span style="opacity:.6">Luas andil</span><span>${escH(String(la))} ha ${cov ? '('+cov+')' : ''}</span>`
@@ -463,18 +592,22 @@ export class LeafletAdapter {
         }
         const luasLine = p.luas_baku ? `Luas ${escH(p.luas_baku)} ha` + (p.target_rkap ? ` &middot; RKAP ${escH(p.target_rkap)} kg` : '') : (p.target_rkap ? `RKAP ${escH(p.target_rkap)} kg` : '');
         const rows = [
-          `<div style="font-weight:600">Petak ${nomor}</div>`,
-          wilayahLine ? `<div style="opacity:.9">${wilayahLine}</div>` : '',
-          kodeLine ? `<div style="font-size:10px;opacity:.6">${kodeLine}</div>` : '',
-          luasLine ? `<div style="font-size:10px;opacity:.75">${luasLine}</div>` : '',
-          penyadapLine ? `<div style="font-size:10px;opacity:.75">${penyadapLine}</div>` : '',
-          `<div style="margin-top:4px">${wtxt}${p.pencapaian_pct ? ` &mdash; ${escH(p.pencapaian_pct)}%` : ''}</div>`,
+          `<div style="font-weight:700;font-size:15px">Petak ${nomor}</div>`,
+          wilayahLine || '',
+          luasLine ? `<div style="font-size:12px;opacity:.8;margin-top:2px">${luasLine}</div>` : '',
+          `<div style="font-size:13px;margin-top:5px">${wtxt}${p.pencapaian_pct ? ` &mdash; ${escH(p.pencapaian_pct)}%` : ''}</div>`,
           extraRows,
-          `<div style="font-size:9px;opacity:.45;margin-top:4px">${escH(p.kode_evapot||'')}</div>`,
+          penyadapLine || '',
+          // Tombol Perbesar ikut gate yang sama: tanpa penyadap_nama berarti
+          // bisnis produksi/aktivitas — modal andil/mandor tak relevan.
+          (penyadapList.length && evapotKey ? `<button data-petakopen="${escH(evapotKey)}" data-kodetpg="${escH(String(p.kode_tpg || ''))}" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid rgba(45,242,255,.5);background:rgba(45,242,255,.1);color:#fff;font-size:13px;font-weight:700;cursor:pointer" onclick="window.__anaPetakOpen && window.__anaPetakOpen(this.dataset.petakopen, this.dataset.kodetpg ? Number(this.dataset.kodetpg) : null)">⤢ Perbesar — info lengkap</button>` : ''),
+          `<div style="font-size:10px;opacity:.45;margin-top:5px">${escH(p.kode_evapot||'')}</div>`,
         ].filter(Boolean).join('');
-        layer.bindPopup(`<div style="font-family:var(--font-mono,monospace);font-size:11px;line-height:1.35;min-width:220px;max-width:300px">${rows}</div>`);
+        layer.bindPopup(`<div style="font-family:var(--font-mono,monospace);font-size:13px;line-height:1.45;min-width:240px;max-width:320px">${rows}</div>`);
         // Hover = nomor petak saja (identitas cepat). Detail di klik (popup).
         try { layer.bindTooltip('Petak ' + nomor, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
+        // Lazy-load L+P ditangani listener popupopen level map (constructor)
+        // — handler per-layer tak fire untuk L.geoJSON GROUP.
       } catch (_) {}
       layer.on('click', () => { this.select_feature(id); });
       layer.addTo(host);
@@ -743,13 +876,13 @@ set_aktivitas_points(points, opts = {}) {
     const fotoHtml = hasFoto
       ? `<img src="${fotoSrc}" data-full="${fotoFull}" alt="foto aktivitas (klik perbesar)" title="Klik untuk perbesar" style="width:100%;aspect-ratio:3/4;object-fit:contain;border-radius:6px;border:1px solid rgba(45,242,255,.25);background:#010813;cursor:zoom-in" loading="lazy" onclick="window.__anaFotoOpen && window.__anaFotoOpen(this.dataset.full)" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><div style="display:none;font-size:10px;opacity:.6;padding:8px 0">foto tidak termuat — tablet perlu internet ke server KPHBWB</div>`
       : `<div style="font-size:10px;opacity:.55;padding:6px 0;border:1px dashed rgba(45,242,255,.2);border-radius:6px;text-align:center">tidak ada foto</div>`;
-    const html = `<div style="font-family:var(--font-mono,monospace);font-size:11px;line-height:1.4;min-width:210px;max-width:270px">`
-      + `<div style="font-weight:700;font-size:12px;color:var(--neon,#2DF2FF)">Aktivitas · Petak ${nomor}</div>`
-      + (penyadap ? `<div style="opacity:.85;font-size:10px">${penyadap}</div>` : '')
-      + `<div style="display:flex;flex-wrap:wrap;gap:4px 10px;margin:6px 0 4px 0;padding:5px 6px;background:rgba(45,242,255,.06);border:1px solid rgba(45,242,255,.18);border-radius:5px">${cekHtml}</div>`
-      + `<div style="font-size:9px;opacity:.55;margin-bottom:4px">${jmlJenis} jenis aktivitas · ⚠ koordinat GPS bisa melenceng · pin terikat ke petak via kode_evapot</div>`
+    const html = `<div style="font-family:var(--font-mono,monospace);font-size:13px;line-height:1.45;min-width:230px;max-width:290px">`
+      + `<div style="font-weight:700;font-size:14px;color:var(--neon,#2DF2FF)">Aktivitas · Petak ${nomor}</div>`
+      + (penyadap ? `<div style="opacity:.85;font-size:12px">${penyadap}</div>` : '')
+      + `<div style="display:flex;flex-wrap:wrap;gap:5px 10px;margin:6px 0 4px 0;padding:6px;background:rgba(45,242,255,.06);border:1px solid rgba(45,242,255,.18);border-radius:5px;font-size:12px">${cekHtml}</div>`
+      + `<div style="font-size:11px;opacity:.55;margin-bottom:4px">${jmlJenis} jenis aktivitas · ⚠ koordinat GPS bisa melenceng · pin terikat ke petak via kode_evapot</div>`
       + `<div style="margin:6px 0">${fotoHtml}</div>`
-      + `<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:10px">`
+      + `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px">`
       + `<span style="opacity:.6">Pembaharuan ke</span><b>${escH(pem)}</b>`
       + `<span style="opacity:.6">User create</span><span>${userTxt}</span>`
       + `<span style="opacity:.6">Jabatan</span><span>${jabatanTxt}</span>`
@@ -759,7 +892,7 @@ set_aktivitas_points(points, opts = {}) {
       + `<span style="opacity:.6">Koordinat</span><span>${lat.toFixed(6)}, ${lng.toFixed(6)}</span>`
       + `<span style="opacity:.6">Tanggal</span><span>${tgl} · ${jamTxt} WIB</span>`
       + `</div>`
-      + `<div style="margin-top:6px;font-size:9px;opacity:.5">${escH(r.kode_evapot || '')}</div>`
+      + `<div style="margin-top:5px;font-size:10px;opacity:.5">${escH(r.kode_evapot || '')}</div>`
       + `</div>`;
     // popup pin = detail aktivitas (bukan identitas petak) — bedakan dari popup polygon
     // cegah bubble ke polygon di bawahnya
@@ -1017,8 +1150,410 @@ function _ensureFotoLightbox() {
   } catch (_) {}
 }
 
+// Modal detail petak (tombol Perbesar di popup): info lengkap tanpa beban
+// payload 809 fitur — fetch 3 template saat dibuka (petak_detail +
+// petak_penyadap + petak_mandor_kts), paralel. Singleton seperti lightbox.
+function _ensurePetakModal() {
+  try {
+    if (document.getElementById('anaPetakBox')) return;
+    const box = document.createElement('div');
+    box.id = 'anaPetakBox';
+    box.style.cssText = 'position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:rgba(1,6,16,.94);padding:12px';
+    box.innerHTML = '<div id="anaPetakCard" style="width:min(96vw,1050px);max-height:94vh;overflow-y:auto;background:#03101f;border:1px solid rgba(45,242,255,.4);border-radius:12px;padding:20px 22px;font-family:var(--font-mono,monospace);font-size:15px;line-height:1.6;color:#e8f4ff">'
+      + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><b id="anaPetakTitle" style="font-size:20px;letter-spacing:.02em">Petak</b>'
+      + '<button id="anaPetakX" aria-label="Tutup" style="margin-left:auto;width:38px;height:38px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:rgba(2,15,42,.9);color:#fff;font-size:18px;cursor:pointer">✕</button></div>'
+      + '<div id="anaPetakBody">memuat…</div></div>';
+    document.body.appendChild(box);
+    const close = () => { box.style.display = 'none'; };
+    box.addEventListener('click', (e) => { if (e.target === box || e.target.id === 'anaPetakX') close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && box.style.display !== 'none') close(); });
+    const escH = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const num = (v, d=1) => (v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(d) : '-');
+    window.__anaPetakOpen = async (evapot, kodeTpg) => {
+      try {
+        document.getElementById('anaPetakTitle').textContent = 'Kode Evapot ' + (evapot || '');
+        document.getElementById('anaPetakBody').textContent = 'memuat…';
+        box.style.display = 'flex';
+        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const q = async (template, params) => {
+          const r = await fetch('/api/simoge/query', { method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },
+            body: JSON.stringify({ template, params }) });
+          if (!r.ok) throw new Error('http ' + r.status);
+          return r.json();
+        };
+        // Serial, BUKAN Promise.all: koneksi DB dishare antar thread server —
+        // query paralel bikin "Packet sequence number wrong / Lost connection".
+        // 3x ~12ms tetap cepat, tanpa ubah server.
+        const det = await q('petak_detail', { kode_evapot: evapot }).catch(() => ({ rows: [] }));
+        const pem = await q('petak_penyadap', { kode_evapot: evapot }).catch(() => ({ rows: [] }));
+        const mk = kodeTpg ? await q('petak_mandor_kts', { kode_tpg: kodeTpg }).catch(() => ({ rows: [] })) : { rows: [] };
+        const d = (det.rows || [])[0] || {};
+        const lb = d.luas_baku != null ? Number(d.luas_baku) : null;
+        const jp = d.jumlah_pohon != null ? Number(d.jumlah_pohon) : null;
+        const pct = (v, base) => (v != null && base ? (Number(v) / base * 100).toFixed(1) + '%' : '-');
+        const pctNum = (v, base) => (v != null && base ? (Number(v) / base * 100) : null);
+        const rows = (pem.rows || []).map(r => ({
+          n: String(r.nama_penyadap || '').trim(),
+          no: String(r.nomor_penyadap || '-'),
+          l: r.luas_andil != null ? Number(r.luas_andil) : null,
+          p: r.jml_pohon != null ? Number(r.jml_pohon) : null,
+          tel: String(r.telpon || '').trim(), al: String(r.alamat || '').trim(),
+        })).filter(r => r.n);
+        const contact = (r) => [r.tel, r.al].filter(Boolean).join(' · ');
+        const totL = rows.reduce((a, r) => a + (r.l || 0), 0);
+        const totP = rows.reduce((a, r) => a + (r.p || 0), 0);
+        // Sisa baku: clamp -0.0 (artefak pembulatan 74.2 vs 74.24) jadi 0.0
+        const sisaBaku = lb != null ? Math.max(0, lb - totL).toFixed(1) + ' ha' : '-';
+        const sec = (t, inner) => `<div style="margin-top:16px;border-top:1px solid rgba(45,242,255,.2);padding-top:14px"><div style="font-size:13px;opacity:.6;margin-bottom:8px;letter-spacing:.08em;font-weight:700">${escH(t)}</div>${inner}</div>`;
+        // Info petak: 2 kolom horizontal agar manfaatkan lebar 900px
+        const infoPairs = [
+          ['Nomor', escH(d.nomor_petak || evapot)],
+          ['Kode Evapot', `<span style="font-size:12px;opacity:.9">${escH(d.kode_evapot || evapot)}</span>`],
+          ['BKPH', escH(d.bkph_nama || '-')],
+          ['RPH', escH(d.rph_nama || '-')],
+          ['TPG', escH(d.tpg_nama || '-') + (d.kode_tpg ? ` <span style="opacity:.5;font-size:12px">(${escH(String(d.kode_tpg))})</span>` : '')],
+          ['KPH', escH(d.kph_nama || '-')],
+          ['Luas baku', lb != null ? `<b style="font-size:16px">${lb.toFixed(2)} ha</b>` : '-'],
+          ['Rencana luas', d.rencana_luas != null ? Number(d.rencana_luas).toFixed(2) + ' ha' : '-'],
+          ['Jenis sadap', escH(d.jenis_sadap || '-')],
+          ['RKAP', d.target_rkap != null ? `<b style="font-size:16px">${Number(d.target_rkap).toFixed(1)} kg</b>` : '-'],
+          ['Pohon petak', jp != null ? `<b style="font-size:16px">${jp.toLocaleString('id-ID')}</b> pohon` : '-'],
+          ['Tahun tanam / RTT', escH((d.tahun_tanam || '-') + ' / ' + (d.tahun_rtt || '-'))],
+        ];
+        // 2 blok: kiri info petak + mandor + ringkasan, kanan tabel penyadap.
+        // <760px menumpuk vertikal (responsif).
+        let html = `<style>#anaPetakCols{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}#anaPetakCols>div+div{border-left:1px solid rgba(45,242,255,.45);padding-left:20px}@media (max-width:760px){#anaPetakCols{grid-template-columns:1fr}#anaPetakCols>div+div{border-left:none;padding-left:0;border-top:1px solid rgba(45,242,255,.45);padding-top:16px}}</style><div id="anaPetakCols"><div>`
+          + `<div style="display:grid;grid-template-columns:1fr;gap:10px">`
+          + infoPairs.filter(([, v]) => v !== '-').map(([k, v]) => `<div style="display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:rgba(45,242,255,.06);border:1px solid rgba(45,242,255,.12);border-radius:8px"><span style="font-size:12px;opacity:.6;letter-spacing:.04em">${escH(k)}</span><span style="font-size:15px">${v}</span></div>`).join('')
+          + `</div>`;
+        let mkHtml = '';
+        const mkRows = (mk.rows || []);
+        if (!mkRows.length) {
+          mkHtml = '<div style="opacity:.6;padding:10px;text-align:center">tidak ada user Mandor/KTS terhubung ke TPG ini</div>';
+        } else {
+          mkHtml = `<div style="display:grid;grid-template-columns:1fr;gap:12px">`
+            + mkRows.map(r => {
+              const isMandor = String(r.peran || '').toLowerCase().includes('mandor');
+              const badge = isMandor ? 'MANDOR' : 'KTS';
+              const badgeCol = isMandor ? 'rgba(34,197,94,.18);border-color:rgba(34,197,94,.4);color:#86EFAC' : 'rgba(45,242,255,.14);border-color:rgba(45,242,255,.35);color:#7DD3FC';
+              return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(45,242,255,.14);border-radius:10px">`
+                + `<span style="font-size:11px;font-weight:800;letter-spacing:.08em;padding:4px 8px;border-radius:6px;border:1px solid ${badgeCol}">${escH(badge)}</span>`
+                + `<span><b style="font-size:15px">${escH(r.nama)}</b><br><span style="opacity:.6;font-size:12px">${escH(r.kode_jabatan)} · ${escH(r.nama_jabatan)}</span></span>`
+                + `</div>`;
+            }).join('')
+            + `</div>`;
+        }
+        html += sec('MANDOR / KTS', mkHtml);
+        // Ringkasan tutup blok kiri, lalu blok kanan = tabel penyadap
+        html += `<div style="margin-top:16px;padding:12px;background:rgba(45,242,255,.08);border:1px solid rgba(45,242,255,.18);border-radius:8px;font-size:14px;line-height:1.7">`
+          + `<div>Total andil: <b>L ${totL.toFixed(1)} ha (${pct(totL, lb)})</b></div>`
+          + `<div><b>P ${totP.toLocaleString('id-ID')} pohon (${pct(totP, jp)})</b></div>`
+          + `<div style="opacity:.7">${rows.length} penyadap · Sisa luas baku: ${sisaBaku}</div>`
+          + `</div></div><div>`;
+        // Tabel penyadap: manfaatkan lebar — kolom L/P + % berdampingan, kontak di kanan
+        const th = `font-size:12px;opacity:.6;padding:8px 10px;text-align:left;border-bottom:1px solid rgba(45,242,255,.2);border-left:1px solid rgba(45,242,255,.18);white-space:nowrap`;
+        const td = `font-size:14px;padding:9px 10px;border-bottom:1px solid rgba(45,242,255,.08);border-left:1px solid rgba(45,242,255,.14);vertical-align:top`;
+        const tdR = td + `;text-align:right;white-space:nowrap`;
+        const bar = (pctVal) => {
+          const v = pctVal != null ? Math.max(0, Math.min(100, pctVal)) : 0;
+          const col = v >= 6 ? '#22C55E' : v >= 3 ? '#F59E0B' : '#EF4444';
+          return `<div style="width:56px;height:6px;background:rgba(255,255,255,.12);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:6px"><div style="width:${v > 10 ? 100 : v*10}%;max-width:100%;height:100%;background:${col}"></div></div>`;
+        };
+        let pemHtml = '';
+        if (!rows.length) {
+          pemHtml = '<div style="opacity:.6;padding:12px;text-align:center">tidak ada andil terdaftar</div>';
+        } else {
+          // Kolom Kontak tampil HANYA bila ≥1 andil punya kontak — tanpa ini
+          // kolom '-' penuh makan ~180px sia-sia (temuan audit visual).
+          const hasContact = rows.some(r => contact(r));
+          pemHtml = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:${hasContact ? '640px' : '520px'}">`
+            + `<thead><tr>`
+            + `<th style="${th};width:32px">#</th><th style="${th}">Nama — Nomor</th><th style="${th}">Luas andil</th><th style="${th}">% thd luas baku</th><th style="${th}">Pohon Andil</th><th style="${th}">% thd Pohon Petak</th>${hasContact ? `<th style="${th}">Kontak</th>` : ''}`
+            + `</tr></thead><tbody>`
+            + rows.map((r, i) => {
+              const pL = pctNum(r.l, lb);
+              const pP = pctNum(r.p, jp);
+              return `<tr>`
+                + `<td style="${td};opacity:.5">${i + 1}</td>`
+                + `<td style="${td}"><b>${escH(r.n)}</b><br><span style="opacity:.55;font-size:12px">${escH(r.no)}</span></td>`
+                + `<td style="${tdR}">${r.l != null ? r.l.toFixed(1) + ' ha' : '-'}</td>`
+                + `<td style="${tdR}">${pct(r.l, lb)}${pL != null ? bar(pL) : ''}</td>`
+                + `<td style="${tdR}">${r.p != null ? r.p.toLocaleString('id-ID') : '-'}</td>`
+                + `<td style="${tdR}">${pct(r.p, jp)}${pP != null ? bar(pP) : ''}</td>`
+                + (hasContact ? `<td style="${td};font-size:12px;opacity:.75;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escH(contact(r))}">${contact(r) ? escH(contact(r)) : '<span style="opacity:.4">-</span>'}</td>` : '')
+                + `</tr>`;
+            }).join('')
+            + `</tbody></table></div>`;
+        }
+        html += sec(`PENYADAP — ${rows.length} andil (persentase terhadap luas baku ${lb != null ? lb.toFixed(2) + ' ha' : '-'} & pohon ${jp != null ? jp.toLocaleString('id-ID') : '-'})`, pemHtml)
+          + `</div></div>`;
+        document.getElementById('anaPetakBody').innerHTML = html;
+        // Aman XSS: semua nilai DB lewat escH()/num()/toFixed(); innerHTML
+        // hanya untuk struktur statis + nilai yang sudah di-escape.
+      } catch (_) {
+        try { document.getElementById('anaPetakBody').textContent = 'gagal memuat detail — coba lagi'; } catch (_) {}
+      }
+    };
+  } catch (_) {}
+}
+
+// Modal detail aktivitas (tombol Perbesar di popup aktivitas): status +
+// tren + pelaku per penyadap + mandor/KTS. Periode dibaca dari
+// window.__spatialMapState saat dibuka (selalu periode tampil). Fetch
+// serial seperti modal petak (koneksi DB dishare). Singleton.
+function _ensureAktivitasModal() {
+  try {
+    if (document.getElementById('anaAktBox')) return;
+    const box = document.createElement('div');
+    box.id = 'anaAktBox';
+    box.style.cssText = 'position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:rgba(1,6,16,.94);padding:12px';
+    box.innerHTML = '<div id="anaAktCard" style="width:min(96vw,900px);max-height:94vh;overflow-y:auto;background:#03101f;border:1px solid rgba(45,242,255,.4);border-radius:12px;padding:20px 22px;font-family:var(--font-mono,monospace);font-size:15px;line-height:1.6;color:#e8f4ff">'
+      + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><b id="anaAktTitle" style="font-size:20px;letter-spacing:.02em">Aktivitas</b>'
+      + '<button id="anaAktX" aria-label="Tutup" style="margin-left:auto;width:38px;height:38px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:rgba(2,15,42,.9);color:#fff;font-size:18px;cursor:pointer">✕</button></div>'
+      + '<div id="anaAktBody">memuat…</div></div>';
+    document.body.appendChild(box);
+    const close = () => { box.style.display = 'none'; };
+    box.addEventListener('click', (e) => { if (e.target === box || e.target.id === 'anaAktX') close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && box.style.display !== 'none') close(); });
+    const escH = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const NAMA_BULAN = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    window.__anaAktivitasOpen = async (evapot, kodeTpg) => {
+      try {
+        // Periode tampil saat modal dibuka (bukan saat popup dibangun).
+        let Y = new Date().getFullYear(), B = new Date().getMonth() + 1, P = 1;
+        try {
+          const st = window.__spatialMapState || {};
+          const f = st.filters || {};
+          if (Number.isFinite(parseInt(f.tahun))) Y = parseInt(f.tahun);
+          if (f.bulan >= 1 && f.bulan <= 12) B = parseInt(f.bulan);
+          if ([0, 1, 2].includes(parseInt(f.periode))) P = parseInt(f.periode);
+        } catch (_) {}
+        const perLabel = P === 0 ? 'Penuh' : 'P' + P;
+        document.getElementById('anaAktTitle').textContent = 'Aktivitas · ' + (NAMA_BULAN[B] || B) + ' ' + perLabel + ' ' + Y;
+        document.getElementById('anaAktBody').textContent = 'memuat…';
+        box.style.display = 'flex';
+        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const q = async (template, params) => {
+          const r = await fetch('/api/simoge/query', { method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },
+            body: JSON.stringify({ template, params }) });
+          if (!r.ok) throw new Error('http ' + r.status);
+          return r.json();
+        };
+        const det = await q('petak_detail', { kode_evapot: evapot }).catch(() => ({ rows: [] }));
+        const pel = await q('aktivitas_penyadap_petak', { kode_evapot: evapot, tahun: Y, bulan: B, periode: P }).catch(() => ({ rows: [] }));
+        const mk = kodeTpg ? await q('petak_mandor_kts', { kode_tpg: kodeTpg }).catch(() => ({ rows: [] })) : { rows: [] };
+        const d = (det.rows || [])[0] || {};
+        const sec = (t, inner) => `<div style="margin-top:16px;border-top:1px solid rgba(45,242,255,.2);padding-top:14px"><div style="font-size:13px;opacity:.6;margin-bottom:8px;letter-spacing:.08em;font-weight:700">${escH(t)}</div>${inner}</div>`;
+        let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;background-image:linear-gradient(rgba(45,242,255,.45),rgba(45,242,255,.45));background-size:1px 100%;background-position:center;background-repeat:no-repeat">`
+          + [['Petak', escH(d.nomor_petak || evapot)],
+             ['Kode Evapot', `<span style="font-size:12px;opacity:.9">${escH(d.kode_evapot || evapot)}</span>`],
+             ['Wilayah', escH([d.bkph_nama, d.rph_nama, d.tpg_nama].filter(Boolean).join(' · ') || '-')],
+             ['Periode', escH((NAMA_BULAN[B] || B) + ' ' + perLabel + ' ' + Y)],
+            ].filter(([, v]) => v !== '-').map(([k, v]) => `<div style="display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:rgba(45,242,255,.06);border:1px solid rgba(45,242,255,.12);border-radius:8px"><span style="font-size:12px;opacity:.6;letter-spacing:.04em">${escH(k)}</span><span style="font-size:15px">${v}</span></div>`).join('')
+          + `</div>`;
+        // Pelaku: siapa mengerjakan apa (dari baris aktivitas, bukan andil —
+        // petak tanpa andil seperti 11B-1 tetap tampil pelakunya).
+        const JENIS = [['quare','Q'],['semprot_cas','S'],['kerok','K'],['budaya_bersih','B'],['naik_batok','N']];
+        const rows = (pel.rows || []);
+        const totAkt = rows.reduce((a, r) => a + (Number(r.n_aktivitas) || 0), 0);
+        let pelHtml = '';
+        if (!rows.length) {
+          pelHtml = '<div style="opacity:.6;padding:12px;text-align:center">tidak ada aktivitas pada periode ini</div>';
+        } else {
+          const th = `font-size:12px;opacity:.6;padding:8px 10px;text-align:left;border-bottom:1px solid rgba(45,242,255,.2);border-left:1px solid rgba(45,242,255,.18);white-space:nowrap`;
+          const td = `font-size:14px;padding:9px 10px;border-bottom:1px solid rgba(45,242,255,.08);border-left:1px solid rgba(45,242,255,.14);vertical-align:top`;
+          const tdR = td + `;text-align:right;white-space:nowrap`;
+          pelHtml = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:520px">`
+            + `<thead><tr><th style="${th};width:32px">#</th><th style="${th}">Penyadap</th><th style="${th}">Aktivitas</th><th style="${th}">Jenis (Q/S/K/B/N)</th><th style="${th}">Tahap</th><th style="${th}">Terakhir</th></tr></thead><tbody>`
+            + rows.map((r, i) => {
+              const jenis = JENIS.map(([k, lbl]) => {
+                const v = Number(r[k]) || 0;
+                return v > 0 ? `<b style="color:#86EFAC">${lbl}${v}</b>` : `<span style="opacity:.3">${lbl}-</span>`;
+              }).join(' ');
+              return `<tr>`
+                + `<td style="${td};opacity:.5">${i + 1}</td>`
+                + `<td style="${td}"><b>${escH(r.nama_penyadap || '-')}</b></td>`
+                + `<td style="${tdR}"><b>${escH(String(r.n_aktivitas ?? '-'))}x</b></td>`
+                + `<td style="${td};font-size:13px">${jenis}</td>`
+                + `<td style="${tdR}">P${escH(String(r.pembaharuan_dominan ?? '-'))}</td>`
+                + `<td style="${tdR};font-size:12px;opacity:.8">${escH(String(r.tgl_terakhir || '-').slice(0, 10))}</td>`
+                + `</tr>`;
+            }).join('')
+            + `</tbody></table></div>`
+            + `<div style="margin-top:10px;padding:10px 12px;background:rgba(45,242,255,.08);border:1px solid rgba(45,242,255,.18);border-radius:8px;font-size:14px">`
+            + `Total: <b>${totAkt} aktivitas</b> oleh <b>${rows.length} penyadap</b></div>`;
+        }
+        html += sec(`PELAKU — ${rows.length} penyadap beraktivitas (${perLabel})`, pelHtml);
+        let mkHtml = '';
+        const mkRows = (mk.rows || []);
+        if (!mkRows.length) {
+          mkHtml = '<div style="opacity:.6;padding:10px;text-align:center">tidak ada user Mandor/KTS terhubung ke TPG ini</div>';
+        } else {
+          mkHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background-image:linear-gradient(rgba(45,242,255,.45),rgba(45,242,255,.45));background-size:1px 100%;background-position:center;background-repeat:no-repeat">`
+            + mkRows.map(r => {
+              const isMandor = String(r.peran || '').toLowerCase().includes('mandor');
+              const badge = isMandor ? 'MANDOR' : 'KTS';
+              const badgeCol = isMandor ? 'rgba(34,197,94,.18);border-color:rgba(34,197,94,.4);color:#86EFAC' : 'rgba(45,242,255,.14);border-color:rgba(45,242,255,.35);color:#7DD3FC';
+              return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(45,242,255,.14);border-radius:10px">`
+                + `<span style="font-size:11px;font-weight:800;letter-spacing:.08em;padding:4px 8px;border-radius:6px;border:1px solid ${badgeCol}">${escH(badge)}</span>`
+                + `<span><b style="font-size:15px">${escH(r.nama)}</b><br><span style="opacity:.6;font-size:12px">${escH(r.kode_jabatan)} · ${escH(r.nama_jabatan)}</span></span>`
+                + `</div>`;
+            }).join('')
+            + `</div>`;
+        }
+        html += sec('MANDOR / KTS', mkHtml);
+        document.getElementById('anaAktBody').innerHTML = html;
+        // Aman XSS: semua nilai DB lewat escH(); innerHTML hanya struktur
+        // statis + nilai yang sudah di-escape.
+      } catch (_) {
+        try { document.getElementById('anaAktBody').textContent = 'gagal memuat detail — coba lagi'; } catch (_) {}
+      }
+    };
+  } catch (_) {}
+}
+
+// Modal detail produksi (tombol Perbesar di popup produksi/matriks):
+// target vs realisasi + gap + tren vs periode lalu + setoran per penyadap
+// + mandor/KTS. Periode dari window.__spatialMapState saat dibuka. Fetch
+// serial (koneksi DB dishare). Singleton.
+function _ensureProduksiModal() {
+  try {
+    if (document.getElementById('anaProdBox')) return;
+    const box = document.createElement('div');
+    box.id = 'anaProdBox';
+    box.style.cssText = 'position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:rgba(1,6,16,.94);padding:12px';
+    box.innerHTML = '<div id="anaProdCard" style="width:min(96vw,900px);max-height:94vh;overflow-y:auto;background:#03101f;border:1px solid rgba(45,242,255,.4);border-radius:12px;padding:20px 22px;font-family:var(--font-mono,monospace);font-size:15px;line-height:1.6;color:#e8f4ff">'
+      + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><b id="anaProdTitle" style="font-size:20px;letter-spacing:.02em">Produksi</b>'
+      + '<button id="anaProdX" aria-label="Tutup" style="margin-left:auto;width:38px;height:38px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:rgba(2,15,42,.9);color:#fff;font-size:18px;cursor:pointer">✕</button></div>'
+      + '<div id="anaProdBody">memuat…</div></div>';
+    document.body.appendChild(box);
+    const close = () => { box.style.display = 'none'; };
+    box.addEventListener('click', (e) => { if (e.target === box || e.target.id === 'anaProdX') close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && box.style.display !== 'none') close(); });
+    const escH = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const NAMA_BULAN = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+    // Periode lalu untuk tren: P2→P1 bulan sama, P1→P2 bulan lalu, Penuh→Penuh bulan lalu.
+    const prevPer = (y, b, p) => {
+      if (p === 2) return [y, b, 1];
+      if (p === 1) { const pb = b > 1 ? b - 1 : 12, py = b > 1 ? y : y - 1; return [py, pb, 2]; }
+      const pb = b > 1 ? b - 1 : 12, py = b > 1 ? y : y - 1; return [py, pb, 0];
+    };
+    window.__anaProduksiOpen = async (evapot, kodeTpg) => {
+      try {
+        let Y = new Date().getFullYear(), B = new Date().getMonth() + 1, P = 1;
+        try {
+          const st = window.__spatialMapState || {};
+          const f = st.filters || {};
+          if (Number.isFinite(parseInt(f.tahun))) Y = parseInt(f.tahun);
+          if (f.bulan >= 1 && f.bulan <= 12) B = parseInt(f.bulan);
+          if ([0, 1, 2].includes(parseInt(f.periode))) P = parseInt(f.periode);
+        } catch (_) {}
+        const perLabel = P === 0 ? 'Penuh' : 'P' + P;
+        document.getElementById('anaProdTitle').textContent = 'Produksi · ' + (NAMA_BULAN[B] || B) + ' ' + perLabel + ' ' + Y;
+        document.getElementById('anaProdBody').textContent = 'memuat…';
+        box.style.display = 'flex';
+        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const q = async (template, params) => {
+          const r = await fetch('/api/simoge/query', { method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },
+            body: JSON.stringify({ template, params }) });
+          if (!r.ok) throw new Error('http ' + r.status);
+          return r.json();
+        };
+        // rkap_map per petak tak ada (agregat per wilayah) — hitung dari
+        // penerimaan langsung + target RO via target_pct. Serial (DB share).
+        const det = await q('petak_detail', { kode_evapot: evapot }).catch(() => ({ rows: [] }));
+        const [py, pb, pp] = prevPer(Y, B, P);
+        // Tren lalu dari produksi_penyadap_petak (per petak), BUKAN
+        // produksi_aktiv (agregat global — pakai itu trennya milik semua petak).
+        const now = await q('produksi_penyadap_petak', { kode_evapot: evapot, tahun: Y, bulan: B, periode: P }).catch(() => ({ rows: [] }));
+        const laluRows = await q('produksi_penyadap_petak', { kode_evapot: evapot, tahun: py, bulan: pb, periode: pp }).catch(() => ({ rows: [] }));
+        const tp = await q('target_pct', { tahun: Y, bulan: B, periode: P }).catch(() => ({ rows: [] }));
+        const mk = kodeTpg ? await q('petak_mandor_kts', { kode_tpg: kodeTpg }).catch(() => ({ rows: [] })) : { rows: [] };
+        const d = (det.rows || [])[0] || {};
+        const rk = d.target_rkap != null ? Number(d.target_rkap) : null;
+        const pctRO = (tp.rows || [])[0] ? Number(tp.rows[0].pct) : null;
+        const tgt = (rk != null && pctRO != null) ? rk * pctRO / 100 : null;
+        const rows = (now.rows || []);
+        const totKg = rows.reduce((a, r) => a + (Number(r.kg) || 0), 0);
+        const cap = (tgt && tgt > 0) ? totKg / tgt * 100 : null;
+        const laluKg = (laluRows.rows || []).reduce((a, r) => a + (Number(r.kg) || 0), 0);
+        const trenTxt = totKg > laluKg ? ` <b style="color:#86EFAC">▲ naik ${totKg && laluKg ? '+' + ((totKg - laluKg) / laluKg * 100).toFixed(1) + '%' : ''}</b>`
+          : totKg < laluKg ? ` <b style="color:#FCA5A5">▼ turun</b>` : ` <span style="opacity:.6">— stabil</span>`;
+        const barW = cap != null ? Math.max(0, Math.min(100, cap)) : 0;
+        const barCol = cap == null ? '#666' : cap < 25 ? '#EF4444' : cap < 50 ? '#F97316' : cap < 75 ? '#EAB308' : '#22C55E';
+        const sec = (t, inner) => `<div style="margin-top:16px;border-top:1px solid rgba(45,242,255,.2);padding-top:14px"><div style="font-size:13px;opacity:.6;margin-bottom:8px;letter-spacing:.08em;font-weight:700">${escH(t)}</div>${inner}</div>`;
+        let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 28px;background-image:linear-gradient(rgba(45,242,255,.45),rgba(45,242,255,.45));background-size:1px 100%;background-position:center;background-repeat:no-repeat">`
+          + [['Petak', escH(d.nomor_petak || evapot)],
+             ['Kode Evapot', `<span style="font-size:12px;opacity:.9">${escH(d.kode_evapot || evapot)}</span>`],
+             ['Wilayah', escH([d.bkph_nama, d.rph_nama, d.tpg_nama].filter(Boolean).join(' · ') || '-')],
+             ['Periode', escH((NAMA_BULAN[B] || B) + ' ' + perLabel + ' ' + Y)],
+             ['Target RKAP', rk != null ? `<b style="font-size:16px">${rk.toFixed(1)} kg</b>` : '-'],
+             ['Target RO periode', (pctRO != null ? pctRO.toFixed(1) + '% → <b style="font-size:16px">' + (tgt != null ? tgt.toFixed(1) : '-') + ' kg</b>' : '-')],
+             ['Realisasi', `<b style="font-size:16px">${totKg.toFixed(1)} kg</b>${trenTxt}`],
+             ['Pencapaian', cap != null ? `<b style="font-size:16px">${cap.toFixed(1)}%</b>` : '-'],
+            ].filter(([, v]) => v !== '-').map(([k, v]) => `<div style="display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:rgba(45,242,255,.06);border:1px solid rgba(45,242,255,.12);border-radius:8px"><span style="font-size:12px;opacity:.6;letter-spacing:.04em">${escH(k)}</span><span style="font-size:15px">${v}</span></div>`).join('')
+          + `</div>`
+          + `<div style="margin-top:12px"><div style="height:10px;background:rgba(255,255,255,.1);border-radius:5px;overflow:hidden"><div style="width:${barW}%;height:100%;background:${barCol}"></div></div>`
+          + `<div style="font-size:12px;opacity:.65;margin-top:4px">vs periode lalu: ${laluKg.toFixed(1)} kg (${NAMA_BULAN[pb] || pb} ${pp === 0 ? 'Penuh' : 'P' + pp}) · Gap: ${tgt != null ? (tgt - totKg > 0 ? 'kurang ' + (tgt - totKg).toFixed(1) + ' kg' : 'lampaui ' + (totKg - tgt).toFixed(1) + ' kg') : '-'}</div></div>`;
+        let setHtml = '';
+        if (!rows.length) {
+          setHtml = '<div style="opacity:.6;padding:12px;text-align:center">belum ada setoran pada periode ini</div>';
+        } else {
+          const th = `font-size:12px;opacity:.6;padding:8px 10px;text-align:left;border-bottom:1px solid rgba(45,242,255,.2);border-left:1px solid rgba(45,242,255,.18);white-space:nowrap`;
+          const td = `font-size:14px;padding:9px 10px;border-bottom:1px solid rgba(45,242,255,.08);border-left:1px solid rgba(45,242,255,.14);vertical-align:top`;
+          const tdR = td + `;text-align:right;white-space:nowrap`;
+          setHtml = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:480px">`
+            + `<thead><tr><th style="${th};width:32px">#</th><th style="${th}">Penyadap</th><th style="${th}">Setoran</th><th style="${th}">Terima</th><th style="${th}">Terakhir</th></tr></thead><tbody>`
+            + rows.map((r, i) => {
+              const kg = Number(r.kg) || 0;
+              const share = totKg > 0 ? (kg / totKg * 100).toFixed(1) + '%' : '-';
+              return `<tr>`
+                + `<td style="${td};opacity:.5">${i + 1}</td>`
+                + `<td style="${td}"><b>${escH(r.nama_penyadap || '-')}</b></td>`
+                + `<td style="${tdR}"><b>${kg.toFixed(1)} kg</b> <span style="opacity:.6;font-size:12px">(${share})</span></td>`
+                + `<td style="${tdR}">${escH(String(r.n_terima ?? '-'))}x</td>`
+                + `<td style="${tdR};font-size:12px;opacity:.8">${escH(String(r.tgl_terakhir || '-').slice(0, 10))}</td>`
+                + `</tr>`;
+            }).join('')
+            + `</tbody></table></div>`;
+        }
+        html += sec(`SETORAN — ${rows.length} penyadap setor (${perLabel})`, setHtml);
+        let mkHtml = '';
+        const mkRows = (mk.rows || []);
+        if (!mkRows.length) {
+          mkHtml = '<div style="opacity:.6;padding:10px;text-align:center">tidak ada user Mandor/KTS terhubung ke TPG ini</div>';
+        } else {
+          mkHtml = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background-image:linear-gradient(rgba(45,242,255,.45),rgba(45,242,255,.45));background-size:1px 100%;background-position:center;background-repeat:no-repeat">`
+            + mkRows.map(r => {
+              const isMandor = String(r.peran || '').toLowerCase().includes('mandor');
+              const badge = isMandor ? 'MANDOR' : 'KTS';
+              const badgeCol = isMandor ? 'rgba(34,197,94,.18);border-color:rgba(34,197,94,.4);color:#86EFAC' : 'rgba(45,242,255,.14);border-color:rgba(45,242,255,.35);color:#7DD3FC';
+              return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(45,242,255,.14);border-radius:10px">`
+                + `<span style="font-size:11px;font-weight:800;letter-spacing:.08em;padding:4px 8px;border-radius:6px;border:1px solid ${badgeCol}">${escH(badge)}</span>`
+                + `<span><b style="font-size:15px">${escH(r.nama)}</b><br><span style="opacity:.6;font-size:12px">${escH(r.kode_jabatan)} · ${escH(r.nama_jabatan)}</span></span>`
+                + `</div>`;
+            }).join('')
+            + `</div>`;
+        }
+        html += sec('MANDOR / KTS', mkHtml);
+        document.getElementById('anaProdBody').innerHTML = html;
+        // Aman XSS: semua nilai DB lewat escH()/toFixed(); innerHTML hanya
+        // struktur statis + nilai yang sudah di-escape.
+      } catch (_) {
+        try { document.getElementById('anaProdBody').textContent = 'gagal memuat detail — coba lagi'; } catch (_) {}
+      }
+    };
+  } catch (_) {}
+}
+
 // Factory: satu pintu buat map.js dan (nanti) MapLibreAdapter.
 export function createLeafletControl(map, opts = {}) {
   try { _ensureFotoLightbox(); } catch (_) {}
+  try { _ensurePetakModal(); } catch (_) {}
+  try { _ensureAktivitasModal(); } catch (_) {}
+  try { _ensureProduksiModal(); } catch (_) {}
   return new LeafletAdapter(map, opts);
 }

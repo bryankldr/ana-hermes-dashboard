@@ -1105,12 +1105,43 @@ def petak_detail(kode_evapot: str, **kw):
     """Full detail of a single petak (clicked in map)."""
     return q("""
         SELECT
-            p.nomor_petak, p.luas_baku, p.target_rkap, p.jenis_sadap,
+            p.nomor_petak, p.kode_evapot, p.luas_baku, p.rencana_luas,
+            p.target_rkap, p.jenis_sadap,
             p.kode_kph, p.kode_bkph, p.kode_rph, p.kode_tpg, p.tahun_rtt,
+            p.kph AS kph_nama, p.bkph AS bkph_nama, p.rph AS rph_nama,
+            p.nama_tpg AS tpg_nama,
             p.jumlah_pohon, p.tahun_tanam
         FROM getah_petak p
         WHERE p.kode_evapot = %s
     """, (kode_evapot,))
+
+
+@template("petak_mandor_kts")
+def petak_mandor_kts(kode_tpg: int, **kw):
+    """Mandor + KTS pengampu satu TPG (pemimpin para penyadap).
+
+    Rantai: getah_daftar_tpg.kode_tpg -> t.id -> junction ->
+    directus_users -> jabatan (M1-M5 = Mandor, K1-K5 = KTS).
+    Return {nama, kode_jabatan, nama_jabatan, peran} order Mandor dulu.
+    """
+    return q("""
+        SELECT
+            CASE WHEN u.last_name IS NULL OR TRIM(u.last_name) = ''
+                      OR LOCATE(TRIM(u.last_name), TRIM(u.first_name)) > 0
+                 THEN TRIM(u.first_name)
+                 ELSE TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) END AS nama,
+            jb.kode_jabatan, jb.nama_jabatan,
+            CASE WHEN jb.kode_jabatan LIKE 'M%%' THEN 'Mandor'
+                 WHEN jb.kode_jabatan LIKE 'K%%' THEN 'KTS'
+                 ELSE COALESCE(jb.nama_jabatan, '-') END AS peran
+        FROM getah_daftar_tpg t
+        JOIN junction_directus_users_getah_daftar_tpg j ON j.getah_daftar_tpg_id = t.id
+        JOIN directus_users u ON u.id = j.directus_users_id
+        LEFT JOIN jabatan jb ON jb.id = u.jabatan
+        WHERE t.kode_tpg = %s
+        ORDER BY CASE WHEN jb.kode_jabatan LIKE 'M%%' THEN 0
+                      WHEN jb.kode_jabatan LIKE 'K%%' THEN 1 ELSE 2 END, nama
+    """, (kode_tpg,))
 
 
 @template("petak_penyadap")
@@ -1119,12 +1150,66 @@ def petak_penyadap(kode_evapot: str, **kw):
     return q("""
         SELECT
             a.id_penyadap, a.nama_penyadap, a.luas_andil,
-            p.nomor_penyadap, a.jml_pohon
+            p.nomor_penyadap, a.jml_pohon, p.telpon, p.alamat
         FROM getah_andil a
         JOIN getah_penyadap p ON p.id = a.id_penyadap
         WHERE a.kode_evapot = %s
         ORDER BY a.luas_andil DESC
     """, (kode_evapot,))
+
+
+@template("aktivitas_penyadap_petak")
+def aktivitas_penyadap_petak(kode_evapot: str, tahun: int, bulan: int, periode: int, **kw):
+    """Siapa mengerjakan apa di satu petak pada satu periode (modal aktivitas).
+
+    Per penyadap: hitungan aktivitas berjalan + jenis (quare/semprot/kerok/
+    budaya/naik_batok) + tahap pembaharuan dominan + tgl terakhir.
+    Petak tanpa andil (contoh 11B-1: aktivitas ada, andil nol) tetap tampil —
+    pelaku dibaca dari baris aktivitas, bukan dari getah_andil.
+    """
+    d0, e1 = period_bounds(tahun, bulan, periode)
+    return q("""
+        SELECT
+            s.id_penyadap, COALESCE(py.nama_penyadap, '-') AS nama_penyadap,
+            COUNT(*) AS n_aktivitas,
+            SUM(COALESCE(s.quare,0)) AS quare,
+            SUM(COALESCE(s.semprot_cas,0)) AS semprot_cas,
+            SUM(COALESCE(s.kerok,0)) AS kerok,
+            SUM(COALESCE(s.budaya_bersih,0)) AS budaya_bersih,
+            SUM(COALESCE(s.naik_batok,0)) AS naik_batok,
+            (SELECT s2.pembaharuan_ke FROM getah_aktivitas_sadap s2
+              WHERE s2.kode_evapot = s.kode_evapot AND s2.id_penyadap = s.id_penyadap
+                AND s2.tgl_pembaharuan BETWEEN %s AND %s
+              GROUP BY s2.pembaharuan_ke ORDER BY COUNT(*) DESC LIMIT 1) AS pembaharuan_dominan,
+            MAX(s.tgl_pembaharuan) AS tgl_terakhir
+        FROM getah_aktivitas_sadap s
+        LEFT JOIN getah_penyadap py ON py.id = s.id_penyadap
+        WHERE s.kode_evapot = %s AND s.tgl_pembaharuan BETWEEN %s AND %s
+        GROUP BY s.id_penyadap, py.nama_penyadap
+        ORDER BY n_aktivitas DESC
+    """, (d0, e1, kode_evapot, d0, e1))
+
+
+@template("produksi_penyadap_petak")
+def produksi_penyadap_petak(kode_evapot: str, tahun: int, bulan: int, periode: int, **kw):
+    """Setoran per penyadap di satu petak pada satu periode (modal produksi).
+
+    Dari getah_aktivitas_penerimaan (berat_penerimaan), bukan dari andil —
+    penyadap tanpa setoran pada periode ini tak muncul (wajar: 0 kg).
+    """
+    d0, e1 = period_bounds(tahun, bulan, periode)
+    return q("""
+        SELECT
+            p.id_penyadap, COALESCE(py.nama_penyadap, '-') AS nama_penyadap,
+            COUNT(*) AS n_terima,
+            ROUND(SUM(COALESCE(p.berat_penerimaan, 0)), 2) AS kg,
+            MAX(p.tanggal) AS tgl_terakhir
+        FROM getah_aktivitas_penerimaan p
+        LEFT JOIN getah_penyadap py ON py.id = p.id_penyadap
+        WHERE p.kode_evapot = %s AND p.tanggal BETWEEN %s AND %s
+        GROUP BY p.id_penyadap, py.nama_penyadap
+        ORDER BY kg DESC
+    """, (kode_evapot, d0, e1))
 
 
 @template("penyadap_aktivitas")

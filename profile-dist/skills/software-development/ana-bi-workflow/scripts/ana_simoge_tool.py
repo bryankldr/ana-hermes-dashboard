@@ -407,6 +407,18 @@ def _explain(result: dict, template: str, params: dict) -> str:
     if template == "petak_penyadap":
         return f"{rc} penyadap di petak {params.get('kode_evapot', '?')}: " + ", ".join(f"{r.get('nama_penyadap','?')} ({r.get('luas_andil','?')} ha)" for r in result["rows"][:5])
 
+    if template == "petak_mandor_kts":
+        parts = [f"{r.get('nama','?')} ({r.get('peran','?')}/{r.get('kode_jabatan','?')})" for r in result["rows"]]
+        return f"Mandor+KTS pengampu TPG {params.get('kode_tpg', '?')}: " + (", ".join(parts) if parts else "tidak ada user terhubung") + " — mereka pemimpin para penyadap"
+
+    if template == "aktivitas_penyadap_petak":
+        tops = [f"{r.get('nama_penyadap','?')} ({r.get('n_aktivitas',0)}x)" for r in result["rows"][:5]]
+        return f"{rc} penyadap beraktivitas di petak {params.get('kode_evapot','?')} periode {params.get('periode','?')}/{params.get('bulan','?')}: " + (", ".join(tops) if tops else "tidak ada aktivitas")
+
+    if template == "produksi_penyadap_petak":
+        tops = [f"{r.get('nama_penyadap','?')} ({r.get('kg',0)} kg)" for r in result["rows"][:5]]
+        return f"{rc} penyadap setor di petak {params.get('kode_evapot','?')} periode {params.get('periode','?')}/{params.get('bulan','?')}: " + (", ".join(tops) if tops else "belum ada setoran")
+
     if template == "petak_adjacent":
         parts = [f"{r.get('nomor_petak','?')} (RTT {r.get('tahun_rtt','?')})" for r in result["rows"]]
         return "Petak sebelah: " + ", ".join(parts[:5]) + " (same TPG)"
