@@ -2,7 +2,7 @@
 
 ## Tables
 
-### geteh_petak (Master RTT petak) — 810 rows (2026)
+### getah_petak (Master RTT petak) — 810 rows (2026)
 ```
 id, user_created, user_updated
 jenis_sadap, luas_baku, rencana_luas, jumlah_pohon, tahun_tanam
@@ -23,26 +23,26 @@ kelas_hutan, no_spk, sdp_pinus, anak_petak
 kode_kph, kode_bkph, kode_rph, kode_divre, kode_tpg, kode_evapot, tpg
 ```
 
-### geteh_daftar_tpg
+### getah_daftar_tpg
 ```
 id, nama_tpg, npk_online (DEPRECATED), alias, jarak_pgt
 kode_kph, kode_bkph, kode_rph, kode_divre, status, kode_tpg
 ```
 
-### geteh_andil (Penyadap → Petak assignment)
+### getah_andil (Penyadap → Petak assignment)
 ```
 id, id_penyadap, kode_evapot, luas_andil (decimal)
 nama_penyadap, nomor_petak, kode_kph, kode_bkph, kode_rph, kode_tpg
 ```
-**Joins**: `id_penyadap` → `geteh_penyadap.id`, `kode_evapot` → `geteh_petak.kode_evapot`
+**Joins**: `id_penyadap` → `getah_penyadap.id`, `kode_evapot` → `getah_petak.kode_evapot`
 
-### geteh_penyadap
+### getah_penyadap
 ```
 id, nomor_penyadap, nama_penyadap, KTP, telpon, alamat, status
 id_tpg, nama_tpg, kode_kph, kode_bkph, kode_rph, kode_tpg
 ```
 
-### geteh_aktivitas_sadap (Tapping execution)
+### getah_aktivitas_sadap (Tapping execution)
 ```
 id, id_penyadap, id_andil, id_rencana
 tgl_pembaharuan (date!), latitude, longitude, cuaca
@@ -51,14 +51,14 @@ local_id, aktivitas_photo, kode_evapot, kode_kph, kode_bkph, kode_rph
 ```
 **Date field**: `tgl_pembaharuan` (not `tanggal`)
 
-### geteh_aktivitas_penerimaan (Collection receipts)
+### getah_aktivitas_penerimaan (Collection receipts)
 ```
 id, nomor_penerimaan, id_penyadap, berat_penerimaan (decimal)
 nomor_drum, id_andil, tanggal (date!), kode_evapot, kode_kph, kode_bkph
 ```
-**Joins**: `id_penyadap` → `geteh_penyadap.id`, `nomor_drum` → `geteh_drum.nomor_drum`
+**Joins**: `id_penyadap` → `getah_penyadap.id`, `nomor_drum` → `getah_drum.nomor_drum`
 
-### geteth_drum (Drum tracking)
+### getah_drum (Drum tracking)
 ```
 id, status_drum, tanggal (date!), kapasitas
 berat_penerimaan, berat_tpg, berat_pgt, nomor_drum, nomor_pengangkutan
@@ -67,7 +67,7 @@ kode_kph, kode_bkph, kode_rph, kode_tpg
 ```
 **Note**: `status_drum` (not `status`), `tanggal` (not `tahun`/`bulan`)
 
-### geteth_target_ro_nps (Monthly targets)
+### getah_target_ro_nps (Monthly targets)
 ```
 id, tahun, bulan (1-12), ro, nps
 ro_periode_1, ro_periode_2, nps_periode_1, nps_periode_2
@@ -75,14 +75,14 @@ kode_kph, kode_divre
 ```
 **Note**: No `kode_evapot`. Target per petak = `target_rkap` × (`ro_periode_X` / 100).
 
-### geteth_laporan_petak
+### getah_laporan_petak (belum dipakai template mana pun)
 ```
-kode_evapot, tahun, bulan, periode, produksi
+id, id_tpg, id_petak, local_id, keterangan
 ```
 
 ## Null / Gotchas
 - `kode_petak` NULL in `getah_petak` + `petak_polygon` — use `kode_evapot`
 - `polygon` is GeoJSON text — parse with `json.loads()` on read
-- `npk_online` in `geteh_daftar_tpg` is deprecated — use `directus_users.npk`
-- `geteh_aktivitas_sadap.tgl_pembaharuan` = date (not `tanggal`)
-- `geteth_drum.status_drum` (not `status`), `tanggal` (not `tahun`/`bulan`)
+- `npk_online` in `getah_daftar_tpg` is deprecated — use `directus_users.npk`
+- `getah_aktivitas_sadap.tgl_pembaharuan` = date (not `tanggal`)
+- `getah_drum.status_drum` (not `status`), `tanggal` (not `tahun`/`bulan`)
