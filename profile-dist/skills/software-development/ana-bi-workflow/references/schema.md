@@ -75,9 +75,9 @@ kode_kph, kode_divre
 ```
 **Note**: No `kode_evapot`. Target per petak = `target_rkap` × (`ro_periode_X` / 100).
 
-### getah_laporan_petak (belum dipakai template mana pun)
+### getah_laporan_petak
 ```
-id, id_tpg, id_petak, local_id, keterangan
+kode_evapot, tahun, bulan, periode, produksi
 ```
 
 ## Null / Gotchas
