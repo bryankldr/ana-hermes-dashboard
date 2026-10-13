@@ -3,15 +3,21 @@
 ANNA BI Runner — quick CLI wrapper for answer_production.
 Usage: python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --mode asisten [--kode_bkph 3121101 ...]
 """
-import os
 import sys
 import json
 import argparse
 import re
+from pathlib import Path
 
-# Use project venv python path for simoge_db
-PROJECT_ROOT = os.environ.get("ANA_WORKDIR", "/home/bryan/ana-hermes-dashboard")
-sys.path.insert(0, f"{PROJECT_ROOT}/profile-dist/skills/software-development/simoge-business/scripts")
+# Anti-hardcode (aturan SKILL simoge-business): resolve relatif terhadap file
+# ini — struktur relatif identik di repo (profile-dist/...) maupun terinstal
+# (~/.hermes/profiles/anna/...). Env ANA_SIMOGE_SCRIPTS menang bila di-set.
+_env_sim = __import__('os').environ.get('ANA_SIMOGE_SCRIPTS', '').strip()
+if _env_sim and Path(_env_sim).is_dir():
+    SIMOGE_SCRIPTS = Path(_env_sim)
+else:
+    SIMOGE_SCRIPTS = Path(__file__).resolve().parents[2] / 'simoge-business' / 'scripts'
+sys.path.insert(0, str(SIMOGE_SCRIPTS))
 sys.path.insert(0, __file__.replace('run_kpi.py', ''))
 
 from ana_kpi import answer_production, answer_production_fuzzy

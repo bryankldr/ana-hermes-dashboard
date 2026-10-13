@@ -6,7 +6,8 @@ ANNA pakai cadangan + meta untuk YOY dengan identitas periode jelas.
 Toleran: spatial_intel baca wrapper baru maupun array lama [{n,p}].
 
 Jalankan: python3 scripts/refresh_petak_simple.py [--dry-run]
-Cron harian: 0 6 * * * cd /home/bryan/ana-hermes-dashboard && python3 scripts/refresh_petak_simple.py >> logs/refresh_petak.log 2>&1
+Cron harian (ganti __ANA_WORKDIR__ dengan path repo di mesin tsb — jangan hardcode /home/...):
+0 6 * * * cd __ANA_WORKDIR__ && python3 scripts/refresh_petak_simple.py >> logs/refresh_petak.log 2>&1
 """
 import json, sys, pathlib, datetime, calendar
 from zoneinfo import ZoneInfo

@@ -1,19 +1,19 @@
 # Vault Access Best Practice (Anna's brain)
 
 ## Principle
-**Local vault = direct file access.** No REST API, no connector needed. Vault at:
+**Local vault = direct file access.** No REST API, no connector needed. Vault default `$HOME/anna_brain`; bila env `OBSIDIAN_VAULT_PATH` di-set, pakai itu. Contoh di bawah memakai `$HOME/anna_brain`:
 ```
-~/MAX-research/vaults/anna/
+$HOME/anna_brain/Anna's brain/
 ```
 
 ## Tools to Use
 | Task | Tool | Example |
 |---|---|---|
-| Find files by name | `search_files(target='files', pattern='*.md', path='~/MAX-research/vaults/anna')` | Cari file `*pembaharuan*.md` |
-| Search content | `search_files(target='content', pattern='pembaharuan', path='~/MAX-research/vaults/anna')` | Cari kata 'pembaharuan' di semua .md |
-| Read file | `read_file(path='~/MAX-research/vaults/anna/ANNA-KNOWLEDGE/...')` | Baca konten spesifik |
-| List structure | `terminal('find ~/MAX-research/vaults/anna -type f -name "*.md" | head -50')` | Overview struktur |
-| Grep with context | `terminal("grep -n -A 3 -B 3 'pembaharuan' ~/MAX-research/vaults/anna/ANNA-KNOWLEDGE/raw/articles/skema-database-kph-bwb-sandbox2.md")` | Cari dengan konteks |
+| Find files by name | `search_files(target='files', pattern='*.md', path='$HOME/anna_brain/Anna\'s brain')` | Cari file `*pembaharuan*.md` |
+| Search content | `search_files(target='content', pattern='pembaharuan', path='$HOME/anna_brain/Anna\'s brain')` | Cari kata 'pembaharuan' di semua .md |
+| Read file | `read_file(path='$HOME/anna_brain/Anna\'s brain/ANNA-KNOWLEDGE/...')` | Baca konten spesifik |
+| List structure | `terminal('find $HOME/anna_brain/Anna\'s\ brain -type f -name "*.md" | head -50')` | Overview struktur |
+| Grep with context | `terminal("grep -n -A 3 -B 3 'pembaharuan' $HOME/anna_brain/Anna\'s\ brain/ANNA-KNOWLEDGE/raw/articles/skema-database-kph-bwb-sandbox2.md")` | Cari dengan konteks |
 
 ## Search Strategy
 1. **Start broad** — `search_files(target='content', pattern='keyword', path=vault_root)`
