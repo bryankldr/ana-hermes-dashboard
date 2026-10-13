@@ -2,64 +2,210 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ANA — Login</title>
-  <meta name="theme-color" content="#020F2A">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>SIMOGE HUD - PT Perhutani</title>
+  <meta name="theme-color" content="#080F0C">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="ANA">
+  <meta name="apple-mobile-web-app-title" content="SIMOGE HUD">
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <noscript><link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet"></noscript>
-  <link rel="stylesheet" href="login.css?v=20261011a">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
+  <link rel="stylesheet" href="login.css?v=20261013a">
+  <link rel="stylesheet" href="landing.css?v=20261014g">
 </head>
-<body>
-<div class="bg-grid"></div>
-<div class="bg-glow"></div>
-<div class="center">
-  <form class="card" id="loginForm" autocomplete="off">
-    <div class="brand">
-      <img src="assets/anna_forest.png" alt="ANA" onerror="this.style.display='none'">
-      <h1>ANA HUD</h1>
-      <span class="badge">sandbox2.kphbwb.web.id</span>
+<body class="landing">
+<!-- Latar: gradien hutan gelap + vignette + kontur topo (pengganti foto remote ref, offline-first) -->
+<div class="ref-bg" aria-hidden="true"></div>
+<div class="ref-vignette" aria-hidden="true"></div>
+<div class="ref-topo" aria-hidden="true"><svg viewBox="0 0 500 500" fill="none" stroke-width="1.2"><ellipse cx="400" cy="400" rx="350" ry="250"/><ellipse cx="380" cy="420" rx="300" ry="200"/><ellipse cx="360" cy="440" rx="240" ry="150"/><ellipse cx="340" cy="460" rx="180" ry="100"/><ellipse cx="320" cy="480" rx="120" ry="60"/></svg></div>
+
+<!-- ===== Header navigasi ala ref ===== -->
+<header class="ref-header">
+  <div class="ref-brand">
+    <img src="assets/logo-white.webp" alt="Perhutani" onerror="this.style.display='none'">
+    <div class="ref-vdiv"></div>
+    <div>
+      <h1>SIMOGE <span>HUD</span></h1>
+      <p>Smart Monitoring &amp; Operational Governance</p>
     </div>
-    <div class="subtitle">Masuk dengan akun Directus — 1 akun 1 perangkat</div>
+  </div>
+  <div class="ref-sound">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>
+    <span>Sound</span>
+    <button type="button" id="soundToggle" aria-label="Nyalakan/matikan backsound" aria-pressed="true"><span class="knob"></span></button>
+    <span class="wave" id="soundWave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <!-- Tanpa src/hardcode: JS isi per lagu dari manifest (shuffle).
+      preload none = nol byte sebelum user nyalakan. -->
+    <audio id="bgSound" preload="none"></audio>
+  </div>
+</header>
 
-    <label for="email">EMAIL</label>
-    <div class="input-wrap"><input id="email" type="email" placeholder="nama@kphbwb.web.id" required autocomplete="username"></div>
-
-    <label for="password">PASSWORD</label>
-    <div class="input-wrap"><input id="password" type="password" placeholder="••••••••" required autocomplete="current-password"></div>
-
-    <div class="otp-row" id="otpRow">
-      <label for="otp">KODE GOOGLE AUTHENTICATOR (6 digit)</label>
-      <div class="input-wrap"><input id="otp" type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
-      <div class="hint">Akun dengan 2FA aktif wajib isi OTP. Jika belum aktifkan, kosongkan dulu — setelah login atur di panel profil.</div>
-    </div>
-
-    <div class="row">
-      <button class="btn btn-primary" id="btnLogin" type="submit">MASUK</button>
-      <button class="btn btn-ghost" id="btnShowOtp" type="button">2FA?</button>
-    </div>
-    <div class="msg" id="msg"></div>
-    <div id="enrollBanner" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--amber);border-radius:8px;background:rgba(255,182,72,.08);color:var(--amber);font-size:12px;line-height:1.5"></div>
-    <div class="hint">Sesi HttpOnly (SameSite=Lax), auto-refresh token, dan perangkat terikat — login di perangkat baru akan mengeluarkan sesi lama.</div>
-    <div class="divider"></div>
-    <div class="qr" id="qrBox">
-      <img id="qrImg" alt="QR TOTP">
-      <code id="qrSecret"></code>
-      <div class="hint">Scan QR di Google Authenticator, lalu verifikasi dengan 6 digit di atas.</div>
-      <div class="row" style="width:100%">
-        <input id="verifyOtp" placeholder="kode 6 digit" inputmode="numeric" maxlength="6" style="flex:1;background:rgba(2,15,42,.9);border:1px solid var(--neon-border);border-radius:8px;color:var(--text-main);padding:10px 12px;font-family:var(--font-mono)">
-        <button type="button" class="btn btn-primary" id="btnVerify">AKTIFKAN</button>
+<!-- ===== Viewport utama ===== -->
+<main class="ref-main">
+  <!-- KIRI: konten + tab + kartu -->
+  <div class="ref-left">
+    <div class="ref-hero ref-reveal">
+      <div class="ref-live"><span class="dot"></span><span>LIVE INSIGHT</span></div>
+      <div class="ref-hero-row">
+        <div class="ref-hero-main">
+          <h2>Hutan Lestari,<br><span class="grad">Nilai untuk Negeri</span></h2>
+          <p>SIMOGE HUD menghadirkan informasi, analisis, dan pengambilan keputusan berbasis data untuk mendukung pengelolaan hutan yang lebih efektif dan berkelanjutan.</p>
+        </div>
+        <!-- Papan skor GLOBAL: YTD + periode + hari ini (cron, bukan live-query).
+             1:1 ref code.html: 3 pil kaca kecil di kanan headline, sejajar bawah. -->
+        <div class="ref-score" id="heroScore" hidden>
+          <div class="ref-score-card" id="sbYtd"><div class="ref-score-top"><span class="ref-score-lb">YTD</span><span class="ref-score-dot"></span></div><div class="ref-score-val"><b id="sbYtdV">…</b><span>ton</span></div><i id="sbYtdS">—</i></div>
+          <div class="ref-score-card" id="sbPerCard"><div class="ref-score-top"><span class="ref-score-lb" id="sbPerLb">P1</span><span class="ref-score-dot"></span></div><div class="ref-score-val"><b id="sbPerV">…</b><span>ton</span></div><i id="sbPerS">—</i></div>
+          <div class="ref-score-card" id="sbTdCard"><div class="ref-score-top"><span class="ref-score-lb">Hari ini</span><span class="ref-score-dot pulse"></span></div><div class="ref-score-val"><b id="sbTdV">…</b><span>ton</span></div><i id="sbTdS">—</i></div>
+        </div>
       </div>
     </div>
-    <div class="footer">Butuh bantuan? Hubungi admin KPHBWB · <a href="/">Kembali</a></div>
-  </form>
-</div>
-<script type="module" src="login.js?v=20261011a"></script>
-<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=20261011a',{scope:'/' }).catch(()=>{});</script>
+    <nav class="ref-tabs ref-reveal" aria-label="Navigasi cepat">
+      <button type="button" class="active">⌂ <span>Start</span></button>
+      <button type="button">📰 <span>News</span></button>
+      <button type="button">▦ <span>Feed</span></button>
+      <button type="button">✦ <span>For You</span></button>
+      <button type="button">➕ <span>Following</span></button>
+      <button type="button">⧉ <span>Channels</span></button>
+      <button type="button">🛡 <span>Publisher</span></button>
+    </nav>
+    <!-- 3 kartu tengah: news dinamis + produksi + supply (rotasi slides, live) -->
+    <section class="ref-cards ref-reveal" id="insightGrid">
+      <div class="ref-card" id="cardNews">
+        <div class="ref-card-body ins-fade">
+          <div>
+            <div class="ref-insight-head"><span>OPTIMASI · <span id="insNewsPeriode">…</span></span><span class="ref-ver-tag" id="insVer0"></span></div>
+            <div class="ins-split">
+              <svg class="ins-chart" id="insNewsMap" viewBox="0 0 200 130" preserveAspectRatio="none" role="img" aria-label="Peta sebaran petak"></svg>
+              <div class="ins-text">
+                <span class="ref-kicker" id="insNewsKick">Peta sebaran</span>
+                <h3 id="insNewsTitle">Memuat…</h3>
+                <p id="insNewsSub">Memuat data optimalisasi…</p>
+                <ol class="ref-rank" id="insNewsRank" hidden></ol>
+              </div>
+            </div>
+          </div>
+          <div class="ref-tren"><span class="ref-badge" id="insNewsBadge">…</span><span class="ref-vs" id="insNewsMeta">menunggu database…</span><span class="ref-dots" id="insNewsDots"></span></div>
+        </div>
+      </div>
+      <div class="ref-card" id="cardProd">
+        <div class="ref-card-body ins-fade">
+          <div>
+            <div class="ref-insight-head"><span>PRODUKSI · <span id="insPeriode">…</span></span><span class="ref-ver-tag" id="insVer1"></span></div>
+            <div class="ins-split">
+              <svg class="ins-chart" id="insSpark" viewBox="0 0 200 130" preserveAspectRatio="none" role="img" aria-label="Tren produksi"></svg>
+              <div class="ins-text">
+                <span class="ref-kicker" id="insProdKick">Pencapaian</span>
+                <h3 id="insProdTitle">Memuat…</h3>
+                <p id="insAktSub">Memuat data produksi…</p>
+                <ol class="ref-rank" id="insRank" hidden></ol>
+              </div>
+            </div>
+          </div>
+          <div class="ref-tren"><span class="ref-badge" id="insAkt">…</span><span class="ref-vs" id="insGen">menunggu database…</span><span class="ref-dots" id="insProdDots"></span></div>
+        </div>
+      </div>
+      <div class="ref-card" id="cardSupply">
+        <div class="ref-card-body ins-fade">
+          <div>
+            <div class="ref-insight-head"><span>ALIRAN HASIL</span><span class="ref-ver-tag" id="insVer3"></span></div>
+            <div class="ins-split">
+              <svg class="ins-chart" id="insSupChart" viewBox="0 0 200 130" preserveAspectRatio="none" role="img" aria-label="Aliran hasil"></svg>
+              <div class="ins-text">
+                <span class="ref-kicker" id="insSupKick">Terima vs perni</span>
+                <h3 id="insSupplyTitle">Memuat…</h3>
+                <p id="insWilSub">Memuat aliran hasil…</p>
+                <p class="ref-petakline"><span id="insPetakSub"></span></p>
+              </div>
+            </div>
+          </div>
+          <div class="ref-tren"><span class="ref-link">Masuk untuk Lihat Peta <span>→</span></span><span class="ref-dots" id="insSupDots"></span></div>
+        </div>
+      </div>
+    </section>
+    <p class="ref-note" id="insightNote">Memuat angka operasional dari database…</p>
+    <!-- Strip tren produksi seluruh KPH (fallback KPH kini; N KPH = seri baru otomatis) -->
+    <section class="ref-kphstrip ref-reveal" id="kphStrip" hidden>
+      <div class="ref-insight-head"><span id="insKphKick">TREN PRODUKSI SELURUH KPH · 12 BULAN</span><span class="ref-ver-tag" id="insVer5"></span></div>
+      <h3 id="insKphTitle">Memuat…</h3>
+      <p id="insKphSub">Memuat tren KPH…</p>
+      <svg id="insKphChart" viewBox="0 0 600 110" preserveAspectRatio="none" role="img" aria-label="Tren produksi per KPH"></svg>
+      <div class="ref-tren"><span class="ref-vs" id="insKphNote">Switch otomatis tiap 12 dtk</span><span class="ref-dots" id="insKphDots"></span></div>
+    </section>
+    <!-- Quick access + motto -->
+    <section class="ref-quick ref-reveal">
+      <div class="ref-qa-grid">
+        <button type="button">▤<span>Laporan<br>&amp; Analitik</span></button>
+        <button type="button">🗄<span>Data<br>Operasional</span></button>
+        <button type="button">🗺<span>Peta<br>Interaktif</span></button>
+        <button type="button">🗂<span>Dokumen<br>&amp; Arsip</span></button>
+        <button type="button">❓<span>Bantuan<br>&amp; Panduan</span></button>
+      </div>
+      <div class="ref-qsep"></div>
+      <div class="ref-motto">
+        <div class="ref-motto-img"><img src="" alt="Moto Perhutani" onerror="this.closest('.ref-motto-img').style.display='none'"></div>
+        <div><p>"Hutan bukan hanya warisan, tetapi juga masa depan."</p>
+        <span class="ref-who"><b>P</b> PERHUTANI</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- KANAN: kartu login (ID auth DIKUNCI — struktur visual ikut ref, logika nol ubah) -->
+  <div class="ref-login-wrap ref-reveal">
+    <form class="card auth-card" id="loginForm" autocomplete="off">
+      <div class="ref-login-brand">
+        <img src="assets/simoge_hero_1.png" alt="SIMOGE" onerror="this.style.display='none'">
+        <h2>SIMOGE <span>HUD</span></h2>
+        <p>Smart Monitoring &amp; Operational Governance</p>
+      </div>
+      <div class="ref-greet">
+        <h3>Selamat Datang</h3>
+        <p>Masuk untuk mengakses sistem dan melanjutkan ke dashboard Anda.</p>
+      </div>
+      <div class="input-wrap has-ico"><span class="in-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><input id="email" type="email" placeholder="Username / Email" required autocomplete="username"></div>
+      <div class="input-wrap has-ico"><span class="in-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><input id="password" type="password" placeholder="Password" required autocomplete="current-password"><button type="button" class="pw-toggle" id="pwToggle" title="Tampilkan/sembunyikan password" aria-label="Tampilkan password">👁</button></div>
+      <div class="auth-row">
+        <label><input type="checkbox" id="rememberEmail"> <span>Ingat saya</span></label>
+        <a href="#" id="forgotLink" title="Minta reset via admin">Lupa password?</a>
+      </div>
+      <div class="otp-row" id="otpRow">
+        <label for="otp">KODE GOOGLE AUTHENTICATOR (6 digit)</label>
+        <div class="input-wrap"><input id="otp" type="text" inputmode="numeric" pattern="\d{6}" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
+        <div class="hint">Akun dengan 2FA aktif wajib isi OTP. Jika belum aktifkan, kosongkan dulu — setelah login atur di panel profil.</div>
+      </div>
+      <div class="row">
+        <button class="btn btn-primary" id="btnLogin" type="submit">Masuk</button>
+        <button class="btn btn-ghost" id="btnShowOtp" type="button">2FA?</button>
+      </div>
+      <div class="msg" id="msg"></div>
+      <div id="enrollBanner" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--amber);border-radius:8px;background:rgba(255,182,72,.08);color:var(--amber);font-size:12px;line-height:1.5"></div>
+      <div class="hint">WAJIB VERIFIKASI OTP</div>
+      <div class="divider"></div>
+      <div class="qr" id="qrBox">
+        <img id="qrImg" alt="QR TOTP">
+        <code id="qrSecret"></code>
+        <div class="hint">Scan QR di Google Authenticator, lalu verifikasi dengan 6 digit di atas.</div>
+        <div class="row" style="width:100%">
+          <input id="verifyOtp" placeholder="kode 6 digit" inputmode="numeric" maxlength="6">
+          <button type="button" class="btn btn-primary" id="btnVerify">AKTIFKAN</button>
+        </div>
+      </div>
+      <div class="ref-trust"><span>🛡 Aman</span><i>|</i><span>✔ Terpercaya</span><i>|</i><span>⚑ Untuk Negeri</span></div>
+      <div class="footer">Butuh bantuan? Hubungi admin KPHBWB · <a href="/">Kembali</a></div>
+    </form>
+  </div>
+</main>
+
+<!-- ===== Footer status ===== -->
+<footer class="ref-footer">
+  <div class="ref-slogan"><span class="ref-tree" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2L9.5 6h5L12 2zm0 4.5l-3.5 5h7l-3.5-5zm-5 5.5l-4 6h18l-4-6H7zm5 6.5c-1.1 0-2 .9-2 2v2h4v-2c0-1.1-.9-2-2-2z"/></svg></span><span>Copyright 2026</span></div>
+  <div class="ref-ver">SIMOGE HUD v1.0.0 <span>|</span> MAX east</div>
+</footer>
+<script type="module" src="login.js?v=20261014e"></script>
+<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=20261013y',{scope:'/' }).catch(()=>{});</script>
 </body>
 </html>

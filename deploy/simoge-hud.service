@@ -1,0 +1,33 @@
+# SIMOGE HUD — systemd service (server target Linux).
+# Pasang:
+#   sudo sed -e "s|__USER__|simoge|" -e "s|__ANA_WORKDIR__|/opt/simoge-dashboard|" \
+#     deploy/simoge-hud.service | sudo tee /etc/systemd/system/simoge-hud.service >/dev/null
+#   sudo systemctl daemon-reload && sudo systemctl enable --now simoge-hud
+# Lihat log: journalctl -u simoge-hud -f  (plus logs/server.log di workdir)
+# Catatan: .env (dibuat dari .env.example) wajib sudah diisi, terutama
+# DB_*/REMOTE_DB_*, ANA_PORT, dan ANA_ALLOWED_HOSTS bila via domain.
+[Unit]
+Description=SIMOGE HUD autonomous dashboard
+After=network-online.target mariadb.service mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__ANA_WORKDIR__
+# .venv per-project bila ada, fallback python3 sistem (lihat start.sh pick_python).
+ExecStart=__ANA_WORKDIR__/start.sh
+Environment=ANA_PORT=8730
+Restart=on-failure
+RestartSec=10
+# Batasi restart loop bila config fatal (DB salah dsb): 5x dalam 10 menit.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+# Log ganda aman: stdout systemd + logs/server.log bawaan aplikasi.
+StandardOutput=journal
+StandardError=journal
+# DB via tunnel SSH butuh HOME (kunci ~/.ssh) — jangan PrivateUsers.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1 @@
+merah untuk nilai 0 - 50 %, kuning 51 -75 %, orange 76 - 99 %, hijau 100 - 110 %, biru 111 % ke atas,

@@ -1,0 +1,7 @@
+# Cron SIMOGE HUD — pasang di server target sebagai user yang sama dengan service:
+#   crontab -e   (lalu tempel dua baris di bawah, sesuaikan __ANA_WORKDIR__)
+# 1) Insight landing harian 06:00 (sebelum jam operasional).
+# 2) Rebuild tiles petak harian 06:10 (butuh DB + cron endpoint, lihat scripts/).
+# Keduanya idempotent + log ke logs/ (abaikan bila file log belum ada).
+0 6 * * * cd __ANA_WORKDIR__ && bash scripts/rebuild_insight_daily.sh >/dev/null 2>&1
+10 6 * * * cd __ANA_WORKDIR__ && bash scripts/rebuild_tiles_daily.sh >/dev/null 2>&1

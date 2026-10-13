@@ -98,6 +98,8 @@ import terminal as ana_terminal
 import voice
 import auth_local
 import db_source
+import landing_insight
+import insight_build
 
 # argon2 top-level — jangan import di dalam try yang sama dengan except(VerifyMismatchError)
 # itu bikin UnboundLocalError: nama belum ter-bind saat except tuple dievaluasi (bug 17:41).
@@ -1172,6 +1174,68 @@ BIND_HOST = os.environ.get("ANA_HOST", "127.0.0.1")
 # pakainya untuk tahu token-nya basi (server restart) vs token ditolak (jahat).
 # Dipakai juga `/api/token-status` yang tanpa auth, jadi tak ada cara baca token.
 BOOT_ID = secrets.token_hex(4)
+# ── Insight publik landing (aturan keras #2) ──
+# Rate-limit sendiri 30/menit/IP (jangan pakai limiter auth 5/menit —
+# login page yang dibuka 6x langsung 429 = bug). Cache 60 dtk di handler.
+_LANDING_RL = {}
+_LANDING_RL_LOCK = threading.Lock()
+_LANDING_CACHE = {}
+# ── Insight Engine v1 (Tahap C): snapshot file + scheduler thread ──
+# API baca snapshot (tanpa query per request). Scheduler hitung berkala.
+# Gagal total (file tak ada + DB mati) = 503, bukan angka bohong.
+_INSIGHT_LOCK = threading.Lock()
+_INSIGHT_MIN = 360
+try:
+    _INSIGHT_MIN = int((os.environ.get("ANA_INSIGHT_MIN") or "360").strip() or "360")
+except Exception:
+    _INSIGHT_MIN = 360
+
+
+def _insight_loop():
+    import insight_build as _ib
+    # Fallback bila cron 06:00 tak ada: hitung bila snapshot basi/tak ada.
+    # Cron aktif = thread ini hampir tak pernah hitung (hemat DB).
+    # Interval fallback: ANA_INSIGHT_MIN (default 360 mnt = 6 jam).
+    try:
+        snap = _ib.load_snapshot()
+        gen = (snap or {}).get("generated_at", "")
+        stale = True
+        try:
+            dt = datetime.datetime.fromisoformat(gen)
+            stale = (datetime.datetime.now() - dt).total_seconds() > 6 * 3600
+        except Exception:
+            stale = True
+        if not snap or stale:
+            _ib.refresh()
+    except Exception as e:
+        _alog(f"insight boot refresh gagal {type(e).__name__}: {str(e)[:120]}", "warn")
+    while True:
+        try:
+            time.sleep(max(_INSIGHT_MIN, 5) * 60)
+        except Exception:
+            return
+        if _INSIGHT_LOCK.acquire(blocking=False):
+            try:
+                _ib.refresh()
+            except Exception as e:
+                _alog(f"insight refresh gagal {type(e).__name__}: {str(e)[:120]}", "warn")
+            finally:
+                try:
+                    _INSIGHT_LOCK.release()
+                except Exception:
+                    pass
+
+
+def _landing_rl_ok(ip):
+    now = time.time()
+    with _LANDING_RL_LOCK:
+        arr = [t for t in _LANDING_RL.get(ip, []) if now - t < 60]
+        if len(arr) >= 30:
+            _LANDING_RL[ip] = arr
+            return False
+        arr.append(now)
+        _LANDING_RL[ip] = arr
+        return True
 # Token: env wins, otherwise reuse existing file so a failed second instance
 # that dies on EADDRINUSE doesn't clobber the running server's token.
 _TOKEN_FILE = ROOT / ".ana_token"
@@ -2254,19 +2318,27 @@ class Handler(BaseHTTPRequestHandler):
             return (wr.stderr or "").strip()[:200]
         return None
 
-    def _tiles_cron(self, action, schedule=""):
-        """status|enable|disable baris cron rebuild harian.
+    _CRON_JOBS = {
+        # marker: (script, log, jadwal default)
+        "ana-pmtiles-daily": ("rebuild_tiles_daily.sh", "refresh_petak.log", "10 6 * * *"),
+        "ana-insight-daily": ("rebuild_insight_daily.sh", "insight.log", "0 6 * * *"),
+    }
 
-        Hanya baris ber-marker ana-pmtiles-daily yang disentuh; cron lain
-        milik user tak diganggu. Default jadwal 10 6 * * * (06:10 WIB).
+    def _tiles_cron(self, action, schedule="", marker="ana-pmtiles-daily"):
+        """status|enable|disable baris cron rebuild harian (generik dua marker).
+
+        Hanya baris ber-marker yang disentuh; cron lain milik user tak diganggu.
         """
         import re as _re
-        sched = (schedule or "").strip() or "10 6 * * *"
+        if marker not in self._CRON_JOBS:
+            return self._json({"error": f"marker tak dikenal: {marker!r}"}, 400)
+        _script, _logf, _def_sched = self._CRON_JOBS[marker]
+        sched = (schedule or "").strip() or _def_sched
         lines, err = self._cron_read()
         if err:
             return self._json({"ok": False, "error": f"crontab -l: {err}"}, 500)
-        mine = [ln for ln in lines if self._CRON_MARKER in ln]
-        others = [ln for ln in lines if self._CRON_MARKER not in ln]
+        mine = [ln for ln in lines if marker in ln]
+        others = [ln for ln in lines if marker not in ln]
         if action == "status":
             return self._json({"ok": True, "enabled": bool(mine),
                                "lines": mine, "cron_error": err})
@@ -2279,10 +2351,10 @@ class Handler(BaseHTTPRequestHandler):
                     r"^[\d\*,/\- ]+$", sched):
                 return self._json({"error": f"jadwal tak valid: {sched!r} "
                                             "(butuh 5 field, mis. '10 6 * * *')"}, 400)
-            script = ROOT / "scripts" / "rebuild_tiles_daily.sh"
-            logf = ROOT / "logs" / "refresh_petak.log"
+            script = ROOT / "scripts" / _script
+            logf = ROOT / "logs" / _logf
             entry = (f"{sched} bash {script} >> {logf} 2>&1 "
-                     f"# {self._CRON_MARKER}")
+                     f"# {marker}")
             werr = self._cron_write(others + [entry])
             if werr:
                 return self._json({"ok": False, "error": f"crontab -: {werr}"}, 500)
@@ -2408,6 +2480,56 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "authenticated": True, "user": auth_local.sanitize_profile_for_client(prof), "session": {"created": sess.get("created"), "last_seen": sess.get("last_seen")}} )
         if p == "/api/token-status":
             return self._json({"boot": BOOT_ID})
+        if p == "/api/landing/insight":
+            # Publik pra-login (tanpa token, tanpa sesi): agregat NYATA saja.
+            # Rate-limit 30/menit/IP; cache 60 dtk agar DB tak dihantam tiap
+            # buka login. Gagal DB = 503 (frontend sembunyikan kartu, bukan
+            # angka bohong). Aturan keras #2.
+            try:
+                ip = (self.client_address[0] if self.client_address else "?")
+            except Exception:
+                ip = "?"
+            if not _landing_rl_ok(ip):
+                return self._json({"ok": False, "error": "terlalu banyak permintaan"}, 429)
+            now = time.time()
+            try:
+                if now - _LANDING_CACHE.get("at", 0) < 60 and _LANDING_CACHE.get("data"):
+                    return self._json(_LANDING_CACHE["data"])
+            except Exception:
+                pass
+            try:
+                data = landing_insight.snapshot()
+            except Exception as e:
+                return self._json({"ok": False, "error": "data insight belum tersedia"}, 503)
+            try:
+                _LANDING_CACHE["at"] = now
+                _LANDING_CACHE["data"] = data
+            except Exception:
+                pass
+            return self._json(data)
+        if p == "/api/public/landing-insights":
+            # Engine v1 (Q2: endpoint baru). Baca snapshot file — TANPA query
+            # per request. Publik tanpa token. Rate-limit ikut landing.
+            try:
+                ip = (self.client_address[0] if self.client_address else "?")
+            except Exception:
+                ip = "?"
+            if not _landing_rl_ok(ip):
+                return self._json({"ok": False, "status": "error",
+                                   "error": "terlalu banyak permintaan"}, 429)
+            try:
+                snap = insight_build.load_snapshot()
+            except Exception:
+                snap = None
+            if not snap or not snap.get("cards"):
+                return self._json({"ok": False, "status": "unavailable",
+                                   "error": "data insight belum tersedia"}, 503)
+            return self._json({"generated_at": snap.get("generated_at"),
+                               "status": "ok",
+                               "metric_version": snap.get("metric_version"),
+                               "data_terbaru": snap.get("data_terbaru", {}),
+                               "scoreboard": snap.get("scoreboard"),
+                               "cards": snap.get("cards")})
         if p in ("/api/status", "/api/voices", "/api/mode"):
             # Bocorkan workdir/profile/model/daftar tools ke LAN tanpa token —
             # kunci ketiganya. Frontend selalu kirim X-Ana-Token (api.headers()),
@@ -3239,6 +3361,12 @@ class Handler(BaseHTTPRequestHandler):
             # cron lain milik user tak diganggu.
             action = (body.get("action") or "status").strip().lower()
             return self._tiles_cron(action, (body.get("schedule") or "").strip())
+        if p == "/api/insight/cron":
+            # Manajemen cron insight harian 06:00 dari UI. Body sama.
+            # Marker: ana-insight-daily. Thread scheduler = fallback bila off.
+            action = (body.get("action") or "status").strip().lower()
+            return self._tiles_cron(action, (body.get("schedule") or "").strip(),
+                                    marker="ana-insight-daily")
         if p == "/api/session":
             # CRUD sesi ANNA milik user login (maks 3, histori persisten).
             # GET/POST-tanpa-action = daftar; {session_id} = pilih aktif;
@@ -4243,6 +4371,11 @@ def main():
 
     srv = QuietServer((BIND_HOST, PORT), Handler)
     _session_restore()  # session terakhir survive restart; TTL tetap berlaku
+    # Insight Engine scheduler (daemon; file-lock anti-bersamaan di dalam loop).
+    try:
+        threading.Thread(target=_insight_loop, daemon=True).start()
+    except Exception as e:
+        _alog(f"insight scheduler gagal start {type(e).__name__}", "warn")
     if os.environ.get("ANA_OPEN", "1") != "0":
         webbrowser.open(f"http://localhost:{PORT}")
     try:

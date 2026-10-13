@@ -3,6 +3,8 @@
 .ana_token
 state.json
 layout.json
+# slot layout per-user = posisi panel runtime, jangan commit
+layout_*.json
 .no-mcp.json
 __pycache__/
 *.pyc
@@ -38,6 +40,10 @@ ui/data/petak_simple.json
 # runtime backup — jangan commit
 runtime_gateway_backup.py
 runtime_gateway.py.bak_current
+# master audio 256kbps (46MB) — sumber encode lo/, jangan ikut repo/deploy
+assets_src/
+# snapshot insight landing (dihitung scheduler, bukan source)
+.ana_insight.json
 *.bak_current
 *.bak*
 *.bak.pre_cleanup*

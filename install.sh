@@ -39,6 +39,38 @@ else
 fi
 
 DIST="$PWD/profile-dist"
+# ── profile-dist: interaktif (default tanya bila TTY) ──
+#   ANA_PROFILE_DIST=yes  → proses tanpa tanya
+#   ANA_PROFILE_DIST=no   → lewati total (deploy tanpa skills/plugins/SOUL)
+#   ANA_PROFILE_DIST=ask  → tanya bila interaktif, proses bila non-TTY (CI aman)
+#   Flag CLI: ./install.sh --with-profile | --without-profile (menang atas env)
+for _arg in "$@"; do
+  case "$_arg" in
+    --with-profile) ANA_PROFILE_DIST=yes ;;
+    --without-profile) ANA_PROFILE_DIST=no ;;
+  esac
+done
+ANA_PROFILE_DIST="${ANA_PROFILE_DIST:-ask}"
+_process_profile=1
+case "$ANA_PROFILE_DIST" in
+  [Nn][Oo]|[Ff]alse|0) _process_profile=0 ;;
+  [Yy][Ee][Ss]|[Tt]rue|1) _process_profile=1 ;;
+  *)
+    if [ -t 0 ]; then
+      printf 'ANA: proses profile-dist (skills/plugins/SOUL, ~5MB) ke profil anna? [Y]a/[n] lewati: ' >&2
+      IFS= read -r _ans < /dev/tty 2>/dev/null || IFS= read -r _ans || _ans=""
+      case "$_ans" in
+        [Nn]*) _process_profile=0 ;;
+        *) _process_profile=1 ;;
+      esac
+    else
+      _process_profile=1
+    fi
+    ;;
+esac
+if [ "$_process_profile" = "0" ]; then
+  echo "ANA: profile-dist DILEWATI (ANA_PROFILE_DIST=no) — lanjut tanpa skills/plugins" >&2
+else
 # fresh install atau update (distribution_owned: SOUL.md, skills, plugins)
 if ! hermes profile list 2>/dev/null | grep -qE '^anna([[:space:]]|$)'; then
   echo "ANA: install profil anna"
@@ -71,6 +103,7 @@ if [ -d "$DIST/memories" ]; then
     fi
   done
 fi
+fi # _process_profile
 
 chmod +x start.sh install.sh
 echo "ANA: siap. jalan: ./start.sh (port ${ANA_PORT:-8730})"

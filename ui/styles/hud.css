@@ -78,7 +78,7 @@ html, body {
 
 .top-controls {
   position: absolute;
-  top: 8px; left: 12px;
+  top: calc(16px + env(safe-area-inset-top, 0px)); left: 20px;
   transform: none;
   display: flex;
   align-items: center;
@@ -101,8 +101,8 @@ html, body {
   border-radius: 6px; color: var(--foreground); cursor: pointer;
 }
 .hud-drawer-btn:hover { border-color: var(--neon); color: var(--neon); }
-@media (max-width: 779px) { .hud-drawer-btn { display: inline-flex; } }
-@media (max-width: 779px) {
+@media (max-width: 780px) { .hud-drawer-btn { display: inline-flex; } }
+@media (max-width: 780px) {
   body:not(.hud-header-open) .top-controls,
   body:not(.hud-header-open) .top-dials,
   body:not(.hud-header-open) .bottom-telemetry { display: none !important; }
@@ -123,7 +123,7 @@ html, body {
    meant the panel resized but the dials stayed the same size. */
 .top-dials {
   position: absolute;
-  top: 8px; left: auto; right: 10px;
+  top: 16px; left: auto; right: 18px;
   transform: none;
   display: flex; gap: 6px;
   align-items: center;
@@ -479,7 +479,7 @@ html, body {
 /* ═══ BOTTOM TELEMETRY ═══ */
 .bottom-telemetry {
   position: absolute;
-  top: 8px; right: 200px;
+  top: 16px; right: 288px;
   left: auto; bottom: auto;
   transform: none;
   display: flex; align-items: center; gap: 2px;
@@ -493,6 +493,8 @@ html, body {
 .tele-left, .tele-right {
   display: flex; align-items: center; gap: 2px;
 }
+/* Equalizer di kiri bar CPU (urutan visual saja via order; DOM/JS tak berubah). */
+.bottom-telemetry .tele-center { order: -1; }
 
 /* Thermometer, not a percentage bar: the fill maps 20C..100C across its width
    (TEMP_MIN/TEMP_MAX in main.js), because "94% full" means nothing for a
@@ -573,7 +575,8 @@ html, body {
    tinggi panel (align-items:stretch), sehingga resize panel = resize area teks. */
 #chatBar {
   position: absolute;
-  bottom: 8px; left: 50%;
+  /* safe-area: tombol kirim tak tertutup home-indicator iOS/gesture bar. */
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: 50%;
   transform: translateX(-50%);
   width: min(560px, calc(100% - 20px));
   min-height: 76px;
@@ -933,9 +936,9 @@ html, body {
 //   persis gejala "batas text hanya sampai maksimalnya". min-height:0 melepas
    dasar auto itu supaya flex:1 benar-benar mengikuti tinggi panel. */
 .response-card {
-  background: rgba(0, 26, 56, 0.7);
+  background: rgba(0, 26, 56, 0.8);
   border: 1px solid var(--neon-dim);
-  border-radius: 4px;
+  border-radius: 12px;
   padding: 14px 18px;
   backdrop-filter: blur(4px);
   display: flex;
@@ -1824,3 +1827,41 @@ html, body {
   .interaction { left: 10px; right: 10px; }
   .top-dials { display: none; }
 }
+
+/* ═══ TABLET (781-1180px: Android + iPad portrait/landscape) ═══
+   Perangkat utama user (HP jarang). Aturan:
+   - Header TETAP tampil (drawer ☰ hanya phone ≤780px) — layar cukup.
+   - Rail menyempit, bukan hilang: panel tetap terjangkau jari.
+   - Hover tak ada di sentuh: state aktif ikut :active juga. */
+@media (min-width: 781px) and (max-width: 1180px) {
+  .left-rail { width: 150px; }
+  .right-rail { width: 180px; }
+  .core { width: 240px; height: 190px; }
+  .event-log { width: 200px; }
+}
+/* Hover = mouse saja. Di sentuh, hover nempel pasca-tap (sticky) —
+   samakan :active agar umpan balik sentuh konsisten. */
+@media (hover: none) {
+  .chat-send:active { background: rgba(0, 220, 255, 0.3); box-shadow: 0 0 10px var(--neon-dim); }
+  .chat-ico:active { color: var(--neon); border-color: var(--neon); background: rgba(0, 220, 255, 0.14); }
+  .tpl-item:active { border-color: var(--neon-border); color: var(--text-main); }
+  .spatial-toggle-btn:active { background: rgba(0,220,255,.14); border-color: var(--neon); }
+}
+
+/* ═══ RESPONSIVE ROBUST (audit 2026-10-12) ═══
+   - data-device/data-touch ditulis device.js saat boot + tiap viewport
+     berubah (resize/orientasi/keyboard visualViewport).
+   - Target sentuh pointer kasar min 40px (WCAG 2.5.8): tombol chat, arsip,
+     kontrol peta. Desktop tak berubah (fine = ukuran semula).
+   - Chatbar mobile selebar layar; drawer filter/search tak keluar layar. */
+html[data-touch="coarse"] .chat-ico { width: 40px; height: 40px; }
+html[data-touch="coarse"] .chat-send { width: 44px; height: 44px; }
+html[data-touch="coarse"] .chat-mode { padding: 10px 14px; font-size: 12px; }
+html[data-touch="coarse"] .tpl-bar-btn { padding: 8px 12px; font-size: 14px; }
+html[data-device="phone"] #chatBar { width: calc(100% - 16px); }
+html[data-device="phone"] #tplPanel { width: calc(100vw - 32px); }
+html[data-device="phone"] .map-fly-top { max-width: calc(100% - 12px); }
+/* Tablet: chatbar lega tapi tak full; panel template ikut tier (phone saja
+   yang full-width di atas). data-device kini phone|tablet|desktop. */
+html[data-device="tablet"] #chatBar { width: min(480px, calc(100% - 24px)); }
+html[data-device="tablet"] #tplPanel { width: min(420px, calc(100vw - 48px)); }

@@ -1,9 +1,12 @@
 /* ANA PWA service worker — universal (Chrome, Edge, Firefox, Safari, Samsung) */
 // Bump versi tiap ada perubahan auth/device agar tablet/HP tak terjebak
 // login.js basi (cache-first .js + loop "sesi tidak terbaca").
-const CACHE = 'ana-v2-device';
+const CACHE = 'ana-v32-legend-meta-bawah';
 const PRECACHE = [
-  '/', '/index.html', '/login.html', '/login.css', '/login.js',
+  '/', '/index.html', '/login.html', '/login.css', '/login.js', '/landing.css',
+  'assets/simoge_hero_1.png', 'assets/simoge_hero_2.png',
+  'assets/logo.png', 'assets/logo-white.webp',
+  'assets/backsound/playlist.json',
   'manifest.webmanifest',
   'styles/tokens.css', 'styles/hud.css', 'styles/map.css', 'vendor/xterm.css', 'vendor/leaflet/leaflet.css',
   'vendor/xterm.js', 'vendor/xterm-addon-fit.js', 'vendor/leaflet/leaflet.js',
@@ -31,6 +34,44 @@ self.addEventListener('fetch', e => {
       caches.open(CACHE).then(c=>c.put(req, copy)).catch(()=>{});
       return r;
     }).catch(()=>caches.match(req).then(m=>m||caches.match('/index.html')||caches.match('/')).then(m=>m||fetch(req))));
+    return;
+  }
+  // backsound: cache-first + Range 206.
+  // <audio> kirim Range; tanpa iris 206 browser anggap cache miss dan
+  // download ulang tiap play (= streaming server). Kunci cache = URL polos
+  // agar request Range dan biasa berbagi satu entri; sekali unduh = nol
+  // byte server selamanya (sampai CACHE bump).
+  if (path.startsWith('/assets/backsound/')) {
+    e.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const range = req.headers.get('range');
+      const m = range && /^bytes=(\d*)-(\d*)$/.exec(range);
+      const storeKey = url.href.split('#')[0];
+      let full = await cache.match(storeKey);
+      if (!full) {
+        const res = await fetch(storeKey, { cache: 'no-store' }).catch(() => null);
+        if (!res || !res.ok) return res || Response.error();
+        try { await cache.put(storeKey, res.clone()); } catch {}
+        full = res;
+      }
+      if (!m) return full;
+      const buf = await full.arrayBuffer();
+      const total = buf.byteLength;
+      const start = m[1] === '' ? Math.max(total - parseInt(m[2] || '0', 10), 0) : parseInt(m[1], 10);
+      const end = m[2] === '' ? total - 1 : Math.min(parseInt(m[2], 10), total - 1);
+      if (start >= total || end < start) {
+        return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + total } });
+      }
+      return new Response(buf.slice(start, end + 1), {
+        status: 206,
+        headers: {
+          'Content-Type': full.headers.get('Content-Type') || 'audio/mpeg',
+          'Content-Range': 'bytes ' + start + '-' + end + '/' + total,
+          'Content-Length': String(end - start + 1),
+          'Accept-Ranges': 'bytes',
+        },
+      });
+    })());
     return;
   }
   // static assets: cache-first

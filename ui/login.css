@@ -4,7 +4,7 @@
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg-base);font-family:var(--font-mono);color:var(--text-body)}
 .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(0,220,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,220,255,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none}
 .bg-glow{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 35%,rgba(0,140,255,.18) 0%,transparent 55%);pointer-events:none}
-.center{position:fixed;inset:0;display:grid;place-items:center;padding:20px}
+.center{position:fixed;inset:0;display:grid;place-items:center;padding:calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + env(safe-area-inset-bottom, 0px))}
 .card{width:min(420px,96vw);background:rgba(5,27,58,.88);border:1px solid var(--neon-border);border-radius:12px;box-shadow:0 0 32px rgba(45,242,255,.14), inset 0 1px 0 rgba(255,255,255,.06);padding:22px 20px 18px;backdrop-filter:blur(8px)}
 .brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
 .brand img{width:28px;height:28px;object-fit:contain;filter:drop-shadow(0 0 8px var(--neon-glow))}

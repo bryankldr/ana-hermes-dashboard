@@ -13,6 +13,7 @@ import { loadBusinessData, fetchWilayahOptions, fetchAktivitasPoints, resolveTem
 import { initSpatialChart } from './spatialChart.js';
 import { initSpatialReport } from './spatialReport.js';
 import { initSpatialArchive } from './spatialArchive.js';
+import { isMobile as _isMobileDevice } from './core/device.js';
 
 const CENTER = [-8.1915, 114.1491];
 const BASE_STYLE = { color: '#2DF2FF', weight: 1, opacity: 0.8, fillColor: '#2DF2FF', fillOpacity: 0.12 };
@@ -215,9 +216,11 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/emas</div></div>'
       + '    </div>'
       + '    <div id="spatialInsight" class="spatial-insight flying"></div>'
-      + '    <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
       + '    <button id="legendToggle" class="spatial-toggle-btn legend-toggle" title="Legenda" aria-label="Legenda">ⓘ</button>'
-      + '    <div class="map-legend flying legend-collapsed" id="mapLegend"></div>'
+      + '    <div class="map-legendbox flying">'
+      + '      <div class="map-legend flying legend-collapsed" id="mapLegend"></div>'
+      + '      <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
+      + '    </div>'
       + '  </div>'
       + '</div>',
   });
@@ -925,12 +928,25 @@ function updateLegend(biz, kat) {
   insightBox?.addEventListener('click', () => { insightBox.classList.toggle('expanded'); });
   $sel('#legendToggle')?.addEventListener('click', function() {
     const lg = $sel('#mapLegend');
-    lg?.classList.toggle('legend-collapsed');
-    this.classList.toggle('active', !lg?.classList.contains('legend-collapsed'));
+    const box = lg?.closest('.map-legendbox') || lg;
+    // Migrasi state awal (inner collapsed = meta saja tampil): klik pertama
+    // tampilkan SEMUA (meta + item), klik berikut sembunyikan SEMUA.
+    if (lg && lg !== box && lg.classList.contains('legend-collapsed')) {
+      lg.classList.remove('legend-collapsed');
+      box?.classList.remove('legend-collapsed');
+      this.classList.add('active');
+    } else {
+      box?.classList.toggle('legend-collapsed');
+      this.classList.toggle('active', !box?.classList.contains('legend-collapsed'));
+    }
   });
-  // K4: mobile (≤780px) KPI mulai collapse — hemat peta 360px. Desktop tetap tampil.
-  if (window.matchMedia && window.matchMedia('(max-width: 780px)').matches) {
-    kpiBox?.classList.add('collapsed');
+  // K4: mobile (≤780px, via device.js) KPI mulai collapse — hemat peta 360px. Desktop tetap tampil.
+  try {
+    if (_isMobileDevice()) kpiBox?.classList.add('collapsed');
+  } catch (_) {
+    if (window.matchMedia && window.matchMedia('(max-width: 780px)').matches) {
+      kpiBox?.classList.add('collapsed');
+    }
   }
   bizSel?.addEventListener('change', () => { syncKatVisibility(); updateLegend(bizSel.value, katSel?.value || 'semua'); updateHead(); renderChips(); scheduleReload(); });
   katSel?.addEventListener('change', () => { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });

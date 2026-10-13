@@ -1790,22 +1790,33 @@ async function init() {
     'topDials','bottomTelemetry'
   ].filter(id => document.getElementById(id)),
     // FASE 1 header-lock + map full-body: posisi 4 id ini dari CSS, bukan layout.json
-    { static: ['topControls','topDials','bottomTelemetry','mapPanel'] });
+    { static: ['topControls','topDials','bottomTelemetry','mapPanel'],
+      dockPair: ['response','chatBar'] });
   window._layoutManager = layout;
-  // FASE 3 drawer mobile (konsep v3 §4): <780px header 3 strip sembunyi
-  // default (peta full-body), floating ☰ buka/tutup. Desktop abaikan.
+  // FASE 3 drawer (konsep v3 §4): phone (<780px) header 3 strip sembunyi
+  // default (peta full-body), floating ☰ buka/tutup. TABLET (781-1180px)
+  // header TETAP tampil (layar cukup) — drawer hanya phone. Desktop abaikan.
+  // Deteksi via device.js tier + flags data-device/data-touch di <html>;
+  // resize/orientation/visualViewport (keyboard tablet) semua sinkron ulang.
   try {
+    const { deviceTier, onViewportChange, applyDeviceFlags } = await import('./core/device.js');
     const drawerBtn = document.getElementById('hudDrawerBtn');
-    const isMobile = () => window.innerWidth < 780;
     const syncDrawer = () => {
-      if (!isMobile()) { document.body.classList.remove('hud-header-open', 'hud-header-hidden'); return; }
+      applyDeviceFlags();
+      // Slot layout ikut mode kini: pindah desktop↔mobile = reload agar
+      // panel baca slot yang benar (layout.js loadConfig per mode).
+      try {
+        const m = deviceTier() === 'desktop' ? 'desktop' : 'mobile';
+        if (layout && layout._mode && layout._mode !== m) { location.reload(); return; }
+      } catch (_) {}
+      if (deviceTier() !== 'phone') { document.body.classList.remove('hud-header-open', 'hud-header-hidden'); return; }
       document.body.classList.toggle('hud-header-hidden', !document.body.classList.contains('hud-header-open'));
     };
     drawerBtn?.addEventListener('click', () => {
       document.body.classList.toggle('hud-header-open');
       syncDrawer();
     });
-    window.addEventListener('resize', syncDrawer);
+    onViewportChange(syncDrawer);
     syncDrawer();
   } catch (_) {}
   // Tunggu GET /api/layout selesai DULU sebelum panel dinamis dibuat:
@@ -1815,6 +1826,8 @@ async function init() {
   // Map panel harus ada di DOM sebelum initPanelOptions bangun menu —
   // whitelist filter by getElementById, panel belum ada = tidak masuk list.
   try { initMapPanel({ log }); } catch (_) {}
+  // Pair response↔chatBar ikut status map kini (dock + z map / home dashboard).
+  try { layout.syncPairWithMap(); } catch (_) {}
   // Bridge ANA ↔ peta: poll /api/map/queue, eksekusi via adapter (Fase 5).
   try { startMapBridge({ token: ANA_TOKEN, log }); } catch (_) {}
   // Token basi (server restart) → auto-reload via BOOT_ID poll, tanpa baca token.

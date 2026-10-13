@@ -41,6 +41,27 @@
   --bg-panel-border: var(--neon-border);
   --bg-panel-glow: var(--neon-glow);
 
+  /* === Forest Editorial (landing terang, Terisolasi) ===
+     Dipakai landing.css saja. Token navy di atas JANGAN diubah —
+     dashboard bergantung padanya. */
+  --forest: #1B5E20;
+  --forest-deep: #0E3B1E;
+  --forest-bright: #2E7D32;
+  --teal: #0E9F8A;
+  --sage: #DCE9DC;
+  --paper: #FAF8F2;
+  --paper-card: rgba(255, 255, 255, 0.82);
+  --ink: #23272B;
+  --ink-soft: #5B6470;
+  --line-soft: #E3E0D5;
+  /* === code.html ref (dark cinematic) — token visual saja, terisolasi === */
+  --ref-teal: #00D09C;
+  --ref-mint: #20E3B2;
+  --ref-green: #00875A;
+  --ref-green-dk: #00744D;
+  --ref-navy: #053B32;
+  --ref-emerald: #0B4D3C;
+
   /* === Accents === */
   --amber: #FFB648;
   --amber-bright: #FFB648;

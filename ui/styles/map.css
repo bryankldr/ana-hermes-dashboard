@@ -65,7 +65,7 @@
   z-index: 11 !important;
 }
 /* FASE 3 drawer mobile: header sembunyi → peta isi .hud penuh. */
-@media (max-width: 779px) {
+@media (max-width: 780px) {
   body:not(.hud-header-open) #mapPanel,
   body.hud-header-hidden #mapPanel { top: 0; }
 }
@@ -362,6 +362,7 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
   .map-bottom-bar .spatial-insight.flying { flex: 1 1 200px; white-space: normal; max-height: 52px; }
   .map-bottom-bar .map-meta.flying { flex: 0 0 auto; }
   .map-bottom-bar .map-legend.flying { flex: 1 1 100%; width: auto; }
+  .map-bottom-bar .map-legendbox.flying { flex: 1 1 100%; max-height: 160px; }
   .spatial-progress.flying { bottom: 92px; width: 200px; }
 }
 @media (max-width: 780px){
@@ -390,6 +391,25 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 .map-bottom-bar .spatial-insight.flying { position: static; flex: 1 1 120px; min-width: 0; max-height: 58px; border-radius: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; left: auto; right: auto; bottom: auto; align-self: center; padding: 8px 12px; font-size: 12px; line-height:1.4; }
 .map-bottom-bar .map-meta.flying { position: static; flex: 0 1 240px; min-width: 0; max-width: 100%; white-space: nowrap; min-height: 34px; align-self: center; left: auto; right: auto; bottom: auto; font-size: 11px; padding: 5px 10px; overflow: hidden; text-overflow: ellipsis; }
 .map-bottom-bar .map-legend.flying { position: static; width: auto; flex: 0 1 170px; min-width: 0; min-height: 52px; max-height: 58px; left: auto; right: auto; bottom: auto; align-content: center; overflow: hidden; }
+/* ── K6: meta + legend gabung satu kartu (legendbox) — anti-overflow ──
+   Meta (sebelumnya pill terpisah di kiri legend) jadi baris kepala kartu;
+   item legend dinamis (evaluasi petak/aktivitas/produksi/matriks) wrap +
+   scroll di dalam kartu, tak pernah meluber. #mapLegend tetap satu-satunya
+   yang di-innerHTML JS; collapse hanya sembunyikan item, meta tetap tampil. */
+/* ── Tumbuh MELEBAR KE KIRI, bukan meninggi: box dijangkar kanan (item
+   terakhir bar), lebar ikut konten hingga batas, tinggi dikunci. ── */
+.map-bottom-bar .map-legendbox.flying { position: static; left: auto; right: auto; bottom: auto; display: flex; flex-direction: column; min-width: 0; flex: 0 1 auto; width: max-content; max-width: min(560px, 55%); max-height: none; padding: 8px 12px; gap: 6px; border-radius: 10px; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.22); box-shadow: 0 6px 20px rgba(0,0,0,.45); overflow: hidden; }
+.map-bottom-bar .map-legendbox .map-meta.flying { position: static; left: auto; right: auto; bottom: auto; display: flex; gap: 8px; align-items: baseline; width: 100%; max-width: none; flex: 0 0 auto; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 0; background: none; backdrop-filter: none; box-shadow: none; font-family: var(--font-mono); font-size: 13px; line-height: 1.4; white-space: nowrap; overflow: hidden; }
+.map-bottom-bar .map-legendbox .map-meta.flying .map-metric, .map-bottom-bar .map-legendbox .map-meta.flying .map-stat { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: none; min-width: 0; }
+.map-bottom-bar .map-legendbox .map-meta.flying .map-metric { flex: 0 1 auto; color: #fff; font-weight: 600; }
+.map-bottom-bar .map-legendbox .map-meta.flying .map-stat { flex: 1 1 auto; text-align: right; color: rgba(255,255,255,.75); }
+.map-bottom-bar .map-legendbox .map-legend.flying { position: static; left: auto; right: auto; bottom: auto; width: auto; flex: 0 0 auto; min-width: 0; min-height: 0; max-height: 66px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px 10px; padding: 0; border: 0; background: none; backdrop-filter: none; box-shadow: none; border-radius: 0; overflow-y: auto; overflow-x: hidden; font-size: 15px; color: #fff; }
+.map-bottom-bar .map-legendbox .map-legend.flying .lg { font-size: 15px; gap: 6px; color: #fff; }
+.map-bottom-bar .map-legendbox .map-legend.flying .lg i { width: 16px; height: 16px; }
+.map-bottom-bar .map-legendbox .map-legend.flying .lg-attrib { font-size: 11px; }
+.map-bottom-bar .map-legendbox .map-legend.flying.legend-collapsed { display: none; }
+/* Collapse dari tombol ⓘ menyembunyikan SELURUH box (meta + item). */
+.map-bottom-bar .map-legendbox.flying.legend-collapsed { display: none; }
 /* ── K1: insight klik-expand (default 1 baris, klik buka 120px scroll) ── */
 .map-bottom-bar .spatial-insight.flying { cursor: pointer; }
 .map-bottom-bar .spatial-insight.flying.expanded { white-space: normal; max-height: 120px; overflow: auto; text-overflow: clip; }
@@ -413,6 +433,10 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 #mapPanel.narrow .map-bottom-bar .spatial-insight.flying { flex: 1 1 0; max-height: 40px; padding: 4px 8px; font-size: 10px; }
 #mapPanel.narrow .map-bottom-bar .map-meta.flying { flex: 0 0 auto; max-width: 96px; min-height: 26px; font-size: 9px; padding: 3px 6px; }
 #mapPanel.narrow .map-bottom-bar .map-legend.flying { flex: 0 0 108px; min-height: 26px; max-height: 40px; }
+#mapPanel.narrow .map-bottom-bar .map-legendbox.flying { flex: 0 0 auto; max-width: 150px; max-height: 64px; padding: 4px 6px; }
+#mapPanel.narrow .map-legendbox .map-meta.flying { max-width: none; font-size: 11px; }
+#mapPanel.narrow .map-legendbox .map-legend.flying { flex: 1 1 auto; min-height: 0; }
+#mapPanel.narrow .map-legendbox .map-legend.flying .lg { font-size: 12px; }
 
 @media (max-width: 640px){
   .spatial-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
@@ -578,6 +602,13 @@ body.rpt-printing .rpt-body { overflow: visible; padding: 0; gap: 0; }
    jangan override warna teks, kecuali .rpt-page dibersihkan ke putih polos. */
 body.rpt-printing .rpt-page { border: none; background: #fff; }
 body.rpt-printing .rpt-btn { display: none; }
+
+/* ═══ RESPONSIVE ROBUST (audit 2026-10-12) ═══
+   Pointer kasar: FAB arsip + tombol drawer arsip min 48px (WCAG 2.5.8).
+   Desktop (fine) tak berubah. Flags ditulis device.js. */
+html[data-touch="coarse"] .spatial-archive-fab { width: 52px; min-height: 56px; }
+html[data-touch="coarse"] .spatial-archive-fab .arch-fab-ico { font-size: 24px; }
+html[data-touch="coarse"] .arch-mv, html[data-touch="coarse"] .arch-del { min-width: 40px; min-height: 40px; }
 @media print {
   /* A4 tanpa margin — padding dokumen sudah mm-presisi di dalam .rpt-page */
   @page { size: A4 portrait; margin: 0; }

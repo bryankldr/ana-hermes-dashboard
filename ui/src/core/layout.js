@@ -3,6 +3,9 @@
 
 const LAYOUT_URL = '/api/layout';
 const getToken = () => document.querySelector('meta[name="ana-token"]')?.content || '';
+// Deteksi mobile TERPUSAT (device.js): matchMedia 780px, bukan innerWidth
+// mentah — tanpa ini CSS 779px vs JS 780px off-by-one di tepi breakpoint.
+import { deviceTier as _deviceTier } from './device.js';
 
 export class LayoutManager {
   constructor(hud, ids, opts = {}) {
@@ -16,6 +19,12 @@ export class LayoutManager {
     this.minW = opts.minW || 120;
     this.minH = opts.minH || 60;
     this.grid = opts.grid || 4;
+    // Pair berdampingan (mis. response↔chatBar): geser satu = pasangannya
+    // ikut; resize horizontal ikut; resize vertikal jaga tanpa tumpang.
+    // opts.dockPair: ['response','chatBar']. Pair yang sama ikut z map.
+    this.pairIds = Array.isArray(opts.dockPair) ? opts.dockPair.filter(id => typeof id === 'string') : [];
+    this._pairDocked = false;
+    this._pairHomeZ = null;
     this.locked = true;
     this.config = { locked: true, layouts: {}, disabled: [] };
     this.items = {};
@@ -70,9 +79,10 @@ export class LayoutManager {
     return true;
   }
 
-  // FASE 2 slot per-user (konsep v3 §3/§4): mode dari viewport,
-  // <780px = mobile. Tanpa toggle manual — reload saat pindah mode.
-  mode() { return window.innerWidth < 780 ? 'mobile' : 'desktop'; }
+  // FASE 2 slot per-user (konsep v3 §3/§4): tablet ikut slot mobile
+  // (server cuma desktop|mobile; layout desktop penuh sesak di 820px).
+  // Tanpa toggle manual — reload saat pindah mode.
+  mode() { try { return _deviceTier() === 'desktop' ? 'desktop' : 'mobile'; } catch (_) { return window.innerWidth > 1180 ? 'desktop' : 'mobile'; } }
 
   async loadConfig() {
     try {
@@ -133,10 +143,17 @@ export class LayoutManager {
       // relatif lintas viewport (1440↔360). px ikut sebagai cache
       // legacy; applyCfg baca frac dulu bila ada.
       const num = v => parseFloat(String(v ?? '').replace('px', '')) || 0;
-      const x = num(el.style.left), y = num(el.style.top);
+      let x = num(el.style.left), y = num(el.style.top);
       const w = num(el.style.width) || el.offsetWidth, h = num(el.style.height) || el.offsetHeight;
+      let sx = el.style.left || '', sy = el.style.top || '';
+      // Pair sedang dock di map: koordinatnya relatif-map — konversi balik
+      // ke relatif-hud agar snapshot tetap kebenaran dashboard (reload aman).
+      if (this._pairDocked && this.pairIds && this.pairIds.includes(id)) {
+        const off = this._mapOffset();
+        if (off) { x += off.dx; y += off.dy; sx = Math.round(x) + 'px'; sy = Math.round(y) + 'px'; }
+      }
       layouts[id] = {
-        x: el.style.left || '', y: el.style.top || '',
+        x: sx, y: sy,
         w: el.style.width || '', h: el.style.height || '',
         ...(pr.width > 0 && pr.height > 0 ? {
           fx: +(x / pr.width).toFixed(4), fy: +(y / pr.height).toFixed(4),
@@ -153,9 +170,109 @@ export class LayoutManager {
     }).catch(() => {});
   }
 
+  // Pasangan pair dari panel yang sedang digeser/di-resize: null bila panel
+  // bukan pair, pasangannya tak ada/tersembunyi. Drag = translasi kaku;
+  // resize horizontal = kunci kolom (kiri+lebar sama); resize vertikal =
+  // independen + dorong anti-tumpang.
+  _followPartner(el) {
+    if (!this.pairIds || this.pairIds.length !== 2 || !el) return null;
+    const mine = el.dataset.layoutId || el.id;
+    if (!this.pairIds.includes(mine)) return null;
+    const other = this.pairIds[0] === mine ? this.pairIds[1] : this.pairIds[0];
+    const p = this.items[other] || document.getElementById(other);
+    if (!p || !p.isConnected) return null;
+    try { if (getComputedStyle(p).display === 'none') return null; } catch (_) {}
+    return p;
+  }
+
+  // Offset mapPanel terhadap .hud (untuk konversi koordinat pair saat
+  // dock/undock/save). null bila map tak ada/tak terukur (display:none).
+  _mapOffset() {
+    try {
+      const map = document.getElementById('mapPanel');
+      if (!map || !map.isConnected) return null;
+      const mr = map.getBoundingClientRect(), pr = this.hud.getBoundingClientRect();
+      if (mr.width < 1 || mr.height < 1) return null;
+      return { dx: mr.left - pr.left, dy: mr.top - pr.top };
+    } catch (_) { return null; }
+  }
+
+  // Map AKTIF: pindahkan pair ke dalam #mapPanel (tanpa ubah ukuran/tampilan
+  // visual) + z paling bawah di antara panel .flying (di atas ubin/pane).
+  // Urutan pair dipertahankan (response di bawah chatBar, seperti dashboard).
+  _dockPairInMap() {
+    if (this._pairDocked) return true;
+    if (!this.pairIds || this.pairIds.length !== 2) return false;
+    const map = document.getElementById('mapPanel');
+    if (!map || !map.isConnected) return false;
+    const off = this._mapOffset();
+    if (!off) return false;
+    const els = this.pairIds.map(id => this.items[id] || document.getElementById(id));
+    if (els.some(e => !e || !e.isConnected)) return false;
+    this._pairHomeZ = {};
+    for (const id of this.pairIds) {
+      const e = this.items[id] || document.getElementById(id);
+      this._pairHomeZ[id] = e.style.zIndex || '';
+    }
+    let minFly = 315;
+    try {
+      const zs = [...map.querySelectorAll('.flying')]
+        .map(n => parseFloat(getComputedStyle(n).zIndex)).filter(Number.isFinite);
+      if (zs.length) minFly = Math.min(...zs);
+    } catch (_) {}
+    this.pairIds.forEach((id, k) => {
+      const e = this.items[id] || document.getElementById(id);
+      const nx = (parseFloat(e.style.left) || 0) - off.dx;
+      const ny = (parseFloat(e.style.top) || 0) - off.dy;
+      if (e.parentElement !== map) map.appendChild(e);
+      e.style.left = nx + 'px';
+      e.style.top = ny + 'px';
+      e.style.zIndex = String(Math.max(1, Math.round(minFly) - this.pairIds.length + k));
+    });
+    this._pairDocked = true;
+    return true;
+  }
+
+  // Map DISABLE: kembalikan pair ke .hud pada posisi visual yang sama
+  // (konversi balik) + z-index dashboard semula. Display tak disentuh
+  // (hormati panel yang di-OFF dari menu).
+  _undockPairToHud() {
+    if (!this._pairDocked) return;
+    const off = this._mapOffset();
+    const homeZ = this._pairHomeZ || {};
+    for (const id of (this.pairIds || [])) {
+      const e = this.items[id] || document.getElementById(id);
+      if (!e || !e.isConnected) continue;
+      const nx = (parseFloat(e.style.left) || 0) + (off ? off.dx : 0);
+      const ny = (parseFloat(e.style.top) || 0) + (off ? off.dy : 0);
+      if (e.parentElement !== this.hud) this.hud.appendChild(e);
+      e.style.left = this.snap(nx) + 'px';
+      e.style.top = this.snap(ny) + 'px';
+      if (homeZ[id]) e.style.zIndex = homeZ[id];
+      else e.style.removeProperty('z-index');
+    }
+    this._pairDocked = false;
+    this._pairHomeZ = null;
+  }
+
+  // Sinkronkan pair dengan status map kini: map tampil = dock, map
+  // hilang/OFF = home dashboard. Aman dipanggil kapan saja (boot, toggle).
+  syncPairWithMap() {
+    try {
+      const map = document.getElementById('mapPanel');
+      const mapOn = !!map && map.isConnected && !this.disabled.has('mapPanel')
+        && getComputedStyle(map).display !== 'none';
+      if (mapOn) this._dockPairInMap();
+      else this._undockPairToHud();
+    } catch (_) {}
+  }
+
   setPanelEnabled(id, enabled) {
     const el = this.items[id];
     if (!el) return;
+    // Pair ikut map: undock DULU selagi rect map masih terukur (sebelum
+    // display:none), agar posisi visual kembali 1:1 ke dashboard.
+    if (id === 'mapPanel' && !enabled) { try { this._undockPairToHud(); } catch (_) {} }
     if (enabled) el.style.removeProperty('display');
     else el.style.setProperty('display', 'none', 'important');
     // #codeViewer visibility-nya dikendalikan class, bukan inline style:
@@ -163,6 +280,8 @@ export class LayoutManager {
     // .visible. Tanpa ini, meng-ON dari menu tidak akan menampilkannya.
     if (el.classList.contains('code-viewer')) el.classList.toggle('visible', enabled);
     if (enabled) this.disabled.delete(id); else this.disabled.add(id);
+    // Map dinyalakan: dock pair setelah display pulih (rect terukur).
+    if (id === 'mapPanel' && enabled) { try { this._dockPairInMap(); } catch (_) {} }
     this.save();
   }
 
@@ -368,7 +487,16 @@ export class LayoutManager {
   // Reset. Pull it back far enough to always keep a grabbable strip on screen.
   reclamp(el) {
     if (!el) return;
-    const pr = this.hud.getBoundingClientRect();
+    // Pair yang dock di map dijepit ke rect map (induknya kini); sisanya ke hud.
+    let base = this.hud;
+    try {
+      if (this._pairDocked && this.pairIds && this.pairIds.includes(el.id)) {
+        const map = document.getElementById('mapPanel');
+        const mr = map?.getBoundingClientRect();
+        if (map && mr && mr.width > 0 && mr.height > 0) base = map;
+      }
+    } catch (_) {}
+    const pr = base.getBoundingClientRect();
     const w = el.offsetWidth, h = el.offsetHeight;
     const num = v => parseFloat(v) || 0;
     let x = num(el.style.left), y = num(el.style.top);
@@ -383,6 +511,8 @@ export class LayoutManager {
   bind() {
     let mode = null, el = null, dir = null, pid = null;
     let sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
+    // Pair-follow: pasangan panel + posisi awalnya selama satu gesture.
+    let pEl = null, pox = 0, poy = 0;
     const onDown = e => {
       if (this.locked) return;
       if (mode) return; // satu gesture aktif — abaikan jari kedua
@@ -407,6 +537,15 @@ export class LayoutManager {
       ox = parseFloat(el.style.left) || 0;
       oy = parseFloat(el.style.top) || 0;
       ow = el.offsetWidth; oh = el.offsetHeight;
+      // Pair-follow: kunci offset relatif (bulat) di awal gesture agar
+      // pembulatan snap tak menumpuk jadi drift antar gesture.
+      pEl = this._followPartner(el);
+      pox = pEl ? (parseFloat(pEl.style.left) || 0) : 0;
+      poy = pEl ? (parseFloat(pEl.style.top) || 0) : 0;
+      if (pEl) {
+        pEl._pairOffX = Math.round(pox - ((parseFloat(el.style.left)) || 0));
+        pEl._pairOffY = Math.round(poy - ((parseFloat(el.style.top)) || 0));
+      }
     };
     const onMove = e => {
       if (!mode || !el || (pid !== null && e.pointerId !== pid)) return;
@@ -414,6 +553,13 @@ export class LayoutManager {
       if (mode === 'drag') {
         el.style.left = this.snap(ox + dx) + 'px';
         el.style.top = this.snap(oy + dy) + 'px';
+        // Pair ikut dengan delta yang sama via offset terkunci — kedekatan
+        // relatif utuh persis, tanpa drift pembulatan antar gesture.
+        if (pEl && pEl.isConnected) {
+          const elL = this.snap(ox + dx), elT = this.snap(oy + dy);
+          pEl.style.left = (elL + (pEl._pairOffX || 0)) + 'px';
+          pEl.style.top = (elT + (pEl._pairOffY || 0)) + 'px';
+        }
         return;
       }
       let w = ow, h = oh, x = ox, y = oy;
@@ -426,6 +572,27 @@ export class LayoutManager {
       el.style.height = h + 'px';
       el.style.left = this.snap(x) + 'px';
       el.style.top = this.snap(y) + 'px';
+      // Pair KOLOM TERKUNCI: resize horizontal (E/W) membuat kedua panel
+      // SELARAS — kiri + lebar partner = kiri + lebar panel yang di-resize
+      // (satu kolom utuh; atas + tinggi masing-masing tetap independen).
+      // Resize vertikal tak mengubah pasangan — kecuali tabrakan: partner
+      // didorong searah secukupnya (ukuran utuh, tetap berdampingan).
+      if (pEl && pEl.isConnected) {
+        if (dir.includes('e') || dir.includes('w')) {
+          pEl.style.left = this.snap(x) + 'px';
+          pEl.style.width = Math.max(this._minW(pEl), w) + 'px';
+        }
+        if (dir.includes('n') || dir.includes('s')) {
+          const pn = v => parseFloat(v) || 0;
+          const npx = pn(pEl.style.left), pw = pEl.offsetWidth, ph = pEl.offsetHeight;
+          const hov = Math.min(x + w, npx + pw) - Math.max(x, npx);
+          const vov = Math.min(y + h, poy + ph) - Math.max(y, poy);
+          if (hov > 0 && vov > 0) {
+            const pdir = (poy + ph / 2) <= (y + h / 2) ? -1 : 1;
+            pEl.style.top = this.snap(poy + pdir * vov) + 'px';
+          }
+        }
+      }
     };
     const onUp = e => {
       if (!mode || !el) return;
@@ -435,7 +602,9 @@ export class LayoutManager {
       // tidak pernah dipakai setelah drag berakhir.
       this.reclamp(el);
       el.classList.remove('dragging');
-      mode = null; el = null; pid = null;
+      // Pasangan ikut dijepit agar tetap terjangkau.
+      if (pEl) { try { this.reclamp(pEl); } catch (_) {} }
+      mode = null; el = null; pid = null; pEl = null;
       this.save();
     };
     // Pointer Events: satu jalur untuk mouse + touch (tablet).

@@ -1,0 +1,408 @@
+/* landing.css — replika 1:1 code.html (dark cinematic), terisolasi login.
+   Pulihkan file ini = kembali ke tema terang kemarin. Token navy global
+   tak tersentuh. Font: Plus Jakarta Sans (ref), fallback sistem offline. */
+.landing {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #E2E8F0;
+  /* Transparan agar .ref-bg (foto) terlihat: kotak background body yang
+     opak menutup anak z-index negatif. Fallback gelap dipegang html. */
+  background: transparent;
+  overflow-y: auto;
+}
+/* Kanvas fallback saat foto belum termuat (html menang atas login.css
+   karena landing.css dimuat sesudahnya; hanya dipakai login.html). */
+html { background: #080F0C; }
+/* Latar foto hutan pinus lokal + gradasi gelap sinematik (offline-first).
+   Overlay gelap menjaga kontras teks putih ala referensi. */
+.ref-bg {
+  position: fixed; inset: 0; z-index: -2;
+  background:
+    linear-gradient(rgba(10, 25, 20, 0.55), rgba(6, 18, 14, 0.65)),
+    url('assets/pineforest.jpg') center / cover no-repeat #080F0C;
+}
+.ref-vignette {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(to right, rgba(6, 78, 59, 0.4), rgba(0, 0, 0, 0.1), transparent),
+    linear-gradient(to top, rgba(2, 6, 23, 0.4), transparent, rgba(0, 0, 0, 0.2));
+}
+.ref-topo {
+  position: fixed; bottom: 0; right: 0; width: 550px; height: 350px;
+  z-index: 0; pointer-events: none; opacity: 0.2; overflow: hidden;
+}
+.ref-topo svg { width: 100%; height: 100%; stroke: #34D399; fill: none; }
+
+/* ===== Header ===== */
+.ref-header {
+  position: relative; z-index: 10; width: 100%;
+  max-width: 1440px; margin-inline: auto;
+  padding: 24px 48px 8px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.ref-brand { display: flex; align-items: center; gap: 24px; }
+.ref-brand img { height: 32px; width: auto; }
+.ref-brand-name { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+.ref-vdiv { height: 28px; width: 1px; background: rgba(255, 255, 255, 0.2); }
+.ref-brand h1 { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.02em; line-height: 1; display: flex; gap: 6px; align-items: center; }
+.ref-brand h1 span { color: #00D09C; font-weight: 800; }
+.ref-brand p { font-size: 10px; color: rgba(255, 255, 255, 0.7); font-weight: 500; margin-top: 4px; }
+.ref-sound {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(0, 0, 0, 0.3); backdrop-filter: blur(12px);
+  padding: 6px 14px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.8);
+}
+.ref-sound > svg { width: 16px; height: 16px; }
+.ref-sound > span { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.9); }
+.ref-sound button {
+  width: 36px; height: 20px; border-radius: 999px; border: 0; cursor: pointer;
+  background: rgba(255, 255, 255, 0.2); padding: 2px;
+  display: flex; align-items: center; transition: background 0.2s;
+}
+.ref-sound button .knob { width: 16px; height: 16px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); transition: transform 0.2s; }
+.ref-sound button[aria-pressed="true"] { background: #00D09C; }
+.ref-sound button[aria-pressed="true"] .knob { transform: translateX(16px); }
+.ref-sound .wave { display: flex; align-items: center; gap: 2px; height: 16px; padding-left: 4px; }
+.ref-sound .wave i { width: 2px; height: 4px; border-radius: 999px; background: rgba(255,255,255,.35); }
+.ref-sound.playing .wave i { background: #00D09C; animation: wave 1.2s ease-in-out infinite alternate; }
+.ref-sound.playing .wave i:nth-child(2) { animation-delay: 0.2s; }
+.ref-sound.playing .wave i:nth-child(3) { animation-delay: 0.4s; }
+.ref-sound.playing .wave i:nth-child(4) { animation-delay: 0.1s; }
+.ref-sound.playing .wave i:nth-child(5) { animation-delay: 0.3s; }
+@keyframes wave { from { height: 4px; } to { height: 16px; } }
+
+/* ===== Main ===== */
+.ref-main {
+  position: relative; z-index: 10; width: 100%;
+  max-width: 1440px; margin-inline: auto;
+  padding: 16px 48px; flex: 1;
+  display: flex; gap: 48px; justify-content: space-between; align-items: center;
+}
+.ref-left { flex: 1; width: 100%; max-width: 1024px; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; }
+.ref-live {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 12px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(12px); margin-bottom: 12px;
+}
+.ref-live .dot { width: 8px; height: 8px; border-radius: 999px; background: #00D09C; animation: pulse 2s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.ref-live span:last-child { font-size: 11px; font-weight: 600; color: rgba(255,255,255,.9); letter-spacing: 0.08em; }
+.ref-hero h2 { font-size: 42px; font-weight: 700; letter-spacing: -0.02em; color: #fff; line-height: 1.15; filter: drop-shadow(0 4px 12px rgba(0,0,0,.5)); }
+.ref-hero h2 .grad {
+  color: transparent;
+  background: linear-gradient(to right, #00D09C, #20E3B2, #A7F3D0);
+  -webkit-background-clip: text; background-clip: text;
+}
+.ref-hero p { color: rgba(255, 255, 255, 0.8); font-size: 14px; margin-top: 12px; line-height: 1.7; max-width: 560px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+/* Papan skor hero kanan: 1:1 ref code.html — 3 pil kaca kecil sejajar bawah headline. */
+.ref-hero-row { display: flex; gap: 24px; align-items: flex-end; justify-content: space-between; }
+.ref-hero-main { flex: 1; min-width: 0; max-width: 36rem; }
+.ref-score { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding-bottom: 4px; }
+/* ===== Scoreboard (hero kanan) — 1:1 reference glass-pill ===== */
+.ref-score-card {
+  /* Satu-satunya sumber warna = backend (scoreboard.capaian_color via --ach).
+     Tanpa --ach = netral (kartu volume P1/Hari ini, bukan capaian).
+     NOL hex ambang bisnis di CSS — aturan merah/kuning/oranye/hijau/biru
+     hidup di insight_build._ach_color saja. */
+  --ach: #94A3B8;
+  background: rgba(12, 33, 27, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-color: color-mix(in srgb, var(--ach) 35%, transparent);
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-width: 96px;
+  /* Glow lembut ikut warna bisnis (--ach dari backend, bukan hardcode):
+     fallback baris pertama untuk browser tanpa color-mix. */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 18px color-mix(in srgb, var(--ach) 35%, transparent);
+}
+/* Data tertunda (nilai 0 = jujur "tertunda", bukan 0 produksi): kartu
+   beralih ke amber status + ikon ⚠ di sub-teks. --ach ditimpa di sini
+   (status, bukan ambang capaian) sehingga border+dot+glow ikut amber. */
+.ref-score-card.is-stale { --ach: #D97706; }
+.ref-score-card.is-stale i::before { content: "⚠ "; }
+.ref-score-top { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 4px; }
+.ref-score-lb { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ach); }
+.ref-score-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--ach); }
+.ref-score-dot.pulse { animation: pulse 2s infinite; }
+/* Perhatian animatif: glow lembut berdenyut mengikuti warna kartu
+   (var(--ach) dari backend / amber status) — tanpa hex ambang di sini.
+   Mati total bila prefers-reduced-motion (di bawah). */
+.ref-score-card.attn { animation: scoreAttn 2.6s ease-in-out infinite; }
+@keyframes scoreAttn {
+  0%, 100% { filter: drop-shadow(0 0 3px var(--ach)); }
+  50% { filter: drop-shadow(0 0 16px var(--ach)); }
+}
+/* Badge + headline + ranking capaian: denyut cahaya ikut currentColor
+   (warna ambang dari backend). */
+.ref-badge.attn { animation: badgeAttn 2.6s ease-in-out infinite; }
+@keyframes badgeAttn {
+  0%, 100% { filter: drop-shadow(0 0 2px currentColor); }
+  50% { filter: drop-shadow(0 0 9px currentColor); }
+}
+.ins-text h3.attn, .ref-rank b.attn { animation: textAttn 2.6s ease-in-out infinite; }
+@keyframes textAttn {
+  0%, 100% { text-shadow: 0 0 0 transparent; }
+  50% { text-shadow: 0 0 14px currentColor; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ref-score-card.attn, .ref-badge.attn, .ins-text h3.attn, .ref-rank b.attn { animation: none; }
+}
+.ref-score-val { display: flex; align-items: baseline; gap: 4px; }
+.ref-score-val b {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ref-score-val span { font-size: 10px; font-weight: 500; color: rgba(255, 255, 255, 0.7); }
+.ref-score-card i {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.4;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+/* Tab pills */
+.ref-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 4px; }
+.ref-tabs button {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.15);
+  background: rgba(12, 33, 27, 0.45); backdrop-filter: blur(12px);
+  color: rgba(255, 255, 255, 0.9); font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s;
+}
+.ref-tabs button:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.ref-tabs button.active { background: #00D09C; border-color: #00D09C; color: #052E22; font-weight: 700; box-shadow: 0 4px 14px rgba(0,208,156,.4); }
+
+/* Kartu tengah */
+.ref-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.ref-card {
+  background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px);
+  border-radius: 16px; overflow: hidden;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); border: 1px solid rgba(255,255,255,.2);
+  display: flex; flex-direction: column; justify-content: space-between;
+  transition: transform 0.15s; color: #1E293B;
+  /* Ukuran FIX 360px: chart 132 + teks natural + foot ramping.
+     Isi terburuk (rank 4 baris) ≈ 352px — tak ada yang terpotong. */
+  min-height: 360px; max-height: 360px;
+}
+.ref-card-body { overflow: hidden; }
+/* Fade halus tiap ganti slide (hormati reduced-motion: transisi mati). */
+.ins-fade { transition: opacity 0.45s ease; }
+.ins-fade.out { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .ins-fade { transition: none; }
+}
+/* Strip tren KPH bawah: kartu lebar penuh, chart garis multi-seri. */
+.ref-kphstrip {
+  margin-top: 16px;
+  background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px);
+  border-radius: 16px; padding: 16px 18px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); border: 1px solid rgba(255,255,255,.2);
+  color: #1E293B; min-height: 190px;
+}
+.ref-kphstrip h3 { font-size: 14px; font-weight: 700; }
+.ref-kphstrip p { font-size: 11px; color: #64748B; margin-top: 2px; }
+.ref-kphstrip svg { width: 100%; height: 110px; display: block; margin-top: 6px; }
+.ref-card:hover { transform: translateY(-2px); }
+.ref-card-img { height: 128px; width: 100%; overflow: hidden; position: relative; background: #0B4D3C; }
+.ref-card-img img { width: 100%; height: 100%; object-fit: cover; }
+.ref-card-body { padding: 16px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+.ref-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 10px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; color: #065F46; background: #D1FAE5; margin-bottom: 8px;
+}
+.ref-pill i { width: 6px; height: 6px; border-radius: 999px; background: #059669; }
+.ref-card h3 { font-size: 14px; font-weight: 700; color: #1E293B; line-height: 1.4; }
+.ref-card p { font-size: 12px; color: #64748B; margin-top: 6px; line-height: 1.6; }
+.ref-card-foot { padding-top: 16px; margin-top: 12px; border-top: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #94A3B8; }
+.ref-who { display: flex; align-items: center; gap: 6px; font-weight: 500; color: #475569; }
+.ref-who b { width: 16px; height: 16px; border-radius: 999px; background: #059669; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.ref-insight-head { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #94A3B8; margin-bottom: 8px; }
+.ref-ver-tag { font-size: 9px; font-weight: 600; color: #6EE7B7; background: #065F46; border-radius: 4px; padding: 1px 6px; letter-spacing: 0; text-transform: none; }
+.ref-rank { margin: 8px 0 0; padding-left: 18px; font-size: 11px; color: #475569; line-height: 1.7; }
+.ref-rank b { color: #065F46; }
+/* Komposisi 50/50 v4.1: chart ATAS, teks BAWAH — tiap slide wajib keduanya. */
+.ins-split { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ins-chart { width: 100%; height: 132px; display: block; background: rgba(236,253,245,.5); border: 1px solid #D1FAE5; border-radius: 8px; }
+.ins-text { min-width: 0; }
+.ins-text h3 { font-size: 13px; }
+.ins-text p { font-size: 11px; }
+.ref-card-body { padding: 12px 16px; }
+.ref-card-foot { padding-top: 10px; margin-top: 8px; }
+@media (max-width: 480px) {
+  .ins-chart { height: 120px; }
+}
+.ref-dots { display: inline-flex; gap: 4px; margin-left: auto; align-items: center; }
+/* Dots rotasi slides (ala bursa): titik kecil, aktif = teal. Dibangun dinamis JS. */
+.ref-dots i { width: 6px; height: 6px; border-radius: 999px; background: #CBD5E1; }
+.ref-dots i.on { background: #00D09C; }
+.spark { width: 100%; height: 96px; display: block; margin: 4px 0; }
+.ref-kicker { display: inline-block; font-size: 9px; font-weight: 700; color: #0D9488; text-transform: uppercase; letter-spacing: 0.14em; margin-top: 4px; }
+.ref-tren { padding-top: 12px; margin-top: 8px; display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.ref-badge { display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #D1FAE5; color: #047857; max-width: 100%; min-width: 0; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-badge.down { background: #FEE2E2; color: #B91C1C; }
+.ref-vs { font-size: 11px; color: #94A3B8; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-map { width: 100%; height: 96px; border-radius: 8px; background: rgba(236, 253, 245, 0.7); border: 1px solid #D1FAE5; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; margin: 4px 0; }
+.ref-map svg { width: 100%; height: 100%; opacity: 0.8; }
+.ref-maptag { position: absolute; top: 8px; left: 8px; font-size: 9px; font-weight: 600; color: #065F46; background: rgba(255,255,255,.8); padding: 2px 6px; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+.ref-petakline { font-size: 11px; color: #475569; }
+.ref-petakline b { color: #065F46; font-size: 13px; }
+.ref-petakline span { color: #94A3B8; font-size: 10px; }
+.ref-link { display: inline-flex; align-items: center; font-size: 12px; font-weight: 700; color: #047857; gap: 4px; }
+.ref-note { font-size: 11px; color: rgba(255, 255, 255, 0.55); }
+
+/* Quick access */
+.ref-quick {
+  background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px);
+  border-radius: 16px; padding: 16px; box-shadow: 0 12px 32px rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.2);
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+}
+.ref-qa-grid { flex: 1; width: 100%; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; text-align: center; }
+.ref-qa-grid button { display: flex; flex-direction: column; align-items: center; background: none; border: 0; cursor: pointer; font-size: 24px; color: #475569; }
+.ref-qa-grid button:hover { color: #047857; }
+.ref-qa-grid button span { font-size: 10px; font-weight: 500; color: #475569; margin-top: 6px; line-height: 1.3; }
+.ref-qsep { width: 1px; height: 64px; background: #E2E8F0; }
+.ref-motto { display: flex; align-items: center; gap: 14px; max-width: 320px; }
+.ref-motto-img { width: 80px; height: 64px; border-radius: 12px; overflow: hidden; flex-shrink: 0; border: 1px solid #E2E8F0; background: #0B4D3C; }
+.ref-motto-img img { width: 100%; height: 100%; object-fit: cover; }
+.ref-motto p { font-size: 12px; font-weight: 600; color: #334155; font-style: italic; line-height: 1.4; }
+.ref-motto .ref-who { margin-top: 8px; font-size: 11px; font-weight: 700; color: #475569; }
+.ref-motto .ref-who b { width: 14px; height: 14px; font-size: 8px; }
+
+/* ===== Kartu login (ID auth DIKUNCI) ===== */
+.ref-login-wrap { width: 100%; flex-shrink: 0; max-width: 384px; display: flex; flex-direction: column; justify-content: center; margin: auto 0; align-items: center; }
+.auth-card {
+  background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px);
+  border-radius: 16px; padding: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255,255,255,.4);
+  color: #1E293B; max-width: 384px; margin: 0 auto; width: 100%;
+}
+.ref-login-brand { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.ref-login-brand img { height: 76px; width: auto; max-width: 260px; object-fit: contain; border-radius: 10px; margin-bottom: 6px; }
+.ref-login-brand h2 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #0F172A; margin-top: 4px; }
+.ref-login-brand h2 span { color: #00C896; }
+.ref-login-brand p { font-size: 10px; font-weight: 500; color: #94A3B8; margin-top: 2px; }
+.ref-greet { margin-top: 16px; text-align: left; }
+.ref-greet h3 { font-size: 14px; font-weight: 700; color: #0F172A; }
+.ref-greet p { font-size: 11px; color: #64748B; margin-top: 2px; }
+.auth-card .input-wrap { margin-top: 12px; position: relative; }
+.auth-card .input-wrap input {
+  width: 100%; padding: 8px 14px; background: rgba(248, 250, 252, 0.8);
+  border: 1px solid #E2E8F0; border-radius: 8px; font-size: 12px; color: #1E293B; outline: none;
+}
+.auth-card .input-wrap input:focus { border-color: #10B981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35); background: #fff; }
+.auth-card .input-wrap input::placeholder { color: #94A3B8; }
+.input-wrap.has-ico input { padding-left: 36px !important; }
+.input-wrap.has-ico input#password { padding-right: 36px !important; }
+.in-ico { position: absolute; left: 0; top: 0; bottom: 0; padding-left: 12px; display: flex; align-items: center; pointer-events: none; color: #94A3B8; }
+.in-ico svg { width: 14px; height: 14px; }
+.pw-toggle { position: absolute; top: 0; bottom: 0; right: 0; padding-right: 12px; display: flex; align-items: center; border: 0; background: transparent; color: #94A3B8; cursor: pointer; font-size: 14px; }
+.pw-toggle:hover { color: #475569; }
+.auth-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; padding-top: 10px; }
+.auth-row label { margin: 0; display: inline-flex; align-items: center; gap: 0; color: #475569; font-size: 11px; letter-spacing: 0; }
+.auth-row input[type="checkbox"] { width: 14px; height: 14px; accent-color: #059669; }
+.auth-row span { margin-left: 6px; }
+.auth-row a { color: #059669; font-weight: 600; text-decoration: none; }
+.auth-row a:hover { text-decoration: underline; }
+.auth-card .row { display: flex; gap: 10px; margin-top: 12px; }
+.auth-card .btn { flex: 1; border-radius: 8px; font-size: 12px; font-weight: 600; padding: 8px 14px; cursor: pointer; letter-spacing: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.auth-card .btn-primary { background: #00875A; border: 1px solid #00875A; color: #fff; box-shadow: 0 4px 12px rgba(0,135,90,.35); }
+.auth-card .btn-primary:hover { background: #00744D; }
+.auth-card .btn-ghost { background: transparent; color: #475569; border: 1px solid #E2E8F0; }
+.auth-card .msg { margin-top: 12px; font-size: 12px; min-height: 16px; color: #B45309; }
+.auth-card .msg.err { color: #DC2626; }
+.auth-card .msg.ok { color: #059669; }
+.auth-card .hint { margin-top: 10px; font-size: 11px; color: #94A3B8; line-height: 1.5; }
+.auth-card .otp-row label { font-size: 11px; letter-spacing: 0.1em; color: #64748B; display: block; margin: 12px 0 6px; }
+.auth-card #verifyOtp { flex: 1; background: rgba(248,250,252,.9); border: 1px solid #E2E8F0; border-radius: 8px; color: #1E293B; padding: 10px 12px; font-size: 13px; }
+.auth-card .divider { height: 1px; background: #F1F5F9; margin: 14px 0; }
+.auth-card .qr { margin-top: 12px; }
+.auth-card .qr img { background: #fff; }
+.auth-card .qr code { color: #64748B; }
+.auth-card .footer { margin-top: 18px; text-align: center; font-size: 11px; color: #94A3B8; }
+.auth-card .footer a { color: #059669; text-decoration: none; }
+.ref-trust { margin-top: 16px; padding-top: 12px; border-top: 1px solid #F1F5F9; display: flex; align-items: center; justify-content: center; gap: 16px; font-size: 9px; color: #94A3B8; font-weight: 500; }
+.ref-trust i { color: #CBD5E1; font-style: normal; }
+
+/* ===== Footer ===== */
+.ref-footer {
+  position: relative; z-index: 10; width: 100%;
+  max-width: 1440px; margin-inline: auto;
+  padding: 16px 48px; display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; color: rgba(255, 255, 255, 0.7); border-top: 1px solid rgba(255,255,255,.1);
+}
+.ref-slogan { display: flex; align-items: center; gap: 12px; }
+.ref-tree { width: 20px; height: 20px; color: #fff; }
+.ref-tree svg { width: 100%; height: 100%; fill: currentColor; }
+.ref-ver { font-size: 11px; font-family: ui-monospace, monospace; color: rgba(255,255,255,.6); }
+.ref-ver span { margin: 0 4px; color: rgba(255,255,255,.3); }
+
+/* Fokus keyboard jelas. */
+.landing a:focus-visible, .landing button:focus-visible, .landing input:focus-visible { outline: 2px solid #00D09C; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .ref-sound.playing .wave i, .ref-live .dot { animation: none; }
+  .ref-reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+}
+/* Tahap 5: reveal halus (transform/opacity saja) + parallax hero.
+   Mati total bila prefers-reduced-motion (di atas). */
+@media (prefers-reduced-motion: no-preference) {
+  .ref-reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.55s ease, transform 0.55s ease; }
+  .ref-reveal.in { opacity: 1; transform: none; }
+}
+
+/* ===== Responsif ===== */
+@media (max-width: 1024px) {
+  .ref-main { flex-direction: column; align-items: stretch; padding: 16px 24px 28px; }
+  /* Mobile/tablet: login di BAWAH hero, di atas tabs/kartu.
+     display:contents membuat anak ref-left jadi item flex sejajar login. */
+  .ref-left { display: contents; }
+  .ref-hero { order: 0; }
+  /* Papan skor ikut hero (order 0), di bawah teks hero, di atas login.
+     Tetap baris 3 pil ala ref (wrap bila sempit), bukan kolom penuh. */
+  .ref-hero-row { flex-direction: column; align-items: stretch; }
+  .ref-score { flex-wrap: wrap; flex-direction: row; align-items: center; }
+  .ref-score-card { flex: 1 1 100px; min-width: 100px; }
+  .ref-login-wrap { order: 1; max-width: 440px; width: 100%; margin: 0 auto; }
+  .ref-tabs { order: 2; }
+  .ref-cards { order: 3; grid-template-columns: 1fr; }
+  .ref-note { order: 4; }
+  /* Strip tren KPH di bawah kartu + note, di atas quick — jangan menyela login. */
+  #kphStrip { order: 5; }
+  .ref-quick { order: 6; flex-direction: column; }
+  .ref-qsep { width: 100%; height: 1px; }
+  .ref-qa-grid { grid-template-columns: repeat(3, 1fr); gap: 16px 8px; }
+}
+@media (max-width: 640px) {
+  .ref-header, .ref-main, .ref-footer { padding-left: 20px; padding-right: 20px; }
+  .ref-hero h2 { font-size: 32px; }
+  .ref-brand-name { display: none; }
+  /* v4.3: pill sound tak boleh kepotong tepi di layar sempit. */
+  .ref-sound span { display: none; }
+  .ref-head-right { gap: 8px; }
+  /* Papan skor tetap 3 pil sejajar ala ref — muat di 390px (±100px/kartu). */
+  .ref-score { flex-direction: row; flex-wrap: nowrap; gap: 8px; }
+  .ref-score-card { flex: 1 1 0; min-width: 0; padding: 10px 12px; }
+  .ref-score-val b { font-size: 16px; }
+  .ref-score-card i { max-width: none; }
+}
