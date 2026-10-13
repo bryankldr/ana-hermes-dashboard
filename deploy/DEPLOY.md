@@ -6,8 +6,9 @@ untuk `requirements.txt`). Server ini (dev) tetap berjalan; jangan otak-atik `.e
 ## 1. Siapkan server target
 - Python 3.12+, `python3-venv`, `pip`, `git`, `ss`/`lsof`, `nginx` (opsional, untuk reverse-proxy).
 - MariaDB/MySQL terjangkau (lokal atau via SSH tunnel — lihat `ANA_DB_SOURCE`).
-- (Opsional tapi disarankan) pasang `hermes` CLI ≥ 0.21.5 bila ingin brain non-MOCK
-  + profil `anna`. Tanpa hermes, instalasi tetap jalan (fallback `.venv` sistem).
+- (Disarankan) `hermes` CLI ≥ 0.21.5 bila ingin brain non-MOCK + profil `anna`.
+  Bila belum ada, `install.sh` menawari pemasangan otomatis (jawab `n` untuk
+  pasang manual). Tanpa hermes, instalasi tetap jalan (fallback `.venv` sistem).
 
 ## 2. Ambil kode (tag rilis, BUKAN branch kerja)
 ```bash

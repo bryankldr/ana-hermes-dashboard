@@ -2,13 +2,38 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 need="0.21.5"
+HERMES_INSTALL_URL="https://hermes-agent.nousresearch.com/install.sh"
 if command -v hermes >/dev/null 2>&1; then
   ver=$(hermes --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
   if [ -n "$ver" ] && [ "$(printf '%s\n%s' "$need" "$ver" | sort -V | head -1)" != "$need" ]; then
-    echo "ANA: hermes $ver < $need, update dulu" >&2; exit 1
+    echo "ANA: hermes $ver < $need, update manual dulu" >&2; exit 1
   fi
 else
-  echo "ANA: hermes tak ketemu. pasang: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash" >&2; exit 1
+  echo "ANA: hermes tak ketemu." >&2
+  # Interaktif: tawarkan pasang otomatis (default bila TTY); non-TTY/CI
+  # tidak pernah curl|bash diam-diam. HERMES_AUTO_INSTALL=yes|no memaksa.
+  _install_hermes=0
+  case "${HERMES_AUTO_INSTALL:-ask}" in
+    [Yy]*|1|[Tt]rue) _install_hermes=1 ;;
+    [Nn]*|0|[Ff]alse) _install_hermes=0 ;;
+    *)
+      if [ -t 0 ]; then
+        printf 'ANA: pasang hermes otomatis dari %s? [Y]a/[n] manual: ' "$HERMES_INSTALL_URL" >&2
+        IFS= read -r _ans < /dev/tty 2>/dev/null || IFS= read -r _ans || _ans=""
+        case "$_ans" in [Nn]*) _install_hermes=0 ;; *) _install_hermes=1 ;; esac
+      else
+        _install_hermes=0
+      fi
+      ;;
+  esac
+  if [ "$_install_hermes" = "1" ]; then
+    echo "ANA: menginstal hermes..." >&2
+    curl -fsSL "$HERMES_INSTALL_URL" | bash >&2 || { echo "ANA: instalasi hermes gagal" >&2; exit 1; }
+    command -v hermes >/dev/null 2>&1 || { echo "ANA: hermes tetap tak ketemu setelah instal (cek PATH di shell baru), lalu ulangi ./install.sh" >&2; exit 1; }
+  else
+    echo "ANA: pasang manual: curl -fsSL $HERMES_INSTALL_URL | bash, lalu ulangi ./install.sh" >&2
+    exit 1
+  fi
 fi
 if [ ! -f .env ]; then cp .env.example .env; echo "ANA: .env dibuat dari example, isi SIMOGE_DB_PASSWORD dulu bila kosong"; fi
 # hermes session injects PYTHONPATH -> bocorin site-packages (numpy c-ext mismatch). isolate.
