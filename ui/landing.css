@@ -1,6 +1,15 @@
 /* landing.css — replika 1:1 code.html (dark cinematic), terisolasi login.
    Pulihkan file ini = kembali ke tema terang kemarin. Token navy global
-   tak tersentuh. Font: Plus Jakarta Sans (ref), fallback sistem offline. */
+   tak tersentuh. Font: Plus Jakarta Sans variable lokal (offline-first,
+   tanpa fetch Google Fonts yang diblokir adblock/jaringan kantor). */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('assets/fonts/jakarta-var.ttf') format('truetype-variations'),
+       url('assets/fonts/jakarta-var.ttf') format('truetype');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
 .landing {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   min-height: 100vh;
