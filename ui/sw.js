@@ -1,7 +1,7 @@
 /* ANA PWA service worker — universal (Chrome, Edge, Firefox, Safari, Samsung) */
 // Bump versi tiap ada perubahan auth/device agar tablet/HP tak terjebak
 // login.js basi (cache-first .js + loop "sesi tidak terbaca").
-const CACHE = 'ana-v36-sesi-atomik';
+const CACHE = 'ana-v37-esri-z18';
 const PRECACHE = [
   '/', '/index.html', '/login.html', '/login.css', '/login.js', '/landing.css',
   'assets/simoge_hero_1.png', 'assets/simoge_hero_2.png',

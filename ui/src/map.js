@@ -251,11 +251,11 @@ export function initMapPanel({ log = () => {} } = {}) {
     return el;
   }
   const map = window.L.map(box, { zoomControl: false, attributionControl: false }).setView(CENTER, 11);
-  const dark = window.L.tileLayer('/api/tiles/esri/dark/{z}/{x}/{y}', { maxZoom: 19, attribution: 'Esri' });
-  const sat = window.L.tileLayer('/api/tiles/esri/sat/{z}/{x}/{y}', { maxZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' });
+  const dark = window.L.tileLayer('/api/tiles/esri/dark/{z}/{x}/{y}', { maxZoom: 18, attribution: 'Esri' });
+  const sat = window.L.tileLayer('/api/tiles/esri/sat/{z}/{x}/{y}', { maxZoom: 18, attribution: 'Esri, Maxar, Earthstar Geographics' });
   // Label di pane sendiri: filter redup imagery tak kena teks (cegah halo/bayangan).
   try { map.createPane('labelPane'); const lp = map.getPane('labelPane'); if (lp) { lp.style.zIndex = 250; lp.style.pointerEvents = 'none'; } } catch(_) {}
-  const refLbl = window.L.tileLayer('/api/tiles/esri/ref/{z}/{x}/{y}', { maxZoom: 19, pane: 'labelPane' });
+  const refLbl = window.L.tileLayer('/api/tiles/esri/ref/{z}/{x}/{y}', { maxZoom: 18, pane: 'labelPane' });
   const petakLayer = window.L.layerGroup();
   const satGroup = window.L.layerGroup([sat]);
   const darkGroup = window.L.layerGroup([dark]);
