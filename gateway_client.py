@@ -138,6 +138,7 @@ class HermesGatewayClient:
         auth_token: str | None = None,
         on_event: Optional[Callable[[str, dict], Any]] = None,
         on_session_change: Optional[Callable[[GatewaySession], Any]] = None,
+        ticket_provider: Optional[Callable[[], Any]] = None,
     ):
         _resolved = (gateway_url or os.environ.get("ANA_GATEWAY_URL", "").strip())
         if not _resolved:
@@ -152,6 +153,10 @@ class HermesGatewayClient:
         self.unix_socket_path = unix_socket_path
         self.profile = profile
         self.auth_token = auth_token
+        # Opsi 2 (gated serve): fungsi sync () -> tiket WS segar (single-use,
+        # TTL 30 dtk). Dipanggil SETIAP connect/reconnect — jangan cache.
+        # None = jalur legacy ?token= seperti dulu (dev tanpa gate).
+        self.ticket_provider = ticket_provider
         self.on_event = on_event
         self.on_session_change = on_session_change
         
@@ -174,36 +179,60 @@ class HermesGatewayClient:
         """Connect to Hermes Gateway via WebSocket."""
         if self.connected:
             return True
-            
-        try:
-            # For token auth, append token to URL
-            url = self.gateway_url
-            if self.auth_token:
-                separator = "&" if "?" in url else "?"
-                url = f"{url}{separator}token={self.auth_token}"
-            
-            self.ws = await websockets.connect(
-                url,
-                ping_interval=20,
-                ping_timeout=10,
-                close_timeout=5,
-            )
-            self.connected = True
-            self._closing = False
-            
-            # Start receive loop
-            self._recv_task = asyncio.create_task(self._recv_loop())
-            
-            # Start heartbeat
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-            
-            logger.info("Connected to Hermes Gateway")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to gateway: {e}")
-            self.connected = False
-            return False
+
+        # Tiket single-use: selalu mint segar per upaya (kegagalan -> mint
+        # ulang sekali sebelum menyerah; tiket basi/terpakai = 403).
+        attempts = 2 if self.ticket_provider else 1
+        last_err = None
+        for _ in range(attempts):
+            try:
+                url = self.gateway_url
+                if self.ticket_provider:
+                    try:
+                        ticket = self.ticket_provider()
+                    except Exception:
+                        ticket = None
+                    if not ticket:
+                        last_err = Exception("tiket kosong (cek HERMES_SERVICE_USER/PASSWORD)")
+                        continue
+                    separator = "&" if "?" in url else "?"
+                    url = f"{url}{separator}ticket={ticket}"
+                elif self.auth_token:
+                    # Jalur legacy (serve tanpa gate): token konstan di URL.
+                    separator = "&" if "?" in url else "?"
+                    url = f"{url}{separator}token={self.auth_token}"
+
+                self.ws = await websockets.connect(
+                    url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=5,
+                )
+                self.connected = True
+                self._closing = False
+
+                # Start receive loop
+                self._recv_task = asyncio.create_task(self._recv_loop())
+
+                # Start heartbeat
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+                logger.info("Connected to Hermes Gateway")
+                return True
+
+            except Exception as e:
+                last_err = e
+                try:
+                    if self.ws:
+                        await self.ws.close()
+                except Exception:
+                    pass
+                self.ws = None
+                continue
+
+        logger.error(f"Failed to connect to gateway: {last_err}")
+        self.connected = False
+        return False
     
     async def connect_unix(self) -> bool:
         """Connect via UNIX socket using a custom connector."""

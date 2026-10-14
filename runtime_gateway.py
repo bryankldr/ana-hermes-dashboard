@@ -164,11 +164,23 @@ def _get_gateway() -> HermesGatewayClient:
             )
         profile = os.environ.get("HERMES_PROFILE", os.environ.get("ANA_PROFILE", "anna")).strip() or "anna"
         auth_token = os.environ.get("ANA_GATEWAY_TOKEN", "").strip() or None
-        
+        # Opsi 2 (serve gated): tiket per-connect via sesi layanan Hermes.
+        # Hanya aktif bila HERMES_SERVICE_USER terisi; dev tanpa gate tetap
+        # jalur legacy (tak tersentuh).
+        ticket_provider = None
+        try:
+            if os.environ.get("HERMES_SERVICE_USER", "").strip():
+                import hermes_service
+                if hermes_service.configured():
+                    ticket_provider = hermes_service.get_ws_ticket
+        except Exception:
+            ticket_provider = None
+
         client = HermesGatewayClient(
             gateway_url=gateway_url,
             profile=profile,
             auth_token=auth_token,
+            ticket_provider=ticket_provider,
         )
         _GATEWAY_CLIENT = client
         
