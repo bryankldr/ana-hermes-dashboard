@@ -60,6 +60,21 @@ async function post(path, body){
   return {ok: r.ok, status: r.status, body: j};
 }
 
+// QR 2FA digambar LOKAL (vendor qrcode-generator, offline-first) — tanpa
+// API qrserver eksternal yang diblokir adblock/jaringan kantor. Fallback
+// remote hanya bila lib lokal gagal dimuat ( nyaris mustahil, same-origin).
+function setQrImage(text){
+  try {
+    if (typeof qrcode === 'function') {
+      const qr = qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      qrImg.src = qr.createDataURL(6, 4);
+      return;
+    }
+  } catch (_) {}
+  qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(text);
+}
 function enterEnrollMode(secretData){
   enrolledMode = true;
   // hide login action, show enrollment
@@ -74,9 +89,9 @@ function enterEnrollMode(secretData){
     pendingSecret = secretData.secret;
     qrSecret.textContent = secretData.secret || '';
     if(secretData.otpauth_url){
-      qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(secretData.otpauth_url);
+      setQrImage(secretData.otpauth_url);
     } else if(secretData.secret){
-      qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent('otpauth://totp/ANA:'+encodeURIComponent(emailEl.value||'user')+'?secret='+secretData.secret+'&issuer=ANA');
+      setQrImage('otpauth://totp/ANA:'+encodeURIComponent(emailEl.value||'user')+'?secret='+secretData.secret+'&issuer=ANA');
     }
     qrBox.classList.add('visible');
     verifyOtp.focus();
