@@ -181,12 +181,17 @@ export async function queryStats(template, params, { timeoutMs = 10000 } = {}) {
 // Return {tahun, divre:[{value,label}], kph:[...], bkph:[...], rph:[...], tpg:[...]}
 // Each level includes parent_code for cascade filtering
 export async function fetchWilayahOptions(tahun) {
+  // Sumber: 'api' (segar) | 'cache' (API gagal, tersimpan 24 jam per user) |
+  // 'fallback' (bawan kode, TERBATAS — tampilkan status di panel).
+  // Kontrak: { data: {...levels}, source }. Pemanggil JANGAN pakai data
+  // tanpa cek source untuk status.
+  const pack = (data, source) => ({ data, source });
   const defaults = {
     tahun: [2026, 2025],
     divre: [{value:'2', label:'2 — JAWA TIMUR'}],
     kph: [{value:'31211', label:'31211 — BANYUWANGI BARAT', kode_divre: '2'}],
     bkph: ['3121101','3121102','3121103','3121104','3121105'].map(v=>({value:v,label:v, kode_kph: '31211'})),
-    rph: ['312110101','312110102','312110201','312110202','312110301','312110302','312110401','312110402','312110403','312110501'].map(v=>({value:v,label:v, kode_bkph: v.slice(0,8)})),
+    rph: ['312110101','312110102','312110201','312110202','312110301','312110302','312110401','312110402','312110403','312110501','312110502'].map(v=>({value:v,label:v, kode_bkph: v.slice(0,8)})),
     tpg: ['31211050101','31211050201','31211040101','31211040106','31211040107','31211040302','31211040301'].map(v=>({value:v,label:v, kode_rph: v.slice(0,10), kode_bkph: v.slice(0,8)})),
   };
   try {
@@ -245,13 +250,46 @@ export async function fetchWilayahOptions(tahun) {
       };
       if (Array.isArray(r0.tpg) && r0.tpg.length) {
         defaults.tpg = r0.tpg
-          .filter(o => String(o.kode_tpg||'').length >= 8)
+          .filter(o => String(o.kode_tpg||'').trim() !== '')
           .slice(0, 500)
           .map(o => ({ value: String(o.kode_tpg), label: String(o.kode_tpg) + ' — ' + (o.nama_tpg||o.alias||'') + (o.alias?' ('+o.alias+')':'' ), kode_rph: (_resRph(o.RPH || o.rph) || _byPrefix(o.kode_tpg, 9, _codes.rph)), kode_bkph: (_resBkph(o.BKPH || o.bkph) || _byPrefix(o.kode_tpg, 7, _codes.bkph)) }));
       }
+      // Bentuk minimal: divre+kph+bkph hidup dari API, atau seluruh respons
+      // dianggap gagal (jangan timpa cache bagus dengan gabungan sebagian).
+      const _live = ['divre', 'kph', 'bkph'].every(k => Array.isArray(r0[k]) && r0[k].length);
+      if (!_live) throw new Error('wilayah_labels tak lengkap');
+      _wilCacheSave(defaults);
+      return pack(defaults, 'api');
     }
-  } catch (_) {}
-  return defaults;
+    throw new Error('wilayah_labels kosong');
+  } catch (e) {
+    try { console.warn('[wilayah] API gagal, fallback:', (e && e.message) || e); } catch (_) {}
+    const cached = _wilCacheLoad();
+    if (cached) return pack(cached, 'cache');
+    return pack(defaults, 'fallback');
+  }
+}
+
+// Cache opsi terakhir yang bagus: per user (scope beda!), TTL 24 jam.
+// Tanpa ini, tiap gagal API = fallback bawaan yang kadaluarsa (RPH hilang).
+function _wilUid() {
+  try {
+    const u = window._authUser || {};
+    return String(u.id || u.email || 'anon');
+  } catch (_) { return 'anon'; }
+}
+function _wilCacheLoad() {
+  try {
+    const raw = localStorage.getItem('ana_wilayah_cache_v1');
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (!j || j.uid !== _wilUid() || !j.data) return null;
+    if (Date.now() - (j.at || 0) > 24 * 3600 * 1000) return null;
+    return j.data;
+  } catch (_) { return null; }
+}
+function _wilCacheSave(data) {
+  try { localStorage.setItem('ana_wilayah_cache_v1', JSON.stringify({ uid: _wilUid(), at: Date.now(), data })); } catch (_) {}
 }
 
 // Pin-point aktivitas (titik GPS tiap kejadian sadap): lat/lng/alt/pembaharuan_ke/foto/cuaca/akses_lokasi

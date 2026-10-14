@@ -48,6 +48,9 @@
 .spatial-fgroup .spatial-row:last-child { grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
 .spatial-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; padding-top: 2px; border-top: 1px dashed rgba(45,242,255,.12); margin-top: 2px; }
 .spatial-chips:empty { display: none; border: none; margin: 0; padding: 0; }
+/* Status sumber opsi wilayah: hanya tampil saat cache/fallback (klik = muat ulang). */
+.spatial-wilstatus { font-family: var(--font-mono); font-size: 10px; color: #FCD34D; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.35); border-radius: 6px; padding: 4px 8px; margin-top: 6px; cursor: pointer; line-height: 1.4; }
+.spatial-wilstatus[hidden] { display: none; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(45,242,255,.22); background: rgba(45,242,255,.12); color: var(--text-body); font-weight:500; }
 .chip b { color: var(--neon); font-weight: 700; }
 .chip i { cursor: pointer; font-style: normal; opacity: .8; padding: 0 2px; font-size:13px; line-height:1; }

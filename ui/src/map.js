@@ -202,6 +202,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '          <button id="fApply" class="spatial-btn" style="margin-left:auto">Terapkan</button>'
       + '          <button id="fReset" class="spatial-btn ghost">Reset</button>'
       + '        </div>'
+      + '        <div class="spatial-wilstatus" id="spatialWilStatus" hidden></div>'
       + '      </div>'
       + '      <div id="spatialChips" class="spatial-chips"></div>'
       + '    </div>'
@@ -1447,14 +1448,43 @@ function updateLegend(biz, kat) {
   // ── Isi dropdown: bangun indeks rantai → render sesuai scope login → pasang cascade ──
   // Urutan: fetch → _buildWIdx → renderWilayah (scope kode user) → lock lama
   // (kompat) → auto-filter lama (kompat) → cascade dua arah → hook reload ANA.
-  function _populateDropdowns(opts) {
+  function _populateDropdowns(res) {
+    // Kontrak fetchWilayahOptions: {data, source} (bentuk lama polos aman).
+    const opts = (res && res.data) || res;
+    const src = (res && res.source) || 'api';
     _wilayahCache = opts;
     _buildWIdx();
     renderWilayah();
+    _setWilStatus(src);
     try {
       const st = collectState();
       setBusiness(st.business);
       setFilters(st.filters);
+    } catch (_) {}
+  }
+  // Status sumber opsi wilayah: hanya tampil bila BUKAN dari API (cache 24 jam
+  // per user / fallback bawaan terbatas). Klik = coba muat ulang dari server.
+  function _setWilStatus(src) {
+    try {
+      const box = el.querySelector('#spatialWilStatus');
+      if (!box) return;
+      if (!src || src === 'api') { box.hidden = true; box.textContent = ''; return; }
+      box.hidden = false;
+      box.textContent = src === 'cache'
+        ? 'Wilayah: data tersimpan (server tak terjangkau) — klik untuk coba lagi'
+        : 'Wilayah: daftar bawaan terbatas — klik untuk muat dari server';
+      if (!box._bound) {
+        box._bound = true;
+        box.addEventListener('click', function() {
+          try {
+            box.textContent = 'Memuat wilayah…';
+            fetchWilayahOptions(2026).then(function(r2) {
+              _populateDropdowns(r2);
+              renderChips();
+            });
+          } catch (_) {}
+        });
+      }
     } catch (_) {}
   }
 
