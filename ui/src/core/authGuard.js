@@ -10,22 +10,28 @@ function authHeaders() {
   return h;
 }
 export async function requireAuth() {
-  try {
-    const r = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store', headers: authHeaders() });
-    if (r.ok) {
-      const j = await r.json();
-      if (j && j.authenticated) {
-        if (j.user && j.user.tfa_enabled === false) {
-          // force TFA setup
-          const next = encodeURIComponent(location.pathname + location.search);
-          location.href = '/login.html?setup2fa=1&next=' + next;
-          await new Promise(()=>{});
-          return null;
+  // Coba 2x HANYA untuk gagal jaringan (fetch throw): HTTP yang terjawab
+  // (termasuk 401 expired/evicted) = keputusan final server, langsung redirect
+  // tanpa retry agar semantik auth tak berubah.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store', headers: authHeaders() });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.authenticated) {
+          if (j.user && j.user.tfa_enabled === false) {
+            // force TFA setup
+            const next = encodeURIComponent(location.pathname + location.search);
+            location.href = '/login.html?setup2fa=1&next=' + next;
+            await new Promise(()=>{});
+            return null;
+          }
+          return j;
         }
-        return j;
       }
-    }
-  } catch {}
+      break;
+    } catch { if (attempt === 0) { await new Promise(r => setTimeout(r, 400)); continue; } }
+  }
   const next = encodeURIComponent(location.pathname + location.search);
   location.href = '/login.html?next=' + next;
   await new Promise(()=>{});

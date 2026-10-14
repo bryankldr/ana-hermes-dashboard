@@ -111,10 +111,19 @@ def _load_sessions():
         return {}
 
 def _save_sessions(d):
+    # Tulis ATOMIK (tmp+rename): server ThreadingHTTPServer melayani banyak
+    # thread; write_text langsung (truncate+isi) membuat thread pembaca lain
+    # dapat JSON robek → terbaca {} → sesi valid dianggap hilang → 401
+    # expired → mental ke login padahal sesi ada ("terkadang keluar sendiri",
+    # makin sering saat 2 perangkat polling bersamaan). Rename POSIX atomik:
+    # pembaca selalu lihat file lama utuh atau baru utuh. Pola sama
+    # _layout_atomic_write / insight publish.
     try:
-        SESS_FILE.write_text(json.dumps(d, indent=2), encoding="utf-8")
-        try: SESS_FILE.chmod(0o600)
+        tmp = SESS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, indent=2), encoding="utf-8")
+        try: tmp.chmod(0o600)
         except: pass
+        os.replace(tmp, SESS_FILE)
     except: pass
 
 def check_rate_limit(ip):
