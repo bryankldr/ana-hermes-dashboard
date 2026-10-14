@@ -251,11 +251,11 @@ export function initMapPanel({ log = () => {} } = {}) {
     return el;
   }
   const map = window.L.map(box, { zoomControl: false, attributionControl: false }).setView(CENTER, 11);
-  const dark = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Esri' });
-  const sat = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, attribution: 'Esri, Maxar, Earthstar Geographics' });
+  const dark = window.L.tileLayer('/api/tiles/esri/dark/{z}/{x}/{y}', { maxZoom: 19, attribution: 'Esri' });
+  const sat = window.L.tileLayer('/api/tiles/esri/sat/{z}/{x}/{y}', { maxZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics' });
   // Label di pane sendiri: filter redup imagery tak kena teks (cegah halo/bayangan).
   try { map.createPane('labelPane'); const lp = map.getPane('labelPane'); if (lp) { lp.style.zIndex = 250; lp.style.pointerEvents = 'none'; } } catch(_) {}
-  const refLbl = window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom: 18, pane: 'labelPane' });
+  const refLbl = window.L.tileLayer('/api/tiles/esri/ref/{z}/{x}/{y}', { maxZoom: 19, pane: 'labelPane' });
   const petakLayer = window.L.layerGroup();
   const satGroup = window.L.layerGroup([sat]);
   const darkGroup = window.L.layerGroup([dark]);
@@ -291,10 +291,13 @@ export function initMapPanel({ log = () => {} } = {}) {
     try {
       const ctrl = ('AbortController' in window) ? new AbortController() : null;
       const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) {} }, 3500);
-      fetch('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0',
-        Object.assign({ mode: 'no-cors', cache: 'no-store' }, ctrl ? { signal: ctrl.signal } : {})
+      // Probe via PROXY same-origin (server teruskan ke Esri): gagal = server
+      // tak mencapai Esri ATAU offline total → mode lokal. Same-origin =
+      // tak pernah diblokir adblock/DNS; r.ok=false (502) = tak reachable.
+      fetch('/api/tiles/esri/sat/0/0/0', Object.assign({ cache: 'no-store' }, ctrl ? { signal: ctrl.signal } : {})
       ).then(
-        () => {
+        (r) => {
+          if (!r || !r.ok) throw new Error('esri-proxy ' + (r && r.status));
           clearTimeout(timer); esriRemember(true);
           try {
             if (!map || !map.getContainer || !map.getContainer().isConnected) return;

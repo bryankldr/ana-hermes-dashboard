@@ -2109,6 +2109,37 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
 
+    # Basemap Esri via server (same-origin) — lihat route /api/tiles/esri/.
+    _ESRI_TILES = {
+        "sat": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "dark": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "ref": "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    }
+
+    def _serve_esri_tile(self, svc, z, x, y):
+        try:
+            z, x, y = int(z), int(x), int(y)
+        except (TypeError, ValueError):
+            return self._bytes(b"koordinat salah", "text/plain", 400)
+        if svc not in self._ESRI_TILES or not (0 <= z <= 19) or x < 0 or y < 0 or x >= 2 ** z or y >= 2 ** z:
+            return self._bytes(b"not found", "text/plain", 404)
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                self._ESRI_TILES[svc].format(z=z, y=y, x=x),
+                headers={"User-Agent": "SIMOGE-HUD/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=12) as r:
+                data = r.read(2 * 1024 * 1024 + 1)
+                if len(data) > 2 * 1024 * 1024:
+                    return self._bytes(b"terlalu besar", "text/plain", 502)
+                ctype = (r.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+                if not ctype.startswith("image/"):
+                    return self._bytes(b"bukan gambar", "text/plain", 502)
+                return self._bytes(data, ctype, 200, cache_control="public, max-age=86400, immutable")
+        except Exception:
+            return self._bytes(b"esri tak terjangkau", "text/plain", 502)
+
     def _serve_pmtiles(self):
         # PMTiles v3 via range request (P2-2). Statis, tanpa Martin/tippecanoe.
         # Client (protomaps-leaflet) kirim Range: bytes=a-b; jawab 206 +
@@ -2779,6 +2810,15 @@ class Handler(BaseHTTPRequestHandler):
             if not self._token_ok():
                 return self._unauth()
             return self._tiles_status()
+        if p.startswith("/api/tiles/esri/"):
+            # Basemap Esri via server (same-origin): klien yang diblokir
+            # adblock/DNS tetap dapat ubin tanpa error console. BUKAN proxy
+            # terbuka: 3 service whitelist + koordinat int tervalidasi,
+            # tanpa query diteruskan. Publik (citra basemap memang publik).
+            parts = p[len("/api/tiles/esri/"):].split("/")
+            if len(parts) == 4:
+                return self._serve_esri_tile(parts[0], parts[1], parts[2], parts[3])
+            return self._bytes(b"not found", "text/plain", 404)
         if p == "/api/layout":
             if not self._token_ok():
                 return self._unauth()
