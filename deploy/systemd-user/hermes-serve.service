@@ -1,0 +1,12 @@
+[Unit]
+Description=Hermes backend gateway (serve)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/hermes serve --port 9119 --host 127.0.0.1 --open-profile max --no-open --skip-build
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=SIMOGE HUD dashboard
+After=network-online.target hermes-serve.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/ana-hermes-dashboard
+ExecStart=%h/ana-hermes-dashboard/start.sh
+Environment=ANA_PORT=8730
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target
