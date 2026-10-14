@@ -30,8 +30,23 @@ def configured() -> bool:
 
 
 def _base() -> str:
-    return (os.environ.get("HERMES_DASHBOARD_URL", "").strip()
-            or "http://127.0.0.1:9121").rstrip("/")
+    # Basis auth = proses yang melayani WS itu sendiri (tiket in-memory per
+    # proses!). Diambil dari ANA_GATEWAY_URL (ws://host:port/api/ws ->
+    # http://host:port) agar selalu sejalan dengan discovery; override manual
+    # via HERMES_DASHBOARD_URL bila diperlukan.
+    ov = (os.environ.get("HERMES_DASHBOARD_URL", "").strip() or "").rstrip("/")
+    if ov:
+        return ov
+    gw = (os.environ.get("ANA_GATEWAY_URL", "").strip() or "")
+    if gw.startswith("ws://"):
+        host = gw[len("ws://"):].split("/")[0]
+        if host:
+            return "http://" + host
+    if gw.startswith("wss://"):
+        host = gw[len("wss://"):].split("/")[0]
+        if host:
+            return "https://" + host
+    return "http://127.0.0.1:9121"
 
 
 def _opener():
