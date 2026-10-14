@@ -663,6 +663,9 @@ function updateLegend(biz, kat) {
   let _suppressVp = false;
   let _lastFittedFilt = null; // kunci filter non-viewport terakhir yang di-fit
   let _lastLoadedFilt = null; // kunci filter+template terakhir yang sukses render (incremental guard)
+  // KPI dikunci ke bisnis+filter (bukan viewport): renderKPIs hanya jalan saat
+  // kunci ini berubah; pan/zoom (bounds saja) tak menyentuh angka KPI.
+  let _lastKpiFilt = null;
   // ANA push set_features mentah (template di luar _TEMPLATE_SPATIAL) → feature
   // count tak sama dengan yang panel minta. Batalkan watchdog, atau panel akan
   // bunyi "render gagal" padahal peta berisi tepat seperti yang ANA minta.
@@ -753,6 +756,16 @@ function updateLegend(biz, kat) {
     _loading = true; _loadSeq++;
     const mySeq = _loadSeq;
     const st = collectState();
+    // KPI = cakupan penuh bisnis+filter: saat kunci filter berubah, buang sisa
+    // viewport (bounds/zoom/page_size) dari parameter keluar agar query tak
+    // tersaring extent terakhir. Pan/zoom murni (kunci sama) memakai apa yang
+    // ada — peta tetap incremental, angka KPI beku pada cakupan filter.
+    const _fkNow = st.business + '|' + _filtKey(st);
+    const _fkChanged = (_fkNow !== _lastKpiFilt);
+    if (_fkChanged) {
+      _viewportExtra = {};
+      try { delete st.filters.bounds; delete st.filters.zoom; delete st.filters.page_size; delete st.filters.aggregated_level; } catch (_) {}
+    }
     // Retry baru untuk filter baru: kunci ganti = hitungan dari nol.
     try { const _rk = st.business + '|' + _filtKey(st); if (_rk !== _retryKey) { _retryKey = _rk; _retryCount = 0; } } catch (_) {}
     _setProgress(12, 'memuat ' + st.business + ' ' + st.filters.tahun + '-' + String(st.filters.bulan).padStart(2,'0') + (String(st.filters.periode) === '0' ? '-FULL' : '-P' + st.filters.periode) + '…');
@@ -814,7 +827,9 @@ function updateLegend(biz, kat) {
         if (stat) stat.textContent = (res.error || 'gagal memuat').slice(0, 120) + (prevFeatures ? ' \u2014 menampilkan data sebelumnya' : '');
         if (metric && !prevFeatures) metric.textContent = '-';
         if (metric && prevFeatures) metric.textContent = prevStat;
-        renderKPIs(st.business, st.filters.kategori, {}, 0);
+        // KPI hanya di-reset saat filter berubah; gagal pada pan/zoom murni
+        // mempertahankan angka terakhir (teks error tetap tampil di stat).
+        if (_fkChanged) { renderKPIs(st.business, st.filters.kategori, {}, 0); _lastKpiFilt = _fkNow; }
         renderInsight(st.business, res.error || 'gagal', 0, {});
         try { if (_ctl && _ctl.clear_aktivitas_points) _ctl.clear_aktivitas_points(true); } catch (_) {}
         _hideProgressSoon(false);
@@ -832,7 +847,8 @@ function updateLegend(biz, kat) {
         const wc = res.warna_counts || {};
         setDataset({ template: res.template, params: res.params, row_count: res.row_count, features: res.features, warna_counts: wc });
         setMetrics({ shown: res.features, total: res.features, warna_counts: wc });
-        renderKPIs(st.business, st.filters.kategori, wc, res.features);
+        // KPI dikunci filter: pan/zoom (kunci sama) = angka tak disentuh.
+        if (_fkChanged) { renderKPIs(st.business, st.filters.kategori, wc, res.features); _lastKpiFilt = _fkNow; }
         renderInsight(st.business, res.explanation || '', res.features, wc);
         // polygon belum tentu tampil — tunggu MAP_FEATURES_LOADED (bridge 400ms). Jangan hide di sini.
         if (res.features === 0) {
