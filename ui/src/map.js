@@ -260,32 +260,55 @@ export function initMapPanel({ log = () => {} } = {}) {
   const satGroup = window.L.layerGroup([sat]);
   const darkGroup = window.L.layerGroup([dark]);
   // Offline-first: ubin Esri (satelit/gelap/label) hanya dipasang bila host-nya
-  // reachable. Probe via fetch() — gagalnya senyap (tanpa spam console seperti
-  // <img>), sukses = perilaku lama persis. Tanpa Esri, peta tetap jalan penuh
-  // di atas latar gelap + data petak lokal (tanpa puluhan error tile).
-  // Probe jalan latar (tanpa await) agar init tak tertahan di jaringan blokir.
+  // reachable. Hasil probe DIINGAT di localStorage: jaringan blokir = cukup
+  // SATU error sekali, load berikut NOL request + NOL error. Tanpa ingatan,
+  // tiap load mengulang probe yang diblokir (= error abadi di console).
+  // Pulih otomatis: tile satelit yang sukses load menandai reachable lagi.
+  const ESRI_KEY = 'ana_esri_ok';
+  const esriRemembered = (() => {
+    try { return window.localStorage.getItem(ESRI_KEY); } catch (_) { return null; }
+  })();
+  const esriRemember = (v) => {
+    try { window.localStorage.setItem(ESRI_KEY, v ? '1' : '0'); } catch (_) {}
+  };
+  try { sat.on('load', () => esriRemember(true)); } catch (_) {}
+  // Demote otomatis: bila Esri tiba-tiba diblokir (jaringan pindah), turunkan
+  // ke mode lokal + ingat — error tile tak berulang tiap load berikutnya.
   try {
-    const ctrl = ('AbortController' in window) ? new AbortController() : null;
-    const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) {} }, 3500);
-    fetch('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0',
-      Object.assign({ mode: 'no-cors', cache: 'no-store' }, ctrl ? { signal: ctrl.signal } : {})
-    ).then(
-      () => { clearTimeout(timer); addEsri(); },
-      () => { clearTimeout(timer); esriOff(); }
-    );
-    function addEsri() {
-      try {
-        if (!map || !map.getContainer || !map.getContainer().isConnected) return;
-        satGroup.addTo(map);
-        refLbl.addTo(map); // satu sumber label, default ON — cegah dobel/bayangan
-      } catch (_) {}
-    }
-    function esriOff() {
-      try { log('map', 'BASEMAP', 'Esri tak terjangkau — mode lokal (tanpa satelit/label)'); } catch (_) {}
-    }
-  } catch (_) {
+    let errN = 0;
+    const onTileErr = () => {
+      if (++errN < 4) return;
+      esriRemember(false);
+      try { map.removeLayer(satGroup); map.removeLayer(refLbl); } catch (_) {}
+      try { log('map', 'BASEMAP', 'Esri gagal — turun ke mode lokal'); } catch (_) {}
+    };
+    sat.on('tileerror', onTileErr);
+    refLbl.on('tileerror', onTileErr);
+  } catch (_) {}
+  if (esriRemembered === '1') {
     try { satGroup.addTo(map); refLbl.addTo(map); } catch (_) {}
+  } else if (esriRemembered !== '0') {
+    try {
+      const ctrl = ('AbortController' in window) ? new AbortController() : null;
+      const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) {} }, 3500);
+      fetch('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0',
+        Object.assign({ mode: 'no-cors', cache: 'no-store' }, ctrl ? { signal: ctrl.signal } : {})
+      ).then(
+        () => {
+          clearTimeout(timer); esriRemember(true);
+          try {
+            if (!map || !map.getContainer || !map.getContainer().isConnected) return;
+            satGroup.addTo(map);
+            refLbl.addTo(map); // satu sumber label, default ON — cegah dobel/bayangan
+          } catch (_) {}
+        },
+        () => { clearTimeout(timer); esriRemember(false); }
+      );
+    } catch (_) {
+      try { satGroup.addTo(map); refLbl.addTo(map); } catch (_) {}
+    }
   }
+  try { log('map', 'BASEMAP', esriRemembered === '0' ? 'Esri diblokir (tersimpan) — mode lokal' : 'basemap Esri aktif/dicek'); } catch (_) {}
   petakLayer.addTo(map);
   window.L.control.scale({ position: 'topright' }).addTo(map);
   window.L.control.layers({ 'Satelit': satGroup, 'Gelap': darkGroup }, { 'Petak': petakLayer, 'Label': refLbl }, { position: 'topright' }).addTo(map);
