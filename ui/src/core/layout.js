@@ -25,6 +25,9 @@ export class LayoutManager {
     this.pairIds = Array.isArray(opts.dockPair) ? opts.dockPair.filter(id => typeof id === 'string') : [];
     this._pairDocked = false;
     this._pairHomeZ = null;
+    this._gestureActive = false;
+    this._pairRO = null;
+    this._pairReT = 0;
     this.locked = true;
     this.config = { locked: true, layouts: {}, disabled: [] };
     this.items = {};
@@ -267,6 +270,101 @@ export class LayoutManager {
     } catch (_) {}
   }
 
+  // Mode susun pair: portrait (tablet-portrait, phone) = deret tengah-bawah;
+  // landscape (desktop + tablet-landscape) = kolom kanan. Tanpa ini tablet
+  // portrait memaksa kolom kanan sempit yang menutupi peta.
+  _pairMode() {
+    try {
+      if (window.matchMedia && window.matchMedia('(orientation: portrait)').matches) return 'bottom';
+    } catch (_) {}
+    return 'right';
+  }
+
+  // Posisikan pair berdampingan di DALAM map: kanan (landscape) atau tengah
+  // bawah (portrait), selalu di atas bar-bawah (legend dkk, anti-tindih) dan
+  // terjepit dalam batas map. Ukuran panel tak diubah; drag manual tetap
+  // dihormati (tak snap saat gesture berjalan). Simpan per slot.
+  positionPairInMap() {
+    try {
+      if (!this.pairIds || this.pairIds.length !== 2) return false;
+      if (this._gestureActive) return false;
+      const map = document.getElementById('mapPanel');
+      if (!map || !map.isConnected) return false;
+      if (this.disabled.has('mapPanel') || getComputedStyle(map).display === 'none') return false;
+      if (!this._pairDocked && !this._dockPairInMap()) return false;
+      const [idTop, idBot] = this.pairIds;
+      const top = this.items[idTop] || document.getElementById(idTop);
+      const bot = this.items[idBot] || document.getElementById(idBot);
+      if (!top || !bot || !top.isConnected || !bot.isConnected) return false;
+      if (getComputedStyle(top).display === 'none' || getComputedStyle(bot).display === 'none') return false;
+      const mr = map.getBoundingClientRect();
+      if (mr.width < 1 || mr.height < 1) return false;
+      const M = 12, GAP = 8;
+      const bw = bot.offsetWidth || parseFloat(bot.style.width) || 300;
+      const bh = bot.offsetHeight || parseFloat(bot.style.height) || 60;
+      const tw = top.offsetWidth || parseFloat(top.style.width) || 300;
+      const th = top.offsetHeight || parseFloat(top.style.height) || 180;
+      // Kepala panel (judul SPATIAL MAP): pair di bawahnya, bukan menutupinya.
+      let headH = 0;
+      try {
+        const hd = map.querySelector(':scope > .panel-title');
+        if (hd) { const hr = hd.getBoundingClientRect(); headH = Math.max(0, hr.bottom - mr.top); }
+      } catch (_) {}
+      // Clearance atas bar-bawah (legend/KPI/insight): pair duduk di atasnya.
+      let clear = M;
+      try {
+        const bar = map.querySelector('.map-bottom-bar');
+        if (bar) {
+          const br = bar.getBoundingClientRect();
+          if (br.width > 0 && br.height > 0) clear = Math.max(M, (mr.bottom - br.top) + 10);
+        }
+      } catch (_) {}
+      const minTop = headH + 4;
+      const botTop = Math.max(minTop, mr.height - clear - bh);
+      const topTop = Math.max(minTop, botTop - GAP - th);
+      let botLeft, topLeft;
+      if (this._pairMode() === 'bottom') {
+        botLeft = (mr.width - bw) / 2;
+        topLeft = (mr.width - tw) / 2;
+      } else {
+        botLeft = mr.width - M - bw;
+        topLeft = mr.width - M - tw;
+      }
+      bot.style.left = this.snap(Math.max(M, botLeft)) + 'px';
+      bot.style.top = this.snap(botTop) + 'px';
+      top.style.left = this.snap(Math.max(M, topLeft)) + 'px';
+      top.style.top = this.snap(topTop) + 'px';
+      this.reclamp(bot);
+      this.reclamp(top);
+      this.save();
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // Amati geometri map + bar-bawah (legend collapse/expand, KPI toggle,
+  // resize map): reposisi pair debounce agar tetap berdampingan rapi.
+  // Absolute pair tak memengaruhi ukuran yang diamati — tanpa loop.
+  watchPairGeometry() {
+    try {
+      if (this._pairRO) return true;
+      if (typeof ResizeObserver === 'undefined') return false;
+      const map = document.getElementById('mapPanel');
+      if (!map || !map.isConnected) return false;
+      const kick = () => {
+        try { clearTimeout(this._pairReT); } catch (_) {}
+        this._pairReT = setTimeout(() => { try { this.positionPairInMap(); } catch (_) {} }, 180);
+      };
+      const ro = new ResizeObserver(() => kick());
+      ro.observe(map);
+      try {
+        const bar = map.querySelector('.map-bottom-bar');
+        if (bar) ro.observe(bar);
+      } catch (_) {}
+      this._pairRO = ro;
+      return true;
+    } catch (_) { return false; }
+  }
+
   setPanelEnabled(id, enabled) {
     const el = this.items[id];
     if (!el) return;
@@ -280,8 +378,9 @@ export class LayoutManager {
     // .visible. Tanpa ini, meng-ON dari menu tidak akan menampilkannya.
     if (el.classList.contains('code-viewer')) el.classList.toggle('visible', enabled);
     if (enabled) this.disabled.delete(id); else this.disabled.add(id);
-    // Map dinyalakan: dock pair setelah display pulih (rect terukur).
-    if (id === 'mapPanel' && enabled) { try { this._dockPairInMap(); } catch (_) {} }
+    // Map dinyalakan: dock pair setelah display pulih (rect terukur),
+    // lalu susun ke kanan map.
+    if (id === 'mapPanel' && enabled) { try { this._dockPairInMap(); this.positionPairInMap(); } catch (_) {} }
     this.save();
   }
 
@@ -533,6 +632,7 @@ export class LayoutManager {
       e.preventDefault();
       pid = e.pointerId;
       el.classList.add('dragging');
+      this._gestureActive = true;
       sx = e.clientX; sy = e.clientY;
       ox = parseFloat(el.style.left) || 0;
       oy = parseFloat(el.style.top) || 0;
@@ -605,6 +705,7 @@ export class LayoutManager {
       // Pasangan ikut dijepit agar tetap terjangkau.
       if (pEl) { try { this.reclamp(pEl); } catch (_) {} }
       mode = null; el = null; pid = null; pEl = null;
+      this._gestureActive = false;
       this.save();
     };
     // Pointer Events: satu jalur untuk mouse + touch (tablet).

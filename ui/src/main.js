@@ -1817,6 +1817,14 @@ async function init() {
       syncDrawer();
     });
     onViewportChange(syncDrawer);
+    // Resize/orientasi dalam mode yang sama (tanpa reload): jaga pair tetap
+    // berdampingan di dalam map (kanan/tengah-bawah + tak tindih legend).
+    // Mode beda sudah reload di atas, jadi debounce ini tak balap apa pun.
+    let _pairRsz = 0;
+    onViewportChange(() => {
+      try { clearTimeout(_pairRsz); } catch (_) {}
+      _pairRsz = setTimeout(() => { try { layout.positionPairInMap(); } catch (_) {} }, 220);
+    });
     syncDrawer();
   } catch (_) {}
   // Tunggu GET /api/layout selesai DULU sebelum panel dinamis dibuat:
@@ -1826,8 +1834,11 @@ async function init() {
   // Map panel harus ada di DOM sebelum initPanelOptions bangun menu —
   // whitelist filter by getElementById, panel belum ada = tidak masuk list.
   try { initMapPanel({ log }); } catch (_) {}
-  // Pair response↔chatBar ikut status map kini (dock + z map / home dashboard).
+  // Pair response↔chatBar ikut status map kini (dock + z map / home dashboard),
+  // lalu susun berdampingan di dalam map + amati geometrinya.
   try { layout.syncPairWithMap(); } catch (_) {}
+  try { layout.positionPairInMap(); } catch (_) {}
+  try { layout.watchPairGeometry(); } catch (_) {}
   // Bridge ANA ↔ peta: poll /api/map/queue, eksekusi via adapter (Fase 5).
   try { startMapBridge({ token: ANA_TOKEN, log }); } catch (_) {}
   // Token basi (server restart) → auto-reload via BOOT_ID poll, tanpa baca token.
