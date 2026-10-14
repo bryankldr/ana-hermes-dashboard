@@ -259,8 +259,33 @@ export function initMapPanel({ log = () => {} } = {}) {
   const petakLayer = window.L.layerGroup();
   const satGroup = window.L.layerGroup([sat]);
   const darkGroup = window.L.layerGroup([dark]);
-  satGroup.addTo(map);
-  refLbl.addTo(map); // satu sumber label, default ON — cegah dobel/bayangan
+  // Offline-first: ubin Esri (satelit/gelap/label) hanya dipasang bila host-nya
+  // reachable. Probe via fetch() — gagalnya senyap (tanpa spam console seperti
+  // <img>), sukses = perilaku lama persis. Tanpa Esri, peta tetap jalan penuh
+  // di atas latar gelap + data petak lokal (tanpa puluhan error tile).
+  // Probe jalan latar (tanpa await) agar init tak tertahan di jaringan blokir.
+  try {
+    const ctrl = ('AbortController' in window) ? new AbortController() : null;
+    const timer = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) {} }, 3500);
+    fetch('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/0/0/0',
+      Object.assign({ mode: 'no-cors', cache: 'no-store' }, ctrl ? { signal: ctrl.signal } : {})
+    ).then(
+      () => { clearTimeout(timer); addEsri(); },
+      () => { clearTimeout(timer); esriOff(); }
+    );
+    function addEsri() {
+      try {
+        if (!map || !map.getContainer || !map.getContainer().isConnected) return;
+        satGroup.addTo(map);
+        refLbl.addTo(map); // satu sumber label, default ON — cegah dobel/bayangan
+      } catch (_) {}
+    }
+    function esriOff() {
+      try { log('map', 'BASEMAP', 'Esri tak terjangkau — mode lokal (tanpa satelit/label)'); } catch (_) {}
+    }
+  } catch (_) {
+    try { satGroup.addTo(map); refLbl.addTo(map); } catch (_) {}
+  }
   petakLayer.addTo(map);
   window.L.control.scale({ position: 'topright' }).addTo(map);
   window.L.control.layers({ 'Satelit': satGroup, 'Gelap': darkGroup }, { 'Petak': petakLayer, 'Label': refLbl }, { position: 'topright' }).addTo(map);
