@@ -1653,12 +1653,19 @@ def wilayah_lookup(nama, **kw):
 
 @template("wilayah_labels")
 def wilayah_labels(**kw):
-    """Distinct wilayah codes + human names (for filter labels). Include parent codes for hierarchical filtering."""
+    """Distinct wilayah codes + human names (for filter labels). Include parent codes for hierarchical filtering.
+
+    Setiap level membawa rantai KODE parent numerik (bukan nama) agar cascade
+    frontend + scope server tak perlu menebak via pencocokan nama/slice:
+    kph{divre,kode_divre}, bkph{kph,kode_kph,kode_divre}, rph{bkph,kode_bkph,
+    kode_kph,kode_divre}, tpg{kode_rph,kode_bkph,kode_kph,kode_divre}.
+    Kolom nama (divre/kph/bkph/RPH/BKPH) ikut disertakan untuk kompat mundur.
+    Junk TPG (kode kecil tes, mis. 45/992/993/999) dibuang via panjang 11 digit."""
     divre = q("SELECT kode_divre, divre FROM divre WHERE kode_divre IS NOT NULL ORDER BY kode_divre")
-    kph = q("SELECT kode_kph, kph, kode_divre FROM kph ORDER BY kode_kph")
-    bkph = q("SELECT kode_bkph, bkph, kode_kph FROM bkph ORDER BY kode_bkph")
-    rph = q("SELECT kode_rph, rph, kode_bkph FROM rph ORDER BY kode_rph")
-    tpg = q("SELECT kode_tpg, nama_tpg, alias, kode_rph, kode_bkph FROM getah_daftar_tpg WHERE kode_tpg >= 31211000000 ORDER BY kode_tpg LIMIT 400")
+    kph = q("SELECT kode_kph, kph, kode_divre, divre FROM kph ORDER BY kode_kph")
+    bkph = q("SELECT kode_bkph, bkph, kode_kph, kph, kode_divre, divre FROM bkph ORDER BY kode_bkph")
+    rph = q("SELECT kode_rph, rph, kode_bkph, bkph, kode_kph, kph, kode_divre, divre FROM rph ORDER BY kode_rph")
+    tpg = q("SELECT kode_tpg, nama_tpg, alias, RPH, BKPH, kph, divre, kode_rph, kode_bkph, kode_kph, kode_divre FROM getah_daftar_tpg WHERE kode_tpg IS NOT NULL AND CHAR_LENGTH(CAST(kode_tpg AS CHAR)) = 11 ORDER BY kode_tpg LIMIT 500")
     return {"columns": [], "rows": [{"divre": divre["rows"], "kph": kph["rows"], "bkph": bkph["rows"], "rph": rph["rows"], "tpg": tpg["rows"]}], "row_count": 1, "elapsed_ms": 0, "sql": "wilayah_labels"}
 
 def run(name, **params):

@@ -192,8 +192,8 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <div class="spatial-fgroup">'
       + '        <div class="spatial-fgroup-title">Wilayah <span class="spatial-hint">scoped hanya SPATIAL MAP</span></div>'
       + '        <div class="spatial-row">'
-      + '          <label>DIVRE <select id="fDivre" class="spatial-mini"><option value="">Semua</option><option value="2">2</option></select></label>'
-      + '          <label>KPH <select id="fKph" class="spatial-mini"><option value="">Semua</option><option value="31211">31211</option></select></label>'
+      + '          <label>DIVRE <select id="fDivre" class="spatial-mini"><option value="">Semua</option></select></label>'
+      + '          <label>KPH <select id="fKph" class="spatial-mini"><option value="">Semua</option></select></label>'
       + '          <label>BKPH <select id="fBkph" class="spatial-mini"><option value="">Semua</option></select></label>'
       + '          <label>RPH <select id="fRph" class="spatial-mini"><option value="">Semua</option></select></label>'
       + '        </div>'
@@ -1203,13 +1203,10 @@ function updateLegend(biz, kat) {
   }
 
   // ── Filter wilayah terintegrasi user login + cascade dua arah ──
-  // Scope dari KODE user (bukan jabatan): divre/kph/bkph/rph/tpg — SEMUA menang.
-  //  - user divre+kph → DIVRE+KPH dikunci (disabled); BKPH/RPH/TPG HANYA
-  //    se-KPH login — di luar KPH tak ada di menu (fail-closed: opsi tanpa
-  //    rantai terverifikasi ikut dibuang). TPG ikut rantai lewat RPH/BKPH.
-  //  - user divre saja → DIVRE dikunci; KPH/BKPH/RPH/TPG se-DIVRE itu.
-  //  - user bkph/rph/tpg → levelnya dikunci; anak di bawahnya disaring rantai.
-  //  - tanpa kode → semua terbuka.
+  // Scope dari KODE user + KODE JABATAN (cermin server): DIREKSI/ADMINISTRATOR
+  // bebas semua; DIVRE kunci DIVRE-nya (KPH/BKPH/RPH/TPG se-DIVRE itu);
+  // ADM kunci DIVRE+KPH (BKPH/RPH/TPG se-KPH itu); BKPH-level kunci s/d BKPH;
+  // TPG-level hanya TPG miliknya (fail-closed). Tanpa kode → semua terbuka.
   // Server menegakkan hal yang sama (_enforce_wilayah_scope di
   // /api/simoge/query|packet|show_on_map, cookie sesi ikut via
   // credentials:same-origin) — curl/devtools tak bisa tamper filter selama
@@ -1226,7 +1223,9 @@ function updateLegend(biz, kat) {
   const _WANCESTORS = { kph: ['divre'], bkph: ['kph', 'divre'], rph: ['bkph', 'kph', 'divre'], tpg: ['rph', 'bkph', 'kph', 'divre'] };
   let _wChain = {};
   function _userScope() {
-    // Scope dari KODE user login (bukan jabatan): divre/kph/bkph/rph.
+    // Scope dari KODE user + KODE JABATAN (cermin server _wilayah_scope_from_session):
+    // DIREKSI/ADMINISTRATOR → {} (semua); DIVRE → {divre}; ADM → {divre,kph};
+    // ASPER/KSSPROD/MANTRI → s/d {bkph}; lain → apa adanya (terdalam menang).
     // Session menyimpan hasil expand (dict) atau mentah (int/str) — semua bisa.
     const pick = (v, k) => {
       try {
@@ -1242,17 +1241,27 @@ function updateLegend(biz, kat) {
     };
     try {
       const u = window._authUser || {};
-      const scope = {
-        divre: pick(u.kode_divre, 'kode_divre'),
-        kph: pick(u.kode_kph, 'kode_kph'),
-        bkph: pick(u.kode_bkph, 'kode_bkph'),
-        rph: pick(u.kode_rph, 'kode_rph'),
-        tpgList: [],
-      };
+      let jab = '';
+      try {
+        const _j = u.jabatan;
+        if (_j && typeof _j === 'object' && !Array.isArray(_j)) jab = String(_j.kode_jabatan || _j.nama_jabatan || '').trim().toUpperCase();
+        else if (_j != null && _j !== '') jab = String(_j).trim().toUpperCase();
+      } catch (_) {}
+      if (jab === 'DIREKSI' || jab === 'ADMINISTRATOR') return { divre: '', kph: '', bkph: '', rph: '', tpgList: [], jabatan: jab };
+      const dv = pick(u.kode_divre, 'kode_divre');
+      const kp = pick(u.kode_kph, 'kode_kph');
+      const bk = pick(u.kode_bkph, 'kode_bkph');
+      const rp = pick(u.kode_rph, 'kode_rph');
+      const scope = { divre: '', kph: '', bkph: '', rph: '', tpgList: [], jabatan: jab };
+      if (jab === 'DIVRE') { scope.divre = dv; }
+      else if (jab === 'ADM') { scope.divre = dv; scope.kph = kp; }
+      else if (jab === 'ASPER' || jab === 'KSSPROD' || jab === 'MANTRI') { scope.divre = dv; scope.kph = kp; scope.bkph = bk; }
+      else { scope.divre = dv; scope.kph = kp; scope.bkph = bk; scope.rph = rp; }
       // User TPG-level: kode_tpg = list M2M [{kode_tpg,...},...] atau mentah.
+      // DIVRE/ADM bukan TPG-level — abaikan agar tak menyempitkan wilayahnya.
       try {
         const t = u.kode_tpg;
-        if (Array.isArray(t)) for (const e of t) {
+        if ((jab !== 'DIVRE' && jab !== 'ADM') && Array.isArray(t)) for (const e of t) {
           const c = (e && typeof e === 'object') ? e.kode_tpg : e;
           if (c != null && String(c).trim() !== '') scope.tpgList.push(String(c).trim());
         }
@@ -1274,12 +1283,14 @@ function updateLegend(biz, kat) {
         const c = {};
         const P = function(k) { return (o[k] != null && String(o[k]).trim() !== '') ? String(o[k]).trim() : ''; };
         if (L === 'kph') { const d = P('kode_divre'); if (d) c.divre = d; }
-        else if (L === 'bkph') { const k = P('kode_kph'); if (k) { c.kph = k; Object.assign(c, chain('kph', k)); } }
-        else if (L === 'rph') { const b = P('kode_bkph'); if (b) { c.bkph = b; Object.assign(c, chain('bkph', b)); } }
+        else if (L === 'bkph') { const k = P('kode_kph'); if (k) { c.kph = k; Object.assign(c, chain('kph', k)); } if (!c.divre) { const dd = P('kode_divre'); if (dd) c.divre = dd; } }
+        else if (L === 'rph') { const b = P('kode_bkph'); if (b) { c.bkph = b; Object.assign(c, chain('bkph', b)); } if (!c.kph) { const kk = P('kode_kph'); if (kk) c.kph = kk; } if (!c.divre) { const dd = P('kode_divre'); if (dd) c.divre = dd; } }
         else if (L === 'tpg') {
           const r = P('kode_rph'); if (r) { c.rph = r; Object.assign(c, chain('rph', r)); }
           if (!c.bkph) { const b = P('kode_bkph'); if (b) c.bkph = b; }
           if (!c.kph && c.bkph) { const up = chain('bkph', c.bkph); if (up.kph) c.kph = up.kph; if (up.divre) c.divre = up.divre; }
+          if (!c.kph) { const kk = P('kode_kph'); if (kk) c.kph = kk; }
+          if (!c.divre) { const dd = P('kode_divre'); if (dd) c.divre = dd; }
         }
         return c;
       };
@@ -1496,7 +1507,7 @@ function updateLegend(biz, kat) {
         box.hidden = false;
         box.textContent = src === 'cache'
           ? 'Wilayah: data tersimpan (server tak terjangkau) — klik untuk coba lagi'
-          : 'Wilayah: daftar bawaan terbatas — klik untuk muat dari server';
+          : 'Wilayah: gagal memuat dari server — klik untuk coba lagi';
       }
       if (!box._bound) {
         box._bound = true;

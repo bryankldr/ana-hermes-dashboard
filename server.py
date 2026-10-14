@@ -301,7 +301,14 @@ def _scope_code(val, key):
 
 def _wilayah_scope_from_session(handler):
     """Scope wilayah user login dari cookie sesi. {} = tak ada sesi
-    (pemanggil token-only seperti ANA system — sengaja tanpa scope)."""
+    (pemanggil token-only seperti ANA system — sengaja tanpa scope).
+
+    Jabatan-aware (single source of truth, cerminkan di map.js _userScope):
+    - DIREKSI/ADMINISTRATOR → {} (semua, tanpa clamp/filter)
+    - DIVRE  → {kode_divre} (semua di bawah divrenya)
+    - ADM    → {kode_divre, kode_kph} (admin KPH: hanya wilayah KPH-nya)
+    - ASPER/KSSPROD/MANTRI → turun s/d kode_bkph bila ada
+    - lain (M1-M5/K1-K5/tanpa jabatan) → apa adanya (terdalam menang)."""
     try:
         sess = _session_from_cookie(handler)
     except Exception:
@@ -309,19 +316,47 @@ def _wilayah_scope_from_session(handler):
     if not sess:
         return {}
     try:
+        # kode jabatan: sesi simpan dict expand {'kode_jabatan':...} atau mentah
+        jab = ""
+        try:
+            _j = sess.get("jabatan")
+            if isinstance(_j, dict):
+                jab = str(_j.get("kode_jabatan") or _j.get("nama_jabatan") or "").strip().upper()
+            elif _j is not None:
+                jab = str(_j).strip().upper()
+        except Exception:
+            jab = ""
+        if jab in ("DIREKSI", "ADMINISTRATOR"):
+            return {}
         scope = {}
         dv = _scope_code(sess.get("kode_divre"), "kode_divre")
         kp = _scope_code(sess.get("kode_kph"), "kode_kph")
         bk = _scope_code(sess.get("kode_bkph"), "kode_bkph")
         rp = _scope_code(sess.get("kode_rph"), "kode_rph")
-        if dv:
-            scope["kode_divre"] = dv
-        if kp:
-            scope["kode_kph"] = kp
-        if bk:
-            scope["kode_bkph"] = bk
-        if rp:
-            scope["kode_rph"] = rp
+        if jab == "DIVRE":
+            if dv:
+                scope["kode_divre"] = dv
+        elif jab == "ADM":
+            if dv:
+                scope["kode_divre"] = dv
+            if kp:
+                scope["kode_kph"] = kp
+        elif jab in ("ASPER", "KSSPROD", "MANTRI"):
+            if dv:
+                scope["kode_divre"] = dv
+            if kp:
+                scope["kode_kph"] = kp
+            if bk:
+                scope["kode_bkph"] = bk
+        else:
+            if dv:
+                scope["kode_divre"] = dv
+            if kp:
+                scope["kode_kph"] = kp
+            if bk:
+                scope["kode_bkph"] = bk
+            if rp:
+                scope["kode_rph"] = rp
         # user TPG-level: kode_tpg = list M2M [{kode_tpg,...},...] atau mentah
         try:
             tp = sess.get("kode_tpg")
@@ -461,14 +496,24 @@ def _scope_wilayah_labels(data, scope):
             r0["divre"] = [o for o in (r0.get("divre") or []) if str(o.get("kode_divre")) == dv]
         if kp:
             r0["kph"] = [o for o in (r0.get("kph") or []) if str(o.get("kode_kph")) == kp]
+        if dv:
+            r0["kph"] = [o for o in (r0.get("kph") or []) if str(o.get("kode_divre") or "") in ("", dv)]
         if kp:
-            r0["bkph"] = [o for o in (r0.get("bkph") or []) if str(o.get("kode_kph") or kp) == kp]
+            r0["bkph"] = [o for o in (r0.get("bkph") or []) if str(o.get("kode_kph") or "") in ("", kp)]
+        if dv:
+            r0["bkph"] = [o for o in (r0.get("bkph") or []) if str(o.get("kode_divre") or "") in ("", dv)]
         if bk:
             r0["bkph"] = [o for o in (r0.get("bkph") or []) if str(o.get("kode_bkph")) == bk]
-        if kp or bk:
+        if dv or kp or bk:
             def _rph_ok(o):
-                if bk and str(o.get("kode_bkph") or "") not in ("", bk):
-                    return False
+                for k, v in (("kode_divre", dv), ("kode_kph", kp), ("kode_bkph", bk)):
+                    if not v:
+                        continue
+                    ov = o.get(k)
+                    if ov is None or str(ov).strip() == "":
+                        continue
+                    if str(ov).strip() != v:
+                        return False
                 return True
             r0["rph"] = [o for o in (r0.get("rph") or []) if _rph_ok(o)]
         if rp:
