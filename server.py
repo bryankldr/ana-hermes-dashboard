@@ -100,7 +100,16 @@ import auth_local
 import db_source
 import landing_insight
 import insight_build
-import metabase
+try:
+    import metabase
+except ImportError:
+    # WIP paralel (modul belum di-commit): endpoint /api/metabase/* jawab 503
+    # sampai file mendarat — server tetap boot, fitur lain utuh.
+    metabase = None
+
+
+def _metabase_503():
+    return {"ok": False, "error": "modul metabase belum tersedia di deploy ini"}
 
 # argon2 top-level — jangan import di dalam try yang sama dengan except(VerifyMismatchError)
 # itu bikin UnboundLocalError: nama belum ter-bind saat except tuple dievaluasi (bug 17:41).
@@ -2738,10 +2747,14 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/metabase/status":
             if not self._token_ok():
                 return self._unauth()
+            if metabase is None:
+                return self._json(_metabase_503(), 503)
             return self._json(metabase.status())
         if p == "/api/metabase/dashboards":
             if not self._token_ok():
                 return self._unauth()
+            if metabase is None:
+                return self._json(_metabase_503(), 503)
             return self._json(metabase.list_dashboards())
         if p.startswith("/api/metabase/card/"):
             if not self._token_ok():
@@ -2750,6 +2763,8 @@ class Handler(BaseHTTPRequestHandler):
                 cid = int(p.rsplit("/", 1)[-1].split("?")[0])
             except ValueError:
                 return self._json({"ok": False, "error": "card id harus angka"}, 400)
+            if metabase is None:
+                return self._json(_metabase_503(), 503)
             return self._json(metabase.get_card(cid))
         if p == "/api/spatial/report":
             if not self._token_ok():
@@ -4053,6 +4068,8 @@ class Handler(BaseHTTPRequestHandler):
             # {"push": true} = tampilkan hasilnya di tile chart existing (meta.source MAXBI).
             if not self._token_ok():
                 return self._unauth()
+            if metabase is None:
+                return self._json(_metabase_503(), 503)
             if not isinstance(body, dict):
                 return self._json({"error": "body must be object"}, 400)
             try:
