@@ -1,3 +1,28 @@
+/* Font self-hosted (offline-first): tanpa fetch Google Fonts yang diblokir
+   adblock/jaringan kantor. Path relatif dari styles/ ke assets/fonts/. */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('../assets/fonts/jakarta-var.ttf') format('truetype-variations'),
+       url('../assets/fonts/jakarta-var.ttf') format('truetype');
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Orbitron';
+  src: url('../assets/fonts/orbitron-var.ttf') format('truetype-variations'),
+       url('../assets/fonts/orbitron-var.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Share Tech Mono';
+  src: url('../assets/fonts/sharetechmono.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   /* === Background (exact screenshot) === */
   --bg-base: #020F2A;

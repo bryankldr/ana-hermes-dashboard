@@ -22,16 +22,8 @@
   <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
   <title>ANA · Autonomous AI HUD</title>
-  <!-- Fonts: non-blocking (media=print swap) supaya first paint tidak nunggu Google Fonts.
-       Chromium fresh / jaringan lambat sebelumnya bikin layar putih 10-30 dtk. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <noscript>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  </noscript>
+  <!-- Fonts self-hosted via tokens.css @font-face (offline-first, tanpa Google). -->
+  <link rel="preload" href="assets/fonts/jakarta-var.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/hud.css?v=20261014d">
   <!-- xterm vendored locally (see ui/vendor/): the terminal is the one feature
