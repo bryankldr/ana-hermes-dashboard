@@ -100,6 +100,7 @@ import auth_local
 import db_source
 import landing_insight
 import insight_build
+import metabase
 
 # argon2 top-level — jangan import di dalam try yang sama dengan except(VerifyMismatchError)
 # itu bikin UnboundLocalError: nama belum ter-bind saat except tuple dievaluasi (bug 17:41).
@@ -1180,6 +1181,14 @@ BOOT_ID = secrets.token_hex(4)
 _LANDING_RL = {}
 _LANDING_RL_LOCK = threading.Lock()
 _LANDING_CACHE = {}
+# ── Switch perangkat via QR: token satu-pakai + cooldown per user ──
+# In-memory + lock (restart = hangus = aman; TTL pendek). Asumsi satu proses
+# (sama seperti _LOCK sesi). JANGAN pindah ke file tanpa TTL+lock setara.
+_SWITCH_TOKENS = {}
+_SWITCH_LOCK = threading.Lock()
+_SWITCH_TTL = 120
+_SWITCH_COOLDOWN = {}
+_SWITCH_COOLDOWN_SEC = 10
 # ── Insight Engine v1 (Tahap C): snapshot file + scheduler thread ──
 # API baca snapshot (tanpa query per request). Scheduler hitung berkala.
 # Gagal total (file tak ada + DB mati) = 503, bukan angka bohong.
@@ -2561,12 +2570,12 @@ class Handler(BaseHTTPRequestHandler):
                                "data_terbaru": snap.get("data_terbaru", {}),
                                "scoreboard": snap.get("scoreboard"),
                                "cards": snap.get("cards")})
-        if p in ("/api/status", "/api/voices", "/api/mode"):
+        if ANA_AUTH_REQUIRED and p in ("/api/status", "/api/voices", "/api/mode"):
             # Bocorkan workdir/profile/model/daftar tools ke LAN tanpa token —
             # kunci ketiganya. Frontend selalu kirim X-Ana-Token (api.headers()),
             # dan flow restart tetap jalan: 401 dari server baru (token baru)
             # memicu reload via `s.error` di main.js. token-status tetap publik
-            # (deteksi restart tanpa token).
+            # (deteksi restart tanpa token). Dev (ANA_AUTH_REQUIRED=0): terbuka.
             if not self._token_ok():
                 return self._unauth()
         if p == "/api/status":
@@ -2726,6 +2735,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._unauth()
             _ow, _ = _anna_owner_from_request(self)
             return self._json(dict(ok=True, **spatial_chart_store.get_state(owner=_ow)))
+        if p == "/api/metabase/status":
+            if not self._token_ok():
+                return self._unauth()
+            return self._json(metabase.status())
+        if p == "/api/metabase/dashboards":
+            if not self._token_ok():
+                return self._unauth()
+            return self._json(metabase.list_dashboards())
+        if p.startswith("/api/metabase/card/"):
+            if not self._token_ok():
+                return self._unauth()
+            try:
+                cid = int(p.rsplit("/", 1)[-1].split("?")[0])
+            except ValueError:
+                return self._json({"ok": False, "error": "card id harus angka"}, 400)
+            return self._json(metabase.get_card(cid))
         if p == "/api/spatial/report":
             if not self._token_ok():
                 return self._unauth()
@@ -2850,6 +2875,54 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if p in ("/login.html", "/login.js", "/login.css") or p.startswith("/src/login"):
             pass
+        elif p == "/switch":
+            # Consume tautan QR pindah perangkat: token dibakar DULU (di bawah
+            # lock) baru sesi dibuat — dua scan bersamaan = satu menang, satu
+            # ke login + pesan. Sesi baru pending_bind (diikat device mobile
+            # saat kontak pertama). create_session otomatis evict perangkat
+            # lama (aturan 1-perangkat utuh = ini PINDAH, bukan ganda).
+            try:
+                qs = parse_qs(urlparse(self.path).query)
+                tok = (qs.get("t", [""])[0] or "").strip()
+            except Exception:
+                tok = ""
+            rec = None
+            if tok and len(tok) <= 128:
+                with _SWITCH_LOCK:
+                    rec = _SWITCH_TOKENS.pop(tok, None)
+                    if rec is not None:
+                        try:
+                            if time.time() - float(rec.get("created", 0)) > _SWITCH_TTL:
+                                rec = None
+                        except Exception:
+                            rec = None
+            if not rec or not rec.get("uid"):
+                self.send_response(302)
+                self.send_header("Location", "/login.html?err=switch")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            ua = self.headers.get("User-Agent", "") or ""
+            ip = self.client_address[0] if self.client_address else "unknown"
+            try:
+                sid, _, evicted, _ = auth_local.create_session(
+                    rec.get("profile") or {}, ua, ip, "", pending_bind=True)
+            except Exception:
+                self.send_response(302)
+                self.send_header("Location", "/login.html?err=switch")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            _alog(f"auth switch-consume ok user={str(rec.get('uid') or '')[:8]} evicted_lama={bool(evicted)}", "info")
+            self.send_response(302)
+            _set_session_cookie(self, sid, "")
+            self.send_header("Location", "/")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         elif ANA_AUTH_REQUIRED and p.startswith("/api/") and not p.startswith("/api/auth/") and p not in ("/api/token-status",):
             if not self._token_ok():
                 return self._unauth()
@@ -3126,6 +3199,79 @@ class Handler(BaseHTTPRequestHandler):
             _clear_session_cookie(self)
             self.end_headers()
             self.wfile.write(body_out)
+            return
+        # ── Switch perangkat via QR (tanpa login ulang) ──
+        # Token satu-pakai, TTL 120 dtk, burn-di-bawah-lock SEBELUM buat sesi.
+        # Mint wajib sesi valid (delegasi auth, bukan bypass). Consume memakai
+        # create_session sehingga aturan 1-perangkat (evict) tetap berlaku.
+        if p == "/api/auth/switch-mint":
+            sess = _session_from_cookie(self)
+            if not sess:
+                return self._json({"error": "login dulu"}, 401)
+            uid = str(sess.get("user_id") or "")
+            if not uid:
+                return self._json({"error": "sesi tak valid"}, 401)
+            try:
+                origin = (body.get("origin") or "") if isinstance(body, dict) else ""
+                ou = urlparse(str(origin or "").strip())
+                if ou.scheme not in ("http", "https") or not ou.hostname:
+                    raise ValueError("origin")
+                host_hdr = (self.headers.get("Host", "") or "").split(":")[0].strip().lower()
+                if (ou.hostname or "").lower() != host_hdr or "@" in (ou.netloc or ""):
+                    raise ValueError("origin")
+                base = ou.scheme + "://" + ou.hostname + ((":" + str(ou.port)) if ou.port else "")
+            except Exception:
+                return self._json({"error": "origin tak valid"}, 400)
+            now_sw = time.time()
+            with _SWITCH_LOCK:
+                try:
+                    for tk, rec in list(_SWITCH_TOKENS.items()):
+                        if now_sw - float(rec.get("created", 0)) > _SWITCH_TTL:
+                            _SWITCH_TOKENS.pop(tk, None)
+                except Exception:
+                    pass
+                try:
+                    if now_sw - float(_SWITCH_COOLDOWN.get(uid, 0)) < _SWITCH_COOLDOWN_SEC:
+                        return self._json({"error": "tunggu sebentar sebelum QR baru"}, 429)
+                except Exception:
+                    pass
+                _SWITCH_COOLDOWN[uid] = now_sw
+                tok = secrets.token_urlsafe(32)
+                prof = {k: sess.get(k) for k in (
+                    "id", "email", "first_name", "last_name", "role", "jabatan",
+                    "kode_divre", "kode_kph", "kode_bkph", "kode_rph", "kode_tpg",
+                    "hud_access", "panel_access", "tfa_enabled", "2fa")}
+                prof["id"] = uid
+                _SWITCH_TOKENS[tok] = {"uid": uid, "profile": prof, "created": now_sw}
+            _alog(f"auth switch-mint ok user={uid[:8]}", "info")
+            return self._json({"ok": True, "token": tok,
+                               "url": base + "/switch?t=" + tok,
+                               "expires_in": _SWITCH_TTL})
+        if p == "/api/auth/bind-device":
+            sess = _session_from_cookie(self)
+            if not sess:
+                return self._json({"error": "login dulu"}, 401)
+            try:
+                did = (body.get("did") or "") if isinstance(body, dict) else ""
+            except Exception:
+                did = ""
+            ua = self.headers.get("User-Agent", "") or ""
+            if not auth_local.bind_session_device(sess.get("id"), did, ua):
+                return self._json({"error": "sesi sudah terikat / did tak valid"}, 403)
+            _alog(f"auth bind-device ok user={str(sess.get('user_id') or '')[:8]}", "info")
+            # Cookie mirror DITULIS manual (send_header langsung) karena
+            # _set_session_cookie mendahului baris status bila dipanggil
+            # sebelum _json — urutan header HTTP wajib: status dulu.
+            body_out = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body_out)))
+            _set_session_cookie(self, sess.get("id"), did)
+            self.end_headers()
+            try:
+                self.wfile.write(body_out)
+            except Exception:
+                pass
             return
         if p == "/api/auth/tfa/generate":
             sess = _session_from_cookie(self)
@@ -3902,6 +4048,40 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": f"args tidak valid: {e}"[:200]}, 400)
             except Exception as e:                        # noqa: BLE001
                 return self._json({"error": str(e)[:200]}, 500)
+        if p == "/api/metabase/query":
+            # Query deterministik ke MAXBI (tanpa LLM): {card_id} | {database_id, sql}.
+            # {"push": true} = tampilkan hasilnya di tile chart existing (meta.source MAXBI).
+            if not self._token_ok():
+                return self._unauth()
+            if not isinstance(body, dict):
+                return self._json({"error": "body must be object"}, 400)
+            try:
+                if "card_id" in body:
+                    res = metabase.run_card(body.get("card_id"), body.get("params") or {})
+                    title = str(body.get("title") or "") or \
+                        (metabase.get_card(body.get("card_id")).get("card") or {}).get("name", "")
+                elif "sql" in body:
+                    res = metabase.run_sql(body.get("database_id", 9), body.get("sql"))
+                    title = str(body.get("title") or "MAXBI")
+                else:
+                    return self._json({"ok": False, "error": "perlu card_id atau sql"}, 400)
+                if not res.get("ok"):
+                    return self._json(res)
+                out = dict(res)
+                out["chart"] = metabase.to_chart(res, title)
+                if body.get("push"):
+                    _ow, _osc = _anna_owner_from_request(self)
+                    if not _ow:
+                        return self._json({"ok": False, "error": "push berisi data wajib lewat sesi user login"}, 401)
+                    spec = dict(out["chart"], visible=True,
+                                meta={"source": "MAXBI", "title": title})
+                    okp, errp = spatial_chart_store.set_chart(spec, owner=_ow, scope=_osc)
+                    if not okp:
+                        return self._json({"ok": False, "error": errp}, 400)
+                    out["pushed"] = True
+                return self._json(out)
+            except Exception as e:                        # noqa: BLE001
+                return self._json({"ok": False, "error": str(e)[:200]}, 500)
         if p == "/api/spatial/history":
             try:
                 return self._json(spatial_intel.get_history())

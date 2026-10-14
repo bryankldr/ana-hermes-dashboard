@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import pathlib
+import re
 import secrets
 import struct
 import time
@@ -352,7 +353,7 @@ def sanitize_profile_for_client(prof):
     return out
 
 # ── Session (local) ───────────────────────────────────────────
-def create_session(user_profile, ua, ip, device_id=""):
+def create_session(user_profile, ua, ip, device_id="", pending_bind=False):
     sid = secrets.token_urlsafe(32)
     try:
         did = str(device_id or "").strip()[:64]
@@ -385,6 +386,11 @@ def create_session(user_profile, ua, ip, device_id=""):
         "created": now,
         "last_seen": now,
     }
+    if pending_bind:
+        # Switch-QR: device mobile belum dikenal — diikat saat kontak pertama
+        # (bind_session_device). Tanpa flag ini, did kosong = fallback UA-only
+        # yang rapuh; dengan flag, bind eksplisit dan satu-kali.
+        sess["pending_bind"] = True
     with _LOCK:
         db = _load_sessions()
         uid = sess["user_id"]
@@ -394,13 +400,20 @@ def create_session(user_profile, ua, ip, device_id=""):
         # alih), bukan "expired" yang menyesatkan. Hapus fisik hanya saat
         # logout eksplisit (destroy_session) atau prune (>7 hari).
         for k, v in list(db.items()):
-            if v.get("user_id") == uid and v.get("device_hash") != dh:
+            if v.get("user_id") != uid:
+                continue
+            if v.get("device_hash") != dh:
                 if not v.get("revoked_by"):
                     v["revoked_by"] = dh
                     v["revoked_at"] = now
                     v["revoked_label"] = device_short(did) if did else "?"
                     db[k] = v
                 evicted.append(k)
+            else:
+                # A3: yatim se-device (retry login berkali-kali) dibuang —
+                # browser selalu pegang cookie sesi terbaru, jadi aman.
+                # Beda-device tetap soft-revoke (jalur banner di atas).
+                db.pop(k, None)
         # Reclaim: revoked lama dengan device SAMA = milik login ini —
         # hidupkan kembali slotnya? Tidak — sesi baru tetap dibuat, tapi
         # revoked kembar-dh dibersihkan agar file tak menumpuk.
@@ -433,6 +446,39 @@ def create_session(user_profile, ua, ip, device_id=""):
         except Exception:
             evict_info = {"at": now}
     return sid, sess, evicted, evict_info
+
+
+def bind_session_device(sid, did, ua):
+    """TOFU bind untuk sesi switch-QR (pending_bind): kunci device pertama
+    yang kontak dengan did valid. Satu-kali (flag dibersihkan). Return True
+    bila sesi kini terikat pada did tersebut (termasuk bila sudah cocok).
+
+    Aman: hanya sesi ber-flag yang bisa di-bind; sesi normal tanpa flag
+    menolak (perilaku anti-curi-cookie tetap seperti semula). Tanpa flag,
+    perubahan device = evict seperti biasa di _session_from_cookie.
+    """
+    try:
+        d = str(did or "").strip()[:64]
+        if not d or not re.fullmatch(r"[A-Za-z0-9_=\-]{8,64}", d):
+            return False
+        with _LOCK:
+            db = _load_sessions()
+            s = db.get(sid)
+            if not s or not s.get("pending_bind"):
+                return False
+            if s.get("device_hash") == device_hash(ua or "", "", d):
+                s.pop("pending_bind", None)
+                db[sid] = s
+                _save_sessions(db)
+                return True
+            s["device_hash"] = device_hash(ua or "", "", d)
+            s["device_label"] = device_short(d)
+            s.pop("pending_bind", None)
+            db[sid] = s
+            _save_sessions(db)
+            return True
+    except Exception:
+        return False
 
 
 def _write_hardware_id(user_id, dh):

@@ -1867,6 +1867,22 @@ async function init() {
       } catch {}
     };
   } catch {}
+  // Switch-device bind: pendatang via QR belum punya did — daftarkan sekali
+  // ke sesinya SEBELUM cek auth, agar tak terevict sesaat setelah masuk.
+  // Browser normal (did sudah ada dari login) = no-op total.
+  try {
+    let _did0 = null;
+    try { _did0 = localStorage.getItem('ana_device_id') || ''; } catch (_) {}
+    if (!_did0 || !/^[A-Za-z0-9_=-]{8,64}$/.test(_did0)) {
+      _did0 = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2)) + '';
+      _did0 = _did0.replace(/[^A-Za-z0-9_=-]/g, '').slice(0, 64);
+      if (_did0.length < 8) _did0 = 'dev-' + Math.random().toString(36).slice(2, 14);
+      try { localStorage.setItem('ana_device_id', _did0); } catch (_) {}
+      try {
+        await fetch('/api/auth/bind-device', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ did: _did0 }) });
+      } catch (_) {}
+    }
+  } catch {}
   try {
     const _auth = await requireAuth();
     if (_auth && _auth.user) {
@@ -1957,6 +1973,87 @@ async function init() {
       lo.onclick = async () => { try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) {} location.href = '/login.html'; };
       topControls.appendChild(lo);
     }
+    // Switch HP — kanan logout: QR sekali-pakai, scan = sesi pindah ke HP
+    // tanpa ketik password/OTP. Perangkat ini terevict (aturan 1-perangkat).
+    if (!document.getElementById('btnSwitch')) {
+      const sw = document.createElement('button');
+      sw.id = 'btnSwitch'; sw.textContent = '📱'; sw.title = 'Pindah ke HP (QR, tanpa login ulang)';
+      sw.className = 'layout-toggle';
+      sw.onclick = () => { try { openSwitchModal(); } catch (_) {} };
+      topControls.appendChild(sw);
+    }
+  }
+  // Modal QR switch: render lokal (vendor qrcode), countdown TTL, refresh.
+  // Tanpa innerHTML string server (XSS): semua teks via textContent.
+  function closeSwitchModal() {
+    try {
+      const ov = document.getElementById('switchModal');
+      if (ov) { try { clearInterval(ov._t); } catch (_) {} ov.remove(); }
+    } catch (_) {}
+  }
+  function openSwitchModal() {
+    closeSwitchModal();
+    const ov = document.createElement('div');
+    ov.id = 'switchModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6)';
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeSwitchModal(); });
+    const card = document.createElement('div');
+    card.style.cssText = 'background:rgba(2,15,42,.97);border:1px solid var(--neon);border-radius:12px;padding:18px;width:min(320px,92vw);text-align:center;color:var(--text-main)';
+    const t = document.createElement('div');
+    t.textContent = 'Pindah ke HP';
+    t.style.cssText = 'font-weight:700;margin-bottom:4px';
+    const sub = document.createElement('div');
+    sub.textContent = 'Scan dengan kamera HP — sesi pindah, perangkat ini keluar.';
+    sub.style.cssText = 'font-size:12px;color:var(--text-body);margin-bottom:10px';
+    const img = document.createElement('img');
+    img.alt = 'QR pindah perangkat';
+    img.style.cssText = 'width:200px;height:200px;background:#fff;padding:8px;border-radius:8px;display:none;margin:0 auto';
+    const cd = document.createElement('div');
+    cd.style.cssText = 'font-size:12px;margin-top:8px;color:var(--text-body);min-height:16px';
+    const row = document.createElement('div');
+    row.style.cssText = 'margin-top:10px;display:flex;gap:8px;justify-content:center';
+    const mkBtn = (label) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = label;
+      b.style.cssText = 'border:1px solid var(--neon);background:rgba(45,242,255,.12);color:var(--text-header);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px';
+      return b;
+    };
+    const btnRe = mkBtn('QR baru');
+    const btnX = mkBtn('Tutup');
+    btnX.onclick = () => closeSwitchModal();
+    async function load() {
+      cd.textContent = 'Membuat QR…';
+      img.style.display = 'none';
+      try {
+        const r = await fetch('/api/auth/switch-mint', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ origin: location.origin }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.url) throw new Error((j && j.error) || ('HTTP ' + r.status));
+        if (typeof qrcode === 'function') {
+          const qr = qrcode(0, 'M');
+          qr.addData(j.url);
+          qr.make();
+          img.src = qr.createDataURL(6, 4);
+          img.style.display = 'block';
+        } else {
+          cd.textContent = 'Buka di HP: ' + j.url;
+        }
+        const exp = Date.now() + (j.expires_in || 120) * 1000;
+        try { clearInterval(ov._t); } catch (_) {}
+        const tick = () => {
+          const s = Math.max(0, Math.round((exp - Date.now()) / 1000));
+          cd.textContent = s > 0 ? ('Berlaku ' + s + ' dtk — scan sekarang') : 'Kedaluarsa — tekan QR baru';
+          if (s <= 0) { try { clearInterval(ov._t); } catch (_) {} }
+        };
+        tick();
+        ov._t = setInterval(tick, 1000);
+      } catch (e) { cd.textContent = 'Gagal: ' + String((e && e.message) || e); }
+    }
+    btnRe.onclick = () => load();
+    row.appendChild(btnRe); row.appendChild(btnX);
+    card.appendChild(t); card.appendChild(sub); card.appendChild(img); card.appendChild(cd); card.appendChild(row);
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+    load();
   }
   // optBtn dibuat di blok topControls di atas, jadi di frame yang sama sudah ada
   // di DOM — tidak perlu menunggu frame berikutnya. rAF sengaja dihindari: tab

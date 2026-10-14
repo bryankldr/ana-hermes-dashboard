@@ -242,6 +242,12 @@ btnVerify?.addEventListener('click', async ()=>{
       location.href = _next && _next.startsWith('/') ? _next : '/';
     }
   }catch{}
+  // Tautan switch-QR basi/bekas: beri pesan jujur (bukan diam).
+  try {
+    if (new URLSearchParams(location.search).get('err') === 'switch') {
+      msg('Tautan pindah kedaluwarsa/terpakai — minta QR baru di perangkat asal.', 'err');
+    }
+  } catch {}
   emailEl.focus();
 })();
 
