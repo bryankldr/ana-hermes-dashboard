@@ -98,6 +98,10 @@ def _discover_gateway_url() -> str | None:
     Port 37521 was a static fallback that never matches the actual
     `hermes serve --port 0` ephemeral port (e.g. 35405) and caused
     `[Errno 111] ('127.0.0.1', 37521)` when server.py ran without start.sh.
+
+    Deteksi BERLAPIS: nama proses `"hermes"` dulu (kompat lama), lalu
+    cmdline mengandung "hermes" (tangkap `python3 -m hermes_cli.main ...
+    serve` yang comm-nya python3) + verifikasi /api/health khas hermes.
     """
     env_url = os.environ.get("ANA_GATEWAY_URL", "").strip()
     if env_url:
@@ -105,41 +109,57 @@ def _discover_gateway_url() -> str | None:
     # Try to discover from live hermes process (same logic as start.sh:108-122)
     try:
         import subprocess
+        import urllib.request
         import re as _re
+
+        def _is_hermes_health(port: str) -> bool:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3) as resp:
+                    return "displayVersion" in resp.read().decode("utf-8", errors="ignore")
+            except Exception:
+                return False
+
+        def _cmdline_has_hermes(pid: str) -> bool:
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as f:
+                    return b"hermes" in f.read().replace(b"\0", b" ").lower()
+            except Exception:
+                return False
+
         ss = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=3)
-        # Find hermes pid and sport
-        m_pid = _re.search(r'"hermes".*?pid=(\d+)', ss.stdout)
-        if m_pid:
-            pid = m_pid.group(1)
-            m_port = _re.search(rf"pid={pid}.*?127\.0\.0\.1:(\d+)", ss.stdout)
-            # fallback: any 127.0.0.1:port on that pid line
-            if not m_port:
-                for line in ss.stdout.splitlines():
-                    if f"pid={pid}" in line:
-                        mm = _re.search(r"127\.0\.0\.1:(\d+)", line)
-                        if mm:
-                            m_port = mm
-                            break
-            if m_port:
-                sport = m_port.group(1)
-                # Fetch token from http://127.0.0.1:$SPORT/
-                try:
-                    import urllib.request
-                    with urllib.request.urlopen(f"http://127.0.0.1:{sport}/", timeout=3) as resp:
-                        html = resp.read().decode("utf-8", errors="ignore")
-                        m_tok = _re.search(r'__HERMES_SESSION_TOKEN__="([^"]+)"', html)
-                        if m_tok:
-                            tok = m_tok.group(1)
-                            os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
-                            os.environ["ANA_GATEWAY_TOKEN"] = tok
-                            return os.environ["ANA_GATEWAY_URL"]
-                        # token not in page but port exists — still return URL
-                        os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
-                        return os.environ["ANA_GATEWAY_URL"]
-                except Exception:
-                    # port exists but http fetch failed — still try URL (token may be set separately)
+        cands: list = []  # (prioritas, port): 0 = nama persis (kompat), 1 = cmdline+probe
+        for line in ss.stdout.splitlines():
+            if "127.0.0.1:" not in line or "pid=" not in line:
+                continue
+            m_pid = _re.search(r"pid=(\d+)", line)
+            m_port = _re.search(r"127\.0\.0\.1:(\d+)", line)
+            if not m_pid or not m_port:
+                continue
+            if '"hermes"' in line:
+                cands.append((0, m_port.group(1)))
+            elif _cmdline_has_hermes(m_pid.group(1)) and _is_hermes_health(m_port.group(1)):
+                cands.append((1, m_port.group(1)))
+        if not cands:
+            return None
+        cands.sort(key=lambda t: t[0])
+        sport = cands[0][1]
+        # Fetch token from http://127.0.0.1:$SPORT/
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{sport}/", timeout=3) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                m_tok = _re.search(r'__HERMES_SESSION_TOKEN__="([^"]+)"', html)
+                if m_tok:
+                    tok = m_tok.group(1)
                     os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
+                    os.environ["ANA_GATEWAY_TOKEN"] = tok
                     return os.environ["ANA_GATEWAY_URL"]
+                # token not in page but port exists — still return URL
+                os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
+                return os.environ["ANA_GATEWAY_URL"]
+        except Exception:
+            # port exists but http fetch failed — still try URL (token may be set separately)
+            os.environ["ANA_GATEWAY_URL"] = f"ws://127.0.0.1:{sport}/api/ws"
+            return os.environ["ANA_GATEWAY_URL"]
     except Exception:
         pass
     return None

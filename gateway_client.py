@@ -3,10 +3,16 @@
 Hermes Gateway WebSocket Client for ana-hermes-dashboard.
 
 Replaces runtime.py's spawn-hermes-chat architecture with persistent
-WebSocket connection to Hermes Gateway (tui_gateway JSON-RPC over UNIX socket).
+WebSocket connection to Hermes Gateway (JSON-RPC 2.0 over WebSocket TCP).
 
-Protocol: JSON-RPC 2.0 over WebSocket at ws://localhost/api/ws (via UNIX socket proxy)
-Contract: tui_gateway/contracts/registry.py (all methods/events declared)
+Endpoint: `hermes serve` headless backend (BUKAN proses TUI, BUKAN dashboard
+web 9121) — ditemukan via ANA_GATEWAY_URL atau discovery ss+cmdline+probe
+(lihat _discover_gateway_url di runtime_gateway.py dan start.sh).
+Auth: legacy ?token= (serve tanpa gate) atau ?ticket= sekali-pakai via
+ticket_provider (serve gated, lihat hermes_service.py).
+
+Protocol: JSON-RPC 2.0 over WebSocket at ws://127.0.0.1:<SPORT>/api/ws.
+Contract (historis): tui_gateway/contracts/registry.py.
 """
 
 import asyncio
@@ -118,7 +124,7 @@ class GatewaySession:
 
 class HermesGatewayClient:
     """
-    WebSocket client for Hermes Gateway (TUI Gateway JSON-RPC).
+    WebSocket client for Hermes Gateway (JSON-RPC 2.0 over TCP ke `hermes serve`).
     
     Replaces runtime.py's subprocess-based hermes chat with persistent
     WebSocket connection. Handles:

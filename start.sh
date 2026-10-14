@@ -121,16 +121,33 @@ fi
 # Gateway WS lives in `hermes serve` (dynamic port, per-process token) — NOT port 37521.
 # Discover both so ANA brain connects instead of falling back to MOCK.
 # ponytail: single serve instance assumed — extend with profile match when multi-serve needed.
-if [ -z "${ANA_GATEWAY_URL:-}" ] || [ -z "${ANA_GATEWAY_TOKEN:-}" ]; then
-  SPID=$(ss -ltnp 2>/dev/null | grep '"hermes"' | sed 's/.*pid=\([0-9][0-9]*\).*/\1/' | head -1 || true)
-  if [ -n "${SPID:-}" ]; then
-    SPORT=$(ss -ltnp 2>/dev/null | grep "pid=$SPID" | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2 || true)
-    if [ -n "${SPORT:-}" ]; then
-      STOK=$(curl -s -m 3 "http://127.0.0.1:$SPORT/" 2>/dev/null | grep -oE '__HERMES_SESSION_TOKEN__="[^"]+"' | head -1 | cut -d'"' -f2 || true)
-      if [ -n "${STOK:-}" ]; then
-        export ANA_GATEWAY_URL="ws://127.0.0.1:$SPORT/api/ws"
-        export ANA_GATEWAY_TOKEN="$STOK"
+# Deteksi BERLAPIS (bukan nama proses saja): biner `hermes` maupun
+# `python3 -m hermes_cli.main ... serve` (comm=python3!) dikenali lewat
+# cmdline, lalu dipastikan via /api/health khas hermes. Tanpa ini instalasi
+# server (python3) luput dari regex '"hermes"' lama.
+_hermes_listen_ports() {
+  ss -ltnp 2>/dev/null | while IFS= read -r line; do
+    case "$line" in *127.0.0.1:*pid=*) ;; *) continue ;; esac
+    pid=$(printf '%s' "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+    port=$(printf '%s' "$line" | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2)
+    [ -n "$pid" ] && [ -n "$port" ] || continue
+    if printf '%s' "$line" | grep -q '"hermes"'; then
+      echo "$port"
+    elif tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qi hermes; then
+      # verifikasi perilaku agar tak salah menunjuk proses python lain
+      if curl -s -m 3 "http://127.0.0.1:$port/api/health" 2>/dev/null | grep -q 'displayVersion'; then
+        echo "$port"
       fi
+    fi
+  done
+}
+if [ -z "${ANA_GATEWAY_URL:-}" ] || [ -z "${ANA_GATEWAY_TOKEN:-}" ]; then
+  SPORT=$(_hermes_listen_ports | head -1 || true)
+  if [ -n "${SPORT:-}" ]; then
+    STOK=$(curl -s -m 3 "http://127.0.0.1:$SPORT/" 2>/dev/null | grep -oE '__HERMES_SESSION_TOKEN__="[^"]+"' | head -1 | cut -d'"' -f2 || true)
+    if [ -n "${STOK:-}" ]; then
+      export ANA_GATEWAY_URL="ws://127.0.0.1:$SPORT/api/ws"
+      export ANA_GATEWAY_TOKEN="$STOK"
     fi
   fi
 fi
