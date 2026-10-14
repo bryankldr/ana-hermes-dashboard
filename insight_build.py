@@ -342,15 +342,22 @@ def build():
     try:
         pw = run_logged("produksi_per_wilayah", tahun=y, bulan=m, periode=half,
                         level="kode_bkph")
-        rk = sorted(_rows(pw), key=lambda r: float(r.get("actual_kg") or 0),
-                    reverse=True)
+        # Aturan bisnis: terbaik = % capaian target TERTINGGI, bukan volume
+        # terbesar. None (tanpa target) = paling bawah. Seri = volume besar dulu.
+        def _rk_key(r):
+            p = r.get("achievement_pct")
+            return (-float(p) if p is not None else float("inf"),
+                    -(float(r.get("actual_kg") or 0)))
+        rk = sorted(_rows(pw), key=_rk_key)
         rank = [{"nama": r.get("nama_wilayah"),
                  "kg": float(r.get("actual_kg") or 0),
                  "pct": float(r.get("achievement_pct") or 0)
                  if r.get("achievement_pct") is not None else None}
                 for r in rk[:5] if r.get("nama_wilayah")]
         rank_all = [{"nama": r.get("nama_wilayah"),
-                     "kg": float(r.get("actual_kg") or 0)}
+                     "kg": float(r.get("actual_kg") or 0),
+                     "pct": float(r.get("achievement_pct") or 0)
+                     if r.get("achievement_pct") is not None else None}
                     for r in rk if r.get("nama_wilayah")]
     except Exception as e:
         log_lines.append(f"ranking SKIP {type(e).__name__}")
@@ -859,7 +866,26 @@ def build():
         for _bl, mp in per_bl.items():
             for k, v in mp.items():
                 totals[k] = totals.get(k, 0) + v
-        topk = sorted(totals, key=lambda k: totals[k], reverse=True)[:8]
+        # Aturan bisnis: KPH "teratas" = % capaian target tertinggi (level
+        # kode_kph dari template yang sama), bukan volume terbesar. Gagal
+        # hitung = fallback volume (jangan kosongkan strip).
+        try:
+            _pwk = run_logged("produksi_per_wilayah", tahun=y, bulan=m,
+                              periode=half, level="kode_kph")
+            _ak = {}
+            for _r in _rows(_pwk):
+                _p = _r.get("achievement_pct")
+                _ak[str(_r.get("kode_wilayah"))] = \
+                    float(_p) if _p is not None else None
+        except Exception as _e:
+            log_lines.append(f"kph-ach SKIP {type(_e).__name__}")
+            _ak = {}
+
+        def _kk(k):
+            _p = _ak.get(str(k))
+            return (-_p if _p is not None else float("inf"),
+                    -totals.get(k, 0))
+        topk = sorted(totals, key=_kk)[:8]
         rest = [k for k in totals if k not in topk]
         sers, sers_lb = [], []
         for k in topk:
