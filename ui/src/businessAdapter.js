@@ -188,11 +188,11 @@ export async function fetchWilayahOptions(tahun) {
   const pack = (data, source) => ({ data, source });
   const defaults = {
     tahun: [2026, 2025],
-    divre: [{value:'2', label:'2 — JAWA TIMUR'}],
-    kph: [{value:'31211', label:'31211 — BANYUWANGI BARAT', kode_divre: '2'}],
-    bkph: ['3121101','3121102','3121103','3121104','3121105'].map(v=>({value:v,label:v, kode_kph: '31211'})),
-    rph: ['312110101','312110102','312110201','312110202','312110301','312110302','312110401','312110402','312110403','312110501','312110502'].map(v=>({value:v,label:v, kode_bkph: v.slice(0,8)})),
-    tpg: ['31211050101','31211050201','31211040101','31211040106','31211040107','31211040302','31211040301'].map(v=>({value:v,label:v, kode_rph: v.slice(0,10), kode_bkph: v.slice(0,8)})),
+    divre: [{value:'2', label:'JAWA TIMUR'}],
+    kph: [{value:'31211', label:'BANYUWANGI BARAT', kode_divre: '2'}],
+    bkph: [['3121101','LICIN'],['3121102','ROGOJAMPI'],['3121103','KALISETAIL'],['3121104','GLENMORE'],['3121105','KALIBARU']].map(([v,n])=>({value:v,label:n, kode_kph: '31211'})),
+    rph: [['312110101','SUKO'],['312110102','LICIN'],['312110201','SROYO'],['312110202','BAYU'],['312110301','SIDOMULYO'],['312110302','PURWODADI'],['312110401','SUMBERMANGGIS'],['312110402','GUNUNGSARI'],['312110403','WONOASIH'],['312110501','KALIBARU MANIS'],['312110502','KRIKILAN']].map(([v,n])=>({value:v,label:n, kode_bkph: v.slice(0,7)})),
+    tpg: ['31211050101','31211050201','31211040101','31211040106','31211040107','31211040302','31211040301'].map(v=>({value:v,label:v, kode_rph: v.slice(0,9), kode_bkph: v.slice(0,7)})),
   };
   try {
     const res = await fetch('/api/simoge/query', {
@@ -216,23 +216,23 @@ export async function fetchWilayahOptions(tahun) {
       const _divByName = _byName(r0.divre, 'divre', 'kode_divre');
       const _resDiv = (nm) => _divByName[String(nm || '').trim().toUpperCase()] || '';
       if (Array.isArray(r0.divre) && r0.divre.length) {
-        defaults.divre = r0.divre.map(o => ({ value: String(o.kode_divre), label: String(o.kode_divre) + ' — ' + (o.divre||'') }));
+        defaults.divre = r0.divre.map(o => ({ value: String(o.kode_divre), label: (o.divre||'') ? String(o.divre) : String(o.kode_divre) }));
       }
       let _kphByName = {};
       if (Array.isArray(r0.kph) && r0.kph.length) {
-        defaults.kph = r0.kph.map(o => ({ value: String(o.kode_kph), label: String(o.kode_kph) + ' — ' + (o.kph||''), kode_divre: _resDiv(o.divre) }));
+        defaults.kph = r0.kph.map(o => ({ value: String(o.kode_kph), label: (o.kph||'') ? String(o.kph) : String(o.kode_kph), kode_divre: _resDiv(o.divre) }));
         _kphByName = _byName(defaults.kph.map((k, i) => ({ nm: r0.kph[i]?.kph, kode_kph: k.value })), 'nm', 'kode_kph');
       }
       const _resKph = (nm) => _kphByName[String(nm || '').trim().toUpperCase()] || '';
       let _bkphByName = {};
       if (Array.isArray(r0.bkph) && r0.bkph.length) {
-        defaults.bkph = r0.bkph.map(o => ({ value: String(o.kode_bkph), label: String(o.kode_bkph) + ' — ' + (o.bkph||''), kode_kph: _resKph(o.kph) }));
+        defaults.bkph = r0.bkph.map(o => ({ value: String(o.kode_bkph), label: (o.bkph||'') ? String(o.bkph) : String(o.kode_bkph), kode_kph: _resKph(o.kph) }));
         _bkphByName = _byName(defaults.bkph.map((k, i) => ({ nm: r0.bkph[i]?.bkph, kode_bkph: k.value })), 'nm', 'kode_bkph');
       }
       const _resBkph = (nm) => _bkphByName[String(nm || '').trim().toUpperCase()] || '';
       let _rphByName = {};
       if (Array.isArray(r0.rph) && r0.rph.length) {
-        defaults.rph = r0.rph.map(o => ({ value: String(o.kode_rph), label: String(o.kode_rph) + ' — ' + (o.rph||''), kode_bkph: _resBkph(o.bkph) }));
+        defaults.rph = r0.rph.map(o => ({ value: String(o.kode_rph), label: (o.rph||'') ? String(o.rph) : String(o.kode_rph), kode_bkph: _resBkph(o.bkph) }));
         _rphByName = _byName(defaults.rph.map((k, i) => ({ nm: r0.rph[i]?.rph, kode_rph: k.value })), 'nm', 'kode_rph');
       }
       const _resRph = (nm) => _rphByName[String(nm || '').trim().toUpperCase()] || '';

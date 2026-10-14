@@ -1348,6 +1348,7 @@ function updateLegend(biz, kat) {
     }
     const eff = _effScope(scope, cur);
     // bangun ulang opsi per level (batch innerHTML — responsif)
+    const _optCount = {};
     for (const L of _WLEVELS) {
       const sel = SEL[L];
       if (!sel) continue;
@@ -1382,6 +1383,7 @@ function updateLegend(biz, kat) {
       cur[L] = keep;
       let html = '<option value="">Semua</option>';
       for (const o of list) html += '<option value="' + esc(String(o.value)) + '">' + esc(o.label || String(o.value)) + '</option>';
+      _optCount[L] = list.length;
       sel.innerHTML = html;
       sel.value = keep;
       // Select yang dipaksa scope = disabled (tak bisa diubah user).
@@ -1392,8 +1394,23 @@ function updateLegend(biz, kat) {
         sel.title = pinned ? ('Wilayah login — ' + keep) : '';
       } catch (_) {}
     }
+    // Mis-scope terdeteksi: scope login aktif tapi SEMUA menu anak kosong =
+    // kode user tak cocok data apa pun (bukan bug cascade). Tampilkan jujur
+    // agar admin betulkan penugasan, bukan dikira menu rusak.
+    try {
+      const _scoped = !!(scope.divre || scope.kph || scope.bkph || scope.rph || (scope.tpgList && scope.tpgList.length));
+      const _kidsEmpty = ['kph', 'bkph', 'rph', 'tpg'].every(function(L) { return !(_optCount[L] > 0); });
+      if (_scoped && _kidsEmpty) {
+        const _lbl = scope.kph || scope.divre || scope.bkph || scope.rph || (scope.tpgList || []).join(',');
+        _wilScopeMsg = 'Cakupan login (' + _lbl + ') tak cocok data mana pun — hubungi admin';
+        _setWilStatus('scope', _wilScopeMsg);
+        return;
+      }
+      _wilScopeMsg = '';
+    } catch (_) {}
   }
   let _cascadeAttached = false;
+  let _wilScopeMsg = '';
   function _attachWilayahCascade() {
     if (_cascadeAttached) return;
     _cascadeAttached = true;
@@ -1455,7 +1472,9 @@ function updateLegend(biz, kat) {
     _wilayahCache = opts;
     _buildWIdx();
     renderWilayah();
-    _setWilStatus(src);
+    // Pesan mis-scope (bila ada) menang atas status sumber.
+    if (_wilScopeMsg) _setWilStatus('scope', _wilScopeMsg);
+    else _setWilStatus(src);
     try {
       const st = collectState();
       setBusiness(st.business);
@@ -1463,16 +1482,22 @@ function updateLegend(biz, kat) {
     } catch (_) {}
   }
   // Status sumber opsi wilayah: hanya tampil bila BUKAN dari API (cache 24 jam
-  // per user / fallback bawaan terbatas). Klik = coba muat ulang dari server.
-  function _setWilStatus(src) {
+  // per user / fallback bawaan terbatas / mis-scope), atau pesan override.
+  // Klik = coba muat ulang dari server.
+  function _setWilStatus(src, msg) {
     try {
       const box = el.querySelector('#spatialWilStatus');
       if (!box) return;
-      if (!src || src === 'api') { box.hidden = true; box.textContent = ''; return; }
-      box.hidden = false;
-      box.textContent = src === 'cache'
-        ? 'Wilayah: data tersimpan (server tak terjangkau) — klik untuk coba lagi'
-        : 'Wilayah: daftar bawaan terbatas — klik untuk muat dari server';
+      if (msg) {
+        box.hidden = false;
+        box.textContent = msg;
+      } else if (!src || src === 'api') { box.hidden = true; box.textContent = ''; return; }
+      else {
+        box.hidden = false;
+        box.textContent = src === 'cache'
+          ? 'Wilayah: data tersimpan (server tak terjangkau) — klik untuk coba lagi'
+          : 'Wilayah: daftar bawaan terbatas — klik untuk muat dari server';
+      }
       if (!box._bound) {
         box._bound = true;
         box.addEventListener('click', function() {
