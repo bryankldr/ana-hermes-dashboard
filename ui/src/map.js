@@ -1367,6 +1367,8 @@ function updateLegend(biz, kat) {
   }
   map.on('moveend', _pushViewport);
   map.on('zoomend', _pushViewport);
+  map.on('moveend', _scheduleDeclutter);
+  map.on('zoomend', _scheduleDeclutter);
   // Kunci viewport awal = posisi boot: moveend/zoomend dari setup
   // (invalidateSize, fit pertama) tidak dianggap gerakan user sehingga tak
   // memicu reload viewport balapan dengan kick awal (sumber hitungan
@@ -1804,6 +1806,44 @@ function updateLegend(biz, kat) {
     try { clearTimeout(_labelTimer); } catch (_) {}
     _labelTimer = setTimeout(function() { try { _refreshLabels(); } catch (_) {} }, 600);
   }
+  // Declutter: label bertumpuk (centroid BKPH/RPH/TPG berdekatan) —
+  // prioritas BKPH > RPH > TPG; yang kalah disembunyikan (tetap ada).
+  // Hitung ulang tiap peta berhenti bergerak (tanpa reload data).
+  let _declutterTimer = null;
+  const _LABEL_PR = { kph: 0, bkph: 1, rph: 2, tpg: 3 };
+  function _scheduleDeclutter() {
+    try { clearTimeout(_declutterTimer); } catch (_) {}
+    _declutterTimer = setTimeout(function() { try { _declutterLabels(); } catch (_) {} }, 300);
+  }
+  function _declutterLabels() {
+    try {
+      const items = [];
+      for (const L of ['kph', 'bkph', 'rph', 'tpg']) {
+        const g = _labelGroups && _labelGroups[L];
+        if (!g || !map.hasLayer(g)) continue;
+        g.eachLayer(function(mk) {
+          try {
+            const ll = mk.getLatLng && mk.getLatLng();
+            if (!ll) return;
+            const pt = map.latLngToContainerPoint(ll);
+            const el = mk.getElement && mk.getElement();
+            const w = el ? (el.offsetWidth || 60) : 60;
+            items.push({ mk, el, pr: (_LABEL_PR[L] ?? 9), x0: pt.x - w / 2 - 4, x1: pt.x + w / 2 + 4, y0: pt.y - 9, y1: pt.y + 9 });
+          } catch (_) {}
+        });
+      }
+      items.sort((a, b) => a.pr - b.pr);
+      const kept = [];
+      for (const it of items) {
+        let clash = false;
+        for (const k of kept) {
+          if (it.x0 < k.x1 && it.x1 > k.x0 && it.y0 < k.y1 && it.y1 > k.y0) { clash = true; break; }
+        }
+        if (!clash) kept.push(it);
+        try { if (it.el) it.el.style.display = clash ? 'none' : ''; } catch (_) {}
+      }
+    } catch (_) {}
+  }
   async function _refreshLabels() {
     try {
       const groups = _ensureLabelGroups();
@@ -1833,6 +1873,7 @@ function updateLegend(biz, kat) {
         _buildLabelLevel(L, rows);
       }
     } catch (_) {}
+    _scheduleDeclutter(); // rapikan tumpukan setelah bangun ulang
   }
   function _buildLabelLevel(L, rows) {
     try {
