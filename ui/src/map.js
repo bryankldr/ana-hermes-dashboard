@@ -521,7 +521,10 @@ function updateLegend(biz, kat) {
         const v = f[k];
         keep[k] = (v == null) ? '' : String(v);
       }
-      localStorage.setItem(_PANEL_KEY, JSON.stringify({ business: (st && st.business) || 'petak', filters: keep, at: Date.now() }));
+      const snap = { business: (st && st.business) || 'petak', filters: keep, at: Date.now() };
+      localStorage.setItem(_PANEL_KEY, JSON.stringify(snap));
+      try { window.__spatialPersist = { ...(window.__spatialPersist || {}), saved: snap }; } catch (_) {}
+      try { console.info('[spatial-persist] save', snap.business, JSON.stringify(keep)); } catch (_) {}
     } catch (_) {}
   }
   function _readPanelState() {
@@ -546,6 +549,8 @@ function updateLegend(biz, kat) {
   }
   function _restorePanelState() {
     const s = _readPanelState();
+    try { window.__spatialPersist = { ...(window.__spatialPersist || {}), bootRead: s ? { business: s.business, filters: s.filters } : null }; } catch (_) {}
+    try { console.info('[spatial-persist] boot read', s ? (s.business + ' ' + JSON.stringify(s.filters)) : '(kosong)'); } catch (_) {}
     if (!s) return;
     try {
       const f = s.filters || {};
@@ -1596,6 +1601,7 @@ function updateLegend(biz, kat) {
           renderWilayah();
           try { const st = collectState(); setFilters(st.filters); } catch (_) {}
           renderChips();
+          try { console.info('[spatial-persist] wilayah pulih', JSON.stringify(pw)); } catch (_) {}
           if (_autoKicked) scheduleReload();
         }
       } catch (_) {}
