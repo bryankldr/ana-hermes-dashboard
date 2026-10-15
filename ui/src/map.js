@@ -354,10 +354,10 @@ export function initMapPanel({ log = () => {} } = {}) {
     onEvent: (type, data) => {
       if (type === 'MAP_MOVED') log('map', 'MAP', 'view ' + data.lat + ',' + data.lng + ' z' + data.zoom);
       else if (type === 'MAP_FEATURE_SELECTED' && data.id) log('map', 'MAP', 'petak ' + data.id);
-      else if (type === 'MAP_LAYER_CHANGED') log('map', 'MAP', 'layer ' + data.id + ' ' + (data.visible ? 'on' : 'off'));
+      else if (type === 'MAP_LAYER_CHANGED') { log('map', 'MAP', 'layer ' + data.id + ' ' + (data.visible ? 'on' : 'off')); try { _savePanelStateGated({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {} }
       else if (type === 'MAP_FILTER_CHANGED') log('map', 'MAP', 'filter ' + (data.query || '-') + ' (' + data.shown + ')');
       else if (type === 'MAP_HIGHLIGHT_CHANGED') log('map', 'MAP', 'highlight ' + data.ids.length);
-      else if (type === 'MAP_STYLE_CHANGED') log('map', 'MAP', 'basemap ' + _ctl?.get_state().basemap);
+      else if (type === 'MAP_STYLE_CHANGED') { log('map', 'MAP', 'basemap ' + _ctl?.get_state().basemap); try { _savePanelStateGated({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {} }
       else if (type === 'MAP_FEATURES_LOADED') {
         if (metric) metric.textContent = data.added + ' baru \u00b7 ' + data.total + ' total' + (stat ? ' \u00b7 ' + stat.textContent : '');
         try { const s=getSpatialState(); updateLegend(s.business, s.filters?.kategori); } catch (_) {}
@@ -385,6 +385,9 @@ export function initMapPanel({ log = () => {} } = {}) {
   _ctl.registerBase('Satelit', satGroup, true);
   _ctl.registerBase('Gelap', dark, false);
   _ctl.registerLayer('Petak', petakLayer, true);
+  // Label didaftarkan agar visibilitasnya terlacak state _ctl (persistensi
+  // + sinkron kontrol native). Flag awal = kenyataan di peta.
+  try { _ctl.registerLayer('Label', refLbl, map.hasLayer(refLbl)); } catch (_) {}
   try { window.__anaMap = _ctl; } catch (_) {}
   let _rsz = 0;
   new ResizeObserver(() => {
@@ -531,19 +534,37 @@ function updateLegend(biz, kat) {
         snap.filters.bounds = [+bb.getWest().toFixed(6), +bb.getSouth().toFixed(6), +bb.getEast().toFixed(6), +bb.getNorth().toFixed(6)];
         snap.filters.zoom = map.getZoom();
       } catch (_) {}
+      // Visibilitas layer = pilihan user via kontrol layer (basemap Satelit/
+      // Gelap + overlay Petak/Label). Tier PMTiles-vs-GeoJSON mengikuti zoom
+      // (otomatis, tak disimpan). Pin aktivitas mengikuti bisnis+tier.
+      try {
+        const _ly = { base: null, overlays: {} };
+        try { _ly.base = _ctl?.get_state?.()?.basemap || null; } catch (_) {}
+        try {
+          for (const o of (_ctl?.get_layers?.() || [])) {
+            if (o && o.id != null) _ly.overlays[String(o.id)] = !!o.visible;
+          }
+        } catch (_) {}
+        try { _ly.overlays.Label = map.hasLayer(refLbl); } catch (_) {}
+        snap.filters.layers = _ly;
+      } catch (_) {}
       localStorage.setItem(_PANEL_KEY, JSON.stringify(snap));
       try { window.__spatialPersist = { ...(window.__spatialPersist || {}), saved: snap }; } catch (_) {}
       try { console.info('[spatial-persist] save', snap.business, JSON.stringify(keep)); } catch (_) {}
     } catch (_) {}
   }
   function _savePanelStateGated(st) {
-    // Simpan bila kunci filter ATAU posisi peta berubah: pan/zoom murni ikut
-    // tersimpan (fokus menetap), tapi tab yang tak bergerak tak menimpa
-    // simpanan tab lain (anti-clobber).
+    // Simpan bila kunci filter, posisi peta, ATAU visibilitas layer berubah.
+    // Tab yang tak bergerak tak menimpa simpanan tab lain (anti-clobber).
     try {
       let vk = '';
       try { vk = '|vp:' + map.getBounds().toBBoxString() + 'z' + map.getZoom(); } catch (_) {}
-      const k = _filtKey(st) + vk;
+      let lk = '';
+      try {
+        const _ls = _ctl?.get_state?.();
+        lk = '|ly:' + (_ls?.basemap || '') + ':' + (_ctl?.get_layers?.() || []).map(function(o){ return o.id + '=' + (o.visible ? 1 : 0); }).join(',');
+      } catch (_) {}
+      const k = _filtKey(st) + vk + lk;
       if (k === _lastSavedFilt) return false;
       _lastSavedFilt = k;
       _savePanelState(st);
@@ -603,6 +624,32 @@ function updateLegend(biz, kat) {
           map.setView([(b[1] + b[3]) / 2, (b[0] + b[2]) / 2], Math.max(0, Math.min(18, z)));
           _vpRestored = true; // fit otomatis pertama dilewati (hormati fokus ini)
           try { console.info('[spatial-persist] viewport pulih z' + z); } catch (_) {}
+        }
+      } catch (_) {}
+      // Visibilitas layer: basemap + overlay sesuai simpanan. Dijaga tier
+      // (set_layer_visibility menolak pin di z<12) dan status Esri.
+      try {
+        const L = f.layers;
+        if (L && typeof L === 'object') {
+          if (L.base && _ctl && typeof _ctl.set_basemap === 'function') {
+            try {
+              const cur = _ctl.get_state?.()?.basemap;
+              if (cur !== String(L.base)) _ctl.set_basemap(String(L.base));
+            } catch (_) {}
+          }
+          const ov = (L.overlays && typeof L.overlays === 'object') ? L.overlays : {};
+          for (const id of Object.keys(ov)) {
+            try {
+              if (id === 'Label') {
+                if (esriRemembered === '0' && ov[id]) continue; // Esri diblokir: jangan paksa label
+                if (ov[id]) { if (!map.hasLayer(refLbl)) refLbl.addTo(map); }
+                else if (map.hasLayer(refLbl)) map.removeLayer(refLbl);
+              } else if (_ctl && typeof _ctl.set_layer_visibility === 'function') {
+                _ctl.set_layer_visibility(id, !!ov[id]);
+              }
+            } catch (_) {}
+          }
+          try { console.info('[spatial-persist] layer pulih', JSON.stringify(L)); } catch (_) {}
         }
       } catch (_) {}
       updateHead(); renderChips();
@@ -1176,6 +1223,13 @@ function updateLegend(biz, kat) {
     _spatialWarna = ''; _spatialTemplate = null; // reset manual = buang semua titipan ANA
     try { localStorage.removeItem('ana_spatial_panel_v1'); } catch (_) {} // refresh mulai dari default lagi
     try { map.setView(CENTER, 11); } catch (_) {} // reset manual = fokus awal juga
+    try { // reset manual = layer awal juga (basemap bila Esri ok, overlay nyala)
+      if (typeof esriRemembered === 'undefined' || esriRemembered !== '0') {
+        try { _ctl?.set_basemap?.('Satelit'); } catch (_) {}
+        try { if (!map.hasLayer(refLbl)) refLbl.addTo(map); } catch (_) {}
+      }
+      try { _ctl?.set_layer_visibility?.('Petak', true); } catch (_) {}
+    } catch (_) {}
     syncKatVisibility(); updateLegend('petak','semua'); updateHead(); renderChips(); reloadBusiness();
   });
   btnRefresh?.addEventListener('click', reloadBusiness);
@@ -1273,6 +1327,31 @@ function updateLegend(biz, kat) {
   }
   map.on('moveend', _pushViewport);
   map.on('zoomend', _pushViewport);
+  // Kontrol layer bawaan Leaflet mengutak-atik layer langsung (bypass state
+  // _ctl): selaraskan state lewat API idempoten (tanpa efek ganda) agar
+  // visibilitas ikut tersimpan via MAP_LAYER_CHANGED/MAP_STYLE_CHANGED.
+  map.on('overlayadd overlayremove', function(e) {
+    try {
+      const l = e && e.layer;
+      const id = (l === petakLayer) ? 'Petak' : ((l === refLbl) ? 'Label' : null);
+      if (!id || !_ctl || typeof _ctl.set_layer_visibility !== 'function') return;
+      const want = (e.type === 'overlayadd');
+      try {
+        const cur = (_ctl.get_layers() || []).find(function(o){ return String(o.id) === id; });
+        if (cur && !!cur.visible === want) return;
+      } catch (_) {}
+      try { _ctl.set_layer_visibility(id, want); } catch (_) {}
+    } catch (_) {}
+  });
+  map.on('baselayerchange', function(e) {
+    try {
+      const l = e && e.layer;
+      const id = (l === satGroup) ? 'Satelit' : ((l === darkGroup) ? 'Gelap' : null);
+      if (!id || !_ctl || typeof _ctl.set_basemap !== 'function') return;
+      try { if (_ctl.get_state && _ctl.get_state().basemap === id) return; } catch (_) {}
+      try { _ctl.set_basemap(id); } catch (_) {}
+    } catch (_) {}
+  });
 
   // P2-3 hybrid tier — aturan zoom user 2026-10-04:
   // Z<=11 polygon saja (PMTiles, tanpa analisa/pin); Z>=12 analisa + pin tampil (GeoJSON).
