@@ -109,7 +109,8 @@ async function generateTfa(){
 
 async function handlePostLogin(user){
   // user is sanitized profile from /api/auth/me or login response
-  if(user && user.tfa_enabled === false){
+  // Bila 2FA dimatikan via env (tfa_enforced=false), enroll dilewati.
+  if(user && user.tfa_enabled === false && user.tfa_enforced !== false){
     // force enrollment
     const data = await generateTfa();
     if(data) enterEnrollMode(data);
@@ -217,7 +218,7 @@ btnVerify?.addEventListener('click', async ()=>{
     }
     const j = await r.json();
     if(!j.user) return;
-    if(j.user.tfa_enabled === false){
+    if(j.user.tfa_enabled === false && j.user.tfa_enforced !== false){
       // force setup even though already logged in
       emailEl.value = j.user.email || emailEl.value;
       // need password to generate — ask user

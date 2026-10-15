@@ -299,6 +299,38 @@ def _scope_code(val, key):
         return ""
 
 
+_TFA_OFF_WARNED = {"done": False}
+
+
+def _tfa_enforced():
+    """Apakah OTP 2FA diwajibkan saat login. Default YA (perilaku lama).
+
+    Dibaca dari file .env TIAP request (tanpa restart — pola ANA_DB_SOURCE):
+    ANA_2FA_ENABLED=0/false/no/off = mati (password saja lolos, UI lewati enroll).
+    Legacy ANA_TFA_BYPASS=1 = sama (kompat). JANGAN mati di produksi."""
+    try:
+        try:
+            env = db_source._read_env()
+        except Exception:
+            env = {}
+        v = str(env.get("ANA_2FA_ENABLED", os.environ.get("ANA_2FA_ENABLED", "1")) or "1").strip().lower()
+        if v in ("0", "false", "no", "off", "disable", "disabled"):
+            off, why = True, "ANA_2FA_ENABLED=0"
+        elif str(env.get("ANA_TFA_BYPASS", os.environ.get("ANA_TFA_BYPASS", "")) or "").strip().lower() in ("1", "true", "yes", "on"):
+            off, why = True, "ANA_TFA_BYPASS=1 (legacy)"
+        else:
+            return True
+        if not _TFA_OFF_WARNED["done"]:
+            _TFA_OFF_WARNED["done"] = True
+            try:
+                _alog(f"auth 2FA NONAKTIF via {why} — login password saja! JANGAN di produksi.", "warn")
+            except Exception:
+                pass
+        return False
+    except Exception:
+        return True
+
+
 def _wilayah_scope_from_session(handler):
     """Scope wilayah user login dari cookie sesi. {} = tak ada sesi
     (pemanggil token-only seperti ANA system — sengaja tanpa scope).
@@ -2571,7 +2603,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "database tidak terjangkau (tunnel DB mati?)", "authenticated": False}, 503)
             if not prof:
                 return self._json({"error": "profil tidak tersedia"}, 500)
-            return self._json({"ok": True, "authenticated": True, "user": auth_local.sanitize_profile_for_client(prof), "session": {"created": sess.get("created"), "last_seen": sess.get("last_seen")}} )
+            _me_safe = auth_local.sanitize_profile_for_client(prof)
+            try:
+                _me_safe["tfa_enforced"] = bool(_tfa_enforced())
+            except Exception:
+                pass
+            return self._json({"ok": True, "authenticated": True, "user": _me_safe, "session": {"created": sess.get("created"), "last_seen": sess.get("last_seen")}} )
         if p == "/api/token-status":
             return self._json({"boot": BOOT_ID})
         if p == "/api/landing/insight":
@@ -3168,13 +3205,10 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 is_2fa = bool(prof.get("tfa_secret"))
             secret = (prof.get("2fa_secret") or "").strip() if isinstance(prof.get("2fa_secret"), str) else ""
-            # Bypass 2FA uji coba: ANA_TFA_BYPASS=1 lewati gate OTP (password
-            # tetap wajib). Reversibel: unset + restart. JANGAN di produksi.
-            _tfa_bypass = (os.environ.get("ANA_TFA_BYPASS", "").strip().lower()
-                           in ("1", "true", "yes", "on"))
-            if _tfa_bypass and is_2fa:
-                _alog(f"auth login TFA-BYPASS aktif email={email[:32]} ip={ip}", "warn")
-            if is_2fa and not _tfa_bypass:
+            # Saklar 2FA via env (ANA_2FA_ENABLED): 0 = OTP tak pernah diminta,
+            # password saja lolos + UI lewati enroll. Default 1 = perilaku lama.
+            _tfa_on = _tfa_enforced()
+            if is_2fa and _tfa_on:
                 if not otp:
                     _alog(f"auth login 401 otp_required email={email[:32]} ip={ip}", "warn")
                     return self._json({"error": "otp_required", "message": "kode 2FA diperlukan"}, 401)
@@ -3203,7 +3237,12 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             _alog(f"auth login 200 ok email={email[:32]} ip={ip} evicted={bool(evicted)}", "info")
             safe = auth_local.sanitize_profile_for_client(prof)
+            try:
+                safe["tfa_enforced"] = bool(_tfa_on)
+            except Exception:
+                pass
             body_out = json.dumps({"ok": True, "user": safe, "evicted": bool(evicted),
+                                   "tfa_enforced": bool(_tfa_on),
                                    "evict": evict_info or {}}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

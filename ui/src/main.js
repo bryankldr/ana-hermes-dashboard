@@ -1898,8 +1898,8 @@ async function init() {
       // next to Reset — see injectLogoutBtn() in the topControls block below)
       const tc = document.getElementById('topControls');
       if (tc) {
-        // 2FA badge
-        if (!_auth.user.tfa_enabled) {
+        // 2FA badge (sembunyikan bila 2FA dimatikan via env)
+        if (!_auth.user.tfa_enabled && _auth.user.tfa_enforced !== false) {
           const t = document.createElement('a');
           t.textContent='🛡'; t.title='Aktifkan 2FA'; t.href='#'; t.style.cssText='font-size:14px;width:38px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--amber);border-radius:2px;color:var(--amber);text-decoration:none';
           t.onclick=(e)=>{ e.preventDefault(); location.href='/login.html#tfa'; };
