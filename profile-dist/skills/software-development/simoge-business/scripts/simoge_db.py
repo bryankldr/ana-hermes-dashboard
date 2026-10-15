@@ -563,11 +563,11 @@ def rkap_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
                CASE
                    WHEN p.target_rkap * %s / 100 = 0 THEN NULL
                    WHEN 100 * COALESCE(r.realisasi, 0) /
-                        (p.target_rkap * %s / 100) < 25 THEN 'merah'
+                        (p.target_rkap * %s / 100) <= 25 THEN 'merah'
                    WHEN 100 * COALESCE(r.realisasi, 0) /
-                        (p.target_rkap * %s / 100) < 50 THEN 'oranye'
+                        (p.target_rkap * %s / 100) <= 50 THEN 'oranye'
                    WHEN 100 * COALESCE(r.realisasi, 0) /
-                        (p.target_rkap * %s / 100) < 75 THEN 'kuning'
+                        (p.target_rkap * %s / 100) <= 75 THEN 'kuning'
                    WHEN 100 * COALESCE(r.realisasi, 0) /
                         (p.target_rkap * %s / 100) <= 100 THEN 'hijau'
                    ELSE 'emas'
@@ -1043,11 +1043,11 @@ def rkap_achievement(tahun, bulan, periode, upto_bulan=None, upto_periode=None, 
                CASE
                    WHEN p.target_rkap * ({target_expr}) = 0 THEN NULL
                    WHEN 100 * COALESCE(r.realisasi, 0) /
-                        (p.target_rkap * ({target_expr}) / 100) < 25 THEN 'merah'
+                        (p.target_rkap * ({target_expr}) / 100) <= 25 THEN 'merah'
                    WHEN 100 * COALESCE(r.realisasi, 0) /
-                        (p.target_rkap * ({target_expr}) / 100) < 50 THEN 'oranye'
+                        (p.target_rkap * ({target_expr}) / 100) <= 50 THEN 'oranye'
                    WHEN 100 * COALESCE(r.realisasi, 0) /
-                        (p.target_rkap * ({target_expr}) / 100) < 75 THEN 'kuning'
+                        (p.target_rkap * ({target_expr}) / 100) <= 75 THEN 'kuning'
                    WHEN 100 * COALESCE(r.realisasi, 0) /
                         (p.target_rkap * ({target_expr}) / 100) <= 100 THEN 'hijau'
                    ELSE 'emas'

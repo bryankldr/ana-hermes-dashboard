@@ -6,7 +6,7 @@ import { esc } from './utils/helpers.js';
 import { bus, state as busState } from './core/bus.js';
 import { createLeafletControl } from './mapControl.js';
 import {
-  BUSINESS_OPTIONS, PETAK_LAYER_OPTIONS,
+  BUSINESS_OPTIONS, katOptionsFor,
   getSpatialState, setBusiness, setFilters, setDataset, setMetrics, subscribeSpatial
 } from './spatialMapState.js';
 import { loadBusinessData, fetchWilayahOptions, fetchAktivitasPoints, resolveTemplate } from './businessAdapter.js';
@@ -144,7 +144,7 @@ export function initMapPanel({ log = () => {} } = {}) {
     if (ex) { return ex; }
   }
   const bizOpts = _opts(BUSINESS_OPTIONS, 'petak');
-  const katOpts = _opts(PETAK_LAYER_OPTIONS, 'semua');
+  const katOpts = _opts(katOptionsFor('petak'), 'semua');
   const d0 = new Date();
   const curPer = d0.getDate() <= 15 ? '1' : '2';
   const el = ensurePanel({
@@ -214,7 +214,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <div class="kpi"><div class="kpi-label">Total</div><div class="kpi-value" id="kpiTotal">-</div><div class="kpi-sub" id="kpiTotalSub">memuat</div></div>'
       + '      <div class="kpi"><div class="kpi-label" id="kpi2Label">Bongkor</div><div class="kpi-value warn" id="kpi2">-</div><div class="kpi-sub" id="kpi2Sub">merah</div></div>'
       + '      <div class="kpi"><div class="kpi-label" id="kpi3Label">Perhatian</div><div class="kpi-value mid" id="kpi3">-</div><div class="kpi-sub" id="kpi3Sub">kuning/oranye</div></div>'
-      + '      <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/emas</div></div>'
+      + '      <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/biru</div></div>'
       + '    </div>'
       + '    <div id="spatialInsight" class="spatial-insight flying"></div>'
       + '    <button id="legendToggle" class="spatial-toggle-btn legend-toggle" title="Legenda" aria-label="Legenda">ⓘ</button>'
@@ -430,8 +430,23 @@ export function initMapPanel({ log = () => {} } = {}) {
     return y + '-' + m + '-P' + p;
   }
   function syncKatVisibility() {
+    // Cascade bisnis → kategori: bangun ulang opsi katSel per bisnis.
+    // Pilihan dipertahankan bila valid di bisnis baru, else reset 'semua'.
+    // Slug asing (mis. dari ANA: tanpa_penyadap/multi_penyadap/ringkasan)
+    // ditambahkan sementara agar spatial_set tak kehilangan state.
     const b = bizSel?.value || 'petak';
-    if (katSel) katSel.style.display = (b === 'petak' || b === 'aktivitas') ? '' : 'none';
+    if (!katSel) return;
+    try {
+      const opts = katOptionsFor(b);
+      const cur = katSel.value || 'semua';
+      katSel.innerHTML = opts.map(function(o){ return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>'; }).join('');
+      if (opts.some(function(o){ return o.value === cur; })) katSel.value = cur;
+      else if (cur !== '' && cur !== 'semua') {
+        const o = document.createElement('option'); o.value = cur; o.textContent = cur;
+        katSel.appendChild(o); katSel.value = cur;
+      } else katSel.value = 'semua';
+      katSel.style.display = '';
+    } catch (_) {}
   }
   syncKatVisibility();
 
@@ -461,14 +476,14 @@ function updateLegend(biz, kat) {
       // diperjelas: merah tanpa penyadap, kuning luas_andil<luas_baku, hijau >=
       legend.innerHTML = '<span class="lg" title="tidak ada penyadap"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="luas_andil < luas_baku"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg" title="luas_andil >= luas_baku"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span>' + _legendAttrib();
     } else if (biz === 'produksi') {
-      legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> 0-25%</span><span class="lg"><i style="background:#F97316"></i> 26-50%</span><span class="lg"><i style="background:#EAB308"></i> 51-75%</span><span class="lg"><i style="background:#22C55E"></i> 76-100%</span><span class="lg"><i style="background:#FFD700"></i> &gt;100%</span>' + _legendAttrib();
+      legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> 0-25%</span><span class="lg"><i style="background:#F97316"></i> 26-50%</span><span class="lg"><i style="background:#EAB308"></i> 51-75%</span><span class="lg"><i style="background:#22C55E"></i> 76-100%</span><span class="lg"><i style="background:#3B82F6"></i> &gt;100%</span>' + _legendAttrib();
     } else if (biz === 'aktivitas' && k === 'idle') {
       legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Aktif (hijau)</span><span class="lg" title="pin + garis dashed ke pusat petak"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1 cyan/2 oranye/3 merah</span>' + _legendAttrib();
     } else if (biz === 'aktivitas') {
       // diperjelas: merah bongkor (tanpa penyadap / >2bln tanpa aktivitas), kuning idle (ada penyadap + aktivitas 2bln, tapi 0 di periode ini), hijau aktif (cur>0)
       legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg" title="ada aktivitas periode berjalan"><i style="background:#22C55E"></i> Aktif (hijau)</span><span class="lg" title="pin aktivitas + garis dashed ke pusat petak via kode_evapot; GPS bisa melenceng"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1/2/3 ● foto — garis ke petak</span>' + _legendAttrib();
     } else if (biz === 'matriks' || biz === 'matrik') {
-      legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg"><i style="background:#F97316"></i> Kurang & cap<50% (oranye)</span><span class="lg"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span><span class="lg"><i style="background:#FFD700"></i> &gt;100% (emas)</span>' + _legendAttrib();
+      legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg"><i style="background:#F97316"></i> Kurang & cap<50% (oranye)</span><span class="lg"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span><span class="lg"><i style="background:#3B82F6"></i> &gt;100% (biru)</span>' + _legendAttrib();
     } else {
       legend.innerHTML = '<span class="lg"><i style="background:#2DF2FF"></i> Matriks</span>' + _legendAttrib();
     }

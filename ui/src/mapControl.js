@@ -359,13 +359,13 @@ export class LeafletAdapter {
 
   // ── business color mapping (kontek_bisnis.md) ──
   // efektivitas: merah=bongkor(no penyadap), kuning=luas_andil<luas_baku, hijau=terpenuhi
-  // rkap: merah 0-25, oranye 26-50, kuning 51-75, hijau 76-100, emas >100
+  // rkap: merah ≤25, oranye (25,50], kuning (50,75], hijau (75,100], biru >100 (kunci data: emas)
   static WARNA_STYLE = {
     merah:  { color: '#EF4444', fillColor: '#EF4444', fillOpacity: 0.38, weight: 1.2, opacity: 0.9 },
     oranye: { color: '#F97316', fillColor: '#F97316', fillOpacity: 0.38, weight: 1.2, opacity: 0.9 },
     kuning: { color: '#EAB308', fillColor: '#EAB308', fillOpacity: 0.35, weight: 1.2, opacity: 0.9 },
     hijau:  { color: '#22C55E', fillColor: '#22C55E', fillOpacity: 0.32, weight: 1.2, opacity: 0.9 },
-    emas:   { color: '#FFD700', fillColor: '#FFD700', fillOpacity: 0.40, weight: 1.4, opacity: 1 },
+    emas:   { color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.40, weight: 1.4, opacity: 1 },
   };
 
   _resolveStyle(feature, opts = {}) {
@@ -1003,7 +1003,7 @@ set_aktivitas_visibility(visible) {
       { dataLayer: 'petak', symbolizer: _mkSym('#F97316'), filter: _wf('oranye') },
       { dataLayer: 'petak', symbolizer: _mkSym('#EAB308', 0.35), filter: _wf('kuning') },
       { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.32), filter: _wf('hijau') },
-      { dataLayer: 'petak', symbolizer: _mkSym('#FFD700', 0.40), filter: _wf('emas') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#3B82F6', 0.40), filter: _wf('emas') },
       // fallback: fitur tanpa properti warna (tile lama) = hijau seperti dulu
       { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.28) },
     ];

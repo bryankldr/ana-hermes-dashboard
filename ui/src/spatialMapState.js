@@ -21,6 +21,44 @@ export const PETAK_LAYER_OPTIONS = [
   { value: 'multi_penyadap', label: 'Multi Penyadap' },
 ];
 
+// Menu kategori per bisnis (cascade: bisnis → kategori). Slug stabil dipakai
+// resolveTemplate → filter warna server-side. Slug lama (idle/tanpa_penyadap/
+// multi_penyadap/ringkasan) tetap diterima adapter (kompat perintah ANA).
+export const KATEGORI_OPTIONS = {
+  petak: [
+    { value: 'semua',     label: 'Semua' },
+    { value: 'bongkor',   label: 'Bongkor' },
+    { value: 'kurang',    label: 'Kurang' },
+    { value: 'terpenuhi', label: 'Terpenuhi' },
+  ],
+  aktivitas: [
+    { value: 'semua',   label: 'Semua' },
+    { value: 'bongkor', label: 'Bongkor' },
+    { value: 'idle',    label: 'Idle' },
+    { value: 'aktif',   label: 'Aktif' },
+  ],
+  produksi: [
+    { value: 'semua',       label: 'Semua' },
+    { value: 'sangat_buruk', label: 'Sangat buruk (0-25%)' },
+    { value: 'buruk',       label: 'Buruk (26-50%)' },
+    { value: 'kurang',      label: 'Kurang (51-75%)' },
+    { value: 'baik',        label: 'Baik (76-100%)' },
+    { value: 'sangat_baik', label: 'Sangat baik (>100%)' },
+  ],
+  matriks: [
+    { value: 'semua',        label: 'Semua' },
+    { value: 'bongkor',      label: 'Bongkor' },
+    { value: 'kurang_cap50', label: 'Kurang & cap<50%' },
+    { value: 'kurang',       label: 'Kurang' },
+    { value: 'terpenuhi',    label: 'Terpenuhi' },
+    { value: 'sangat_baik',  label: 'Sangat baik' },
+  ],
+};
+
+export function katOptionsFor(business) {
+  return KATEGORI_OPTIONS[business] || KATEGORI_OPTIONS.petak;
+}
+
 const now = new Date();
 const CUR_TAHUN = now.getFullYear();
 const CUR_BULAN = now.getMonth() + 1;

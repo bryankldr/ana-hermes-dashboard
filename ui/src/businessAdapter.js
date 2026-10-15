@@ -72,6 +72,7 @@ export function resolveTemplate(state) {
     // subset warna via ANA spatial_set — filter server-side di _simoge_show_on_map (params.warna),
     // bukan client post-filter. KPI/warna_counts dihitung dari subset (sinkron dengan polygon).
     if (kat === 'kurang') return { template: 'petak_efektivitas_map', params: { tahun, limit, ...wilayah, ...viewport, warna: 'kuning' } };
+    if (kat === 'terpenuhi') return { template: 'petak_efektivitas_map', params: { tahun, limit, ...wilayah, ...viewport, warna: 'hijau' } };
     if (kat === 'ringkasan' || kat === 'summary') {
       // kph_summary_map: aggregated centroid + KPI per KPH/BKPH/DIVRE
       // aggregated_level dikirim dari server via spatial_set (filters.aggregated_level, bounds, zoom)
@@ -91,17 +92,23 @@ export function resolveTemplate(state) {
     return { template: 'petak_efektivitas_map', params: { tahun, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
   }
   if (biz === 'produksi') {
-    return { template: 'rkap_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport } };
+    // Kategori = pita pencapaian (kontigu, tanpa celah): merah ≤25, oranye
+    // (25,50], kuning (50,75], hijau (75,100], emas >100. Kunci data tetap
+    // 'emas' (tampil biru di peta). Pilihan eksplisit menang atas subset ANA.
+    const _pw = { sangat_buruk: 'merah', buruk: 'oranye', kurang: 'kuning', baik: 'hijau', sangat_baik: 'emas' }[kat] || '';
+    return { template: 'rkap_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...((_pw || warna) ? { warna: _pw || warna } : {}) } };
   }
   if (biz === 'aktivitas') {
     // aktivitas_petak_map: merah=bongkor (tanpa penyadap / >2bln tanpa aktivitas), kuning=idle (cur0 prev>0), hijau=aktif
-    if (kat === 'idle') return { template: 'idle_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport } };
-    if (kat === 'bongkor') return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport } };
-    return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport } };
+    if (kat === 'idle') return { template: 'idle_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
+    if (kat === 'bongkor') return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'merah' } };
+    if (kat === 'aktif') return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'hijau' } };
+    return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
   }
   if (biz === 'matriks' || biz === 'matrik') {
     // matriks_map: luas_andil vs pencapaian RKAP, warna merah/oranye/kuning/hijau/emas + bongkor
-    return { template: 'matriks_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport } };
+    const _mw = { bongkor: 'merah', kurang_cap50: 'oranye', kurang: 'kuning', terpenuhi: 'hijau', sangat_baik: 'emas' }[kat] || '';
+    return { template: 'matriks_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...((_mw || warna) ? { warna: _mw || warna } : {}) } };
   }
   return { template: 'petak_efektivitas_map', params: { tahun, limit, ...wilayah, ...viewport } };
 }
