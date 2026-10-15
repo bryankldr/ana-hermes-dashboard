@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from refresh_petak_simple import load_env, db_conn  # reuse koneksi/env, bukan duplikat
 
 
-def fetch(conn, tahun):
+def fetch(conn, tahun, kode_kph=None):
     sql = """
     SELECT p.nomor_petak, p.kode_evapot, pp.polygon AS polygon_json,
            CASE
@@ -35,10 +35,14 @@ def fetch(conn, tahun):
         FROM getah_andil GROUP BY kode_evapot
     ) a ON a.kode_evapot = p.kode_evapot
     WHERE p.tahun_rtt = %s AND pp.polygon IS NOT NULL AND pp.polygon != ''
-    ORDER BY p.kode_evapot
     """
+    vals = [tahun]
+    if kode_kph:
+        sql += " AND p.kode_kph = %s"
+        vals.append(int(kode_kph))
+    sql += " ORDER BY p.kode_evapot"
     with conn.cursor() as cur:
-        cur.execute(sql, (tahun,))
+        cur.execute(sql, tuple(vals))
         return cur.fetchall()
 
 
@@ -46,12 +50,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tahun", type=int, default=2026)
     ap.add_argument("--out", default="tiles/petak.ndjson")
+    ap.add_argument("--kode-kph", default="",
+                    help="batasi satu KPH (untuk tiles/kph_<kode>.ndjson)")
     args = ap.parse_args()
 
     env = load_env()
     conn = db_conn(env)
     try:
-        rows = fetch(conn, args.tahun)
+        rows = fetch(conn, args.tahun, args.kode_kph or None)
     finally:
         conn.close()
 

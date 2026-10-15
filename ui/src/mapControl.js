@@ -996,6 +996,111 @@ set_aktivitas_visibility(visible) {
     return first || this.map;
   }
 
+  // ── Multi-source PMTiles ter-scope (kph_* + bounds_*) ──
+  // Satu layer per URL, reconcile per grup: tambah yang kurang, buang yang
+  // keluar scope. Grup 'petak' (polygon per-KPH) dan 'bounds' (outline KPH
+  // untuk choropleth/overview) visibilitasnya independen. paintRules dinamis
+  // per sumber (warna choropleth dari agregat live) atau default statis.
+  _pmGroup(gid) {
+    try {
+      this._pmGroups = this._pmGroups || {};
+      if (!this._pmGroups[gid]) this._pmGroups[gid] = new Map();
+      return this._pmGroups[gid];
+    } catch (_) { return new Map(); }
+  }
+  _mkPolySym(fill, op, width) {
+    return new window.protomapsL.PolygonSymbolizer({
+      fill, opacity: op ?? 0.38, stroke: '#FFFFFF', width: width ?? 1, strokeOpacity: 0.9,
+    });
+  }
+  _petakRules() {
+    const _mkSym = (fill, op) => this._mkPolySym(fill, op);
+    const _wf = w => (z, f) => String((f && f.props && f.props.warna) || '').toLowerCase() === w;
+    return [
+      { dataLayer: 'petak', symbolizer: _mkSym('#EF4444'), filter: _wf('merah') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#F97316'), filter: _wf('oranye') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#EAB308', 0.35), filter: _wf('kuning') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.32), filter: _wf('hijau') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#3B82F6', 0.40), filter: _wf('emas') },
+      { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.28) },
+    ];
+  }
+  set_pmtiles_sources(gid, sources = [], { token = '' } = {}) {
+    // sources: [{url, kind:'petak'|'kph', rules?, maxDataZoom?}]
+    if (!window.protomapsL) return { ok: false, error: 'protomapsL tidak tersedia' };
+    const grp = this._pmGroup(gid);
+    const want = new Map();
+    for (const s of (sources || [])) {
+      if (!s || !s.url) continue;
+      const tileUrl = token ? (s.url + '?token=' + encodeURIComponent(token)) : s.url;
+      want.set(tileUrl, s);
+    }
+    // buang yang keluar scope/daftar
+    for (const [url, layer] of [...grp.entries()]) {
+      if (!want.has(url)) {
+        try { if (this.map.hasLayer(layer)) this.map.removeLayer(layer); } catch (_) {}
+        grp.delete(url);
+      }
+    }
+    let added = 0, reused = 0;
+    const errors = [];
+    for (const [tileUrl, s] of want.entries()) {
+      if (grp.has(tileUrl)) {
+        try { if (!this.map.hasLayer(grp.get(tileUrl))) grp.get(tileUrl).addTo(this.map); } catch (_) {}
+        reused++;
+        continue;
+      }
+      try {
+        const rules = Array.isArray(s.rules) ? s.rules : (s.kind === 'kph' ? [] : this._petakRules());
+        const layer = window.protomapsL.leafletLayer({
+          url: tileUrl, paintRules: rules, labelRules: [],
+          maxDataZoom: s.maxDataZoom || (s.kind === 'kph' ? 10 : 15),
+        });
+        layer.addTo(this.map);
+        try { layer.bringToFront(); } catch (_) {}
+        grp.set(tileUrl, layer);
+        added++;
+      } catch (e) { errors.push(String((e && e.message) || e).slice(0, 120)); }
+    }
+    try {
+      const anyOn = [...grp.values()].some(l => { try { return this.map.hasLayer(l); } catch (_) { return false; } });
+      this.state.layers[gid === 'bounds' ? 'KphBounds' : 'PMTilesPetak'] = anyOn;
+    } catch (_) {}
+    this._emit('MAP_LAYER_CHANGED', { id: gid === 'bounds' ? 'KphBounds' : 'PMTilesPetak', visible: true, multi: true });
+    return { ok: errors.length === 0, active: [...grp.keys()], added, reused, errors };
+  }
+  set_pmtiles_group_visible(gid, visible) {
+    const grp = this._pmGroup(gid);
+    const v = !!visible;
+    for (const [, layer] of grp) {
+      try {
+        if (v) { if (!this.map.hasLayer(layer)) layer.addTo(this.map); }
+        else if (this.map.hasLayer(layer)) this.map.removeLayer(layer);
+      } catch (_) {}
+    }
+    try { this.state.layers[gid === 'bounds' ? 'KphBounds' : 'PMTilesPetak'] = v; } catch (_) {}
+    this._emit('MAP_LAYER_CHANGED', { id: gid === 'bounds' ? 'KphBounds' : 'PMTilesPetak', visible: v });
+    return { visible: v, layers: grp.size };
+  }
+  // Aturan choropleth KPH dari agregat live {kode: hex}: satu rule per KPH +
+  // fallback netral. Netral (ADM konteks tetangga): satu rule outline transparan.
+  kph_bounds_rules(colorByKode, { neutral = false } = {}) {
+    const mk = (fill, op, w) => this._mkPolySym(fill, op, w);
+    const rules = [];
+    if (!neutral) {
+      for (const kode of Object.keys(colorByKode || {})) {
+        const k = String(kode);
+        rules.push({
+          dataLayer: 'kph',
+          symbolizer: mk(String(colorByKode[kode]), 0.45, 1.5),
+          filter: (z, f) => String((f && f.props && (f.props.kode_kph ?? f.props.kode)) || '') === k,
+        });
+      }
+    }
+    // fallback/jaring pengaman: outline putih transparan (tile tanpa warna)
+    rules.push({ dataLayer: 'kph', symbolizer: mk('#FFFFFF', neutral ? 0.0 : 0.08, 1.5) });
+    return rules;
+  }
   // ── P2-3 hybrid vector tier (protomaps-leaflet) ──
   // Geometri via PMTiles Range 206, atribut via viewport GeoJSON.
   // Dipanggil dari map.js saat business='petak' & zoom cocok.
@@ -1008,78 +1113,30 @@ set_aktivitas_visibility(visible) {
       return { ok: false, error: 'protomapsL tidak tersedia' };
     }
     const tileUrl = token ? (url + '?token=' + encodeURIComponent(token)) : url;
-    // Guard rebuild (Z11 goyang): URL sama + layer hidup = cukup tampilkan,
-    // jangan bangun ulang + fetch Range dari nol. Tiap rebuild = fetch
-    // jaringan baru; lambat/gagal = PMTiles hilang sesaat ("kadang tidak").
-    if (visible && this.pmtilesLayer && this.pmtilesUrl === tileUrl) {
-      try { if (!this.map.hasLayer(this.pmtilesLayer)) this.pmtilesLayer.addTo(this.map); } catch (_) {}
-      this.state.layers['PMTilesPetak'] = true;
-      return { ok: true, visible: true, url: tileUrl, reused: true };
-    }
-    // hapus layer lama bila ada
-    if (this.pmtilesLayer && this.map.hasLayer(this.pmtilesLayer)) {
-      try { this.map.removeLayer(this.pmtilesLayer); } catch (_) {}
-      this.pmtilesLayer = null;
-    }
     if (!visible) {
       this.pmtilesUrl = null;
-      this._emit('MAP_LAYER_CHANGED', { id: 'PMTilesPetak', visible: false });
+      try { this.set_pmtiles_group_visible('petak', false); } catch (_) {}
       return { ok: true, visible: false };
     }
-    this.pmtilesUrl = tileUrl;
-
-    // Warna bisnis per fitur (Evaluasi Petak: presentase bongkor).
-    // Properti warna ditulis export_petak.py ke tiap tile.
-    // Satu symbolizer hijau = seluruh Z<=11 hijau polos (keluhan user).
-    // Sinkron dengan WARNA_STYLE GeoJSON (Z>=12) agar zoom in/out konsisten.
-    // Vendor ini mau filter = FUNGSI (zoom, feature), properti di
-    // feature.props — bukan array ["==",...] (melempar "r.filter is not
-    // a function" dan seluruh layer gagal render).
-    const _mkSym = (fill, op) => new window.protomapsL.PolygonSymbolizer({
-      fill, opacity: op ?? 0.38, stroke: '#FFFFFF', width: 1, strokeOpacity: 0.9,
-    });
-    const _wf = w => (z, f) => String((f && f.props && f.props.warna) || '').toLowerCase() === w;
-    // paintRules: dataLayer 'petak' (nama layer di MVT build_pmtiles.py)
-    const paintRules = [
-      { dataLayer: 'petak', symbolizer: _mkSym('#EF4444'), filter: _wf('merah') },
-      { dataLayer: 'petak', symbolizer: _mkSym('#F97316'), filter: _wf('oranye') },
-      { dataLayer: 'petak', symbolizer: _mkSym('#EAB308', 0.35), filter: _wf('kuning') },
-      { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.32), filter: _wf('hijau') },
-      { dataLayer: 'petak', symbolizer: _mkSym('#3B82F6', 0.40), filter: _wf('emas') },
-      // fallback: fitur tanpa properti warna (tile lama) = hijau seperti dulu
-      { dataLayer: 'petak', symbolizer: _mkSym('#22C55E', 0.28) },
-    ];
-
-    // labelRules kosong — label di level zoom tinggi saja (ponytail)
-    const labelRules = [];
-
+    // Guard rebuild (Z11 goyang): sumber sama + hidup = cukup tampilkan.
+    const r = this.set_pmtiles_sources('petak', [{ url, kind: 'petak' }], { token });
     try {
-      this.pmtilesLayer = window.protomapsL.leafletLayer({
-        url: tileUrl,
-        paintRules: paintRules,
-        labelRules: labelRules,
-        maxDataZoom: 15, // sinkron build_pmtiles --max-zoom 15; tanpa ini View pakai default tapi eksplisit aman
-      });
-      this.pmtilesLayer.addTo(this.map);
-      // overlayPane sudah di atas tilePane; jangan bringToBack agar tidak tenggelam di bawah basemap gelap
-      try { this.pmtilesLayer.bringToFront(); } catch (_) {}
-      this.layers.set('PMTilesPetak', this.pmtilesLayer);
-      this.state.layers['PMTilesPetak'] = true;
-      this._emit('MAP_LAYER_CHANGED', { id: 'PMTilesPetak', visible: true });
-      return { ok: true, visible: true, url: tileUrl };
-    } catch (e) {
-      return { ok: false, error: String(e?.message || e).slice(0, 200) };
-    }
+      const first = [...this._pmGroup('petak').values()][0] || null;
+      this.pmtilesLayer = first;
+    } catch (_) {}
+    this.pmtilesUrl = tileUrl;
+    return { ok: !!r.ok, visible: true, url: tileUrl, active: r.active || [], errors: r.errors || [] };
   }
 
   set_pmtiles_visibility(visible) {
-    if (!this.pmtilesLayer) return { visible: false };
-    const v = !!visible;
-    if (v) { if (!this.map.hasLayer(this.pmtilesLayer)) this.pmtilesLayer.addTo(this.map); }
-    else { if (this.map.hasLayer(this.pmtilesLayer)) this.map.removeLayer(this.pmtilesLayer); }
-    this.state.layers['PMTilesPetak'] = v;
-    this._emit('MAP_LAYER_CHANGED', { id: 'PMTilesPetak', visible: v });
-    return { id: 'PMTilesPetak', visible: v };
+    // Grup petak (multi-source ter-scope). Kompat: return bentuk lama.
+    try {
+      const r = this.set_pmtiles_group_visible('petak', !!visible);
+      try { if (!visible) this.pmtilesUrl = null; } catch (_) {}
+      return { id: 'PMTilesPetak', visible: !!visible, layers: r.layers };
+    } catch (_) {
+      return { id: 'PMTilesPetak', visible: !!visible };
+    }
   }
 }
 

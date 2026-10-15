@@ -331,6 +331,125 @@ def _tfa_enforced():
         return True
 
 
+_KPH_DIVRE_CACHE = {"at": 0.0, "map": {}}
+
+
+def _kph_divre_map():
+    """Peta kode_kph -> kode_divre (cache proses 10 mnt; tabel kecil)."""
+    import time as _t
+    now = _t.time()
+    if now - _KPH_DIVRE_CACHE.get("at", 0) < 600 and _KPH_DIVRE_CACHE.get("map"):
+        return _KPH_DIVRE_CACHE["map"]
+    m = {}
+    try:
+        import db_source
+        import pymysql
+        kw = db_source.kwargs()
+        conn = pymysql.connect(host=kw["host"], port=kw["port"], user=kw["user"],
+                               password=kw["password"], database=kw["database"],
+                               connect_timeout=5)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT kode_kph, kode_divre FROM kph")
+                for r in cur.fetchall():
+                    m[str(r[0]).strip()] = str(r[1]).strip()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _KPH_DIVRE_CACHE["at"] = now
+        _KPH_DIVRE_CACHE["map"] = m
+    except Exception:
+        pass
+    return m or _KPH_DIVRE_CACHE.get("map", {})
+
+
+def _scope_kph_code(scope):
+    """Kode KPH efektif user: langsung, atau resolve dari bkph/rph/tpg."""
+    try:
+        if scope.get("kode_kph"):
+            return str(scope["kode_kph"]).strip()
+        import db_source
+        import pymysql
+        kw = db_source.kwargs()
+        conn = pymysql.connect(host=kw["host"], port=kw["port"], user=kw["user"],
+                               password=kw["password"], database=kw["database"],
+                               connect_timeout=5)
+        try:
+            with conn.cursor() as cur:
+                if scope.get("kode_bkph"):
+                    cur.execute("SELECT kode_kph FROM bkph WHERE kode_bkph=%s LIMIT 1",
+                                (str(scope["kode_bkph"]).strip(),))
+                    r = cur.fetchone()
+                    if r:
+                        return str(r[0]).strip()
+                if scope.get("kode_rph"):
+                    cur.execute("SELECT kode_kph FROM rph WHERE kode_rph=%s LIMIT 1",
+                                (str(scope["kode_rph"]).strip(),))
+                    r = cur.fetchone()
+                    if r:
+                        return str(r[0]).strip()
+                for t in (scope.get("kode_tpg_list") or []):
+                    cur.execute("SELECT kode_kph FROM getah_daftar_tpg WHERE kode_tpg=%s LIMIT 1",
+                                (str(t).strip(),))
+                    r = cur.fetchone()
+                    if r:
+                        return str(r[0]).strip()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return ""
+
+
+def _tiles_scope_ok(handler, kind, kode):
+    """Bolehkah sesi unduh file tile scope (kind=kph/divre, kode=angkanya).
+    Fail-closed: tanpa sesi = tolak (sistem/token-only lewat jalur legacy).
+    DIREKSI/ADMINISTRATOR = semua. DIVRE = dalam divrenya. ADM = KPH-nya
+    (+ bounds se-divre sebagai konteks). Lebih dalam = KPH efektifnya."""
+    try:
+        sess = _session_from_cookie(handler)
+        if not sess:
+            return False, "tanpa sesi"
+        jab = ""
+        try:
+            _j = sess.get("jabatan")
+            if isinstance(_j, dict):
+                jab = str(_j.get("kode_jabatan") or "").strip().upper()
+            elif _j is not None:
+                jab = str(_j).strip().upper()
+        except Exception:
+            jab = ""
+        if jab in ("DIREKSI", "ADMINISTRATOR"):
+            return True, ""
+        scope = _wilayah_scope_from_session(handler)
+        kode = str(kode or "").strip()
+        if not kode:
+            return False, "kode kosong"
+        if kind == "kph":
+            uk = _scope_kph_code(scope)
+            if uk and kode == uk:
+                return True, ""
+            dv = str(scope.get("kode_divre") or "").strip()
+            if dv and _kph_divre_map().get(kode) == dv:
+                return True, ""
+            return False, "di luar scope tile"
+        if kind == "divre":
+            if scope.get("kode_divre") and kode == str(scope.get("kode_divre")).strip():
+                return True, ""
+            uk = _scope_kph_code(scope)
+            if uk and _kph_divre_map().get(uk) == kode:
+                return True, ""
+            return False, "di luar scope tile"
+        return False, "jenis scope tak dikenal"
+    except Exception:
+        return False, "gagal cek scope"
+
+
 def _wilayah_scope_from_session(handler):
     """Scope wilayah user login dari cookie sesi. {} = tak ada sesi
     (pemanggil token-only seperti ANA system — sengaja tanpa scope).
@@ -2235,14 +2354,17 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._bytes(b"esri tak terjangkau", "text/plain", 502)
 
-    def _serve_pmtiles(self):
+    def _serve_pmtiles_file(self, fname):
         # PMTiles v3 via range request (P2-2). Statis, tanpa Martin/tippecanoe.
         # Client (protomaps-leaflet) kirim Range: bytes=a-b; jawab 206 +
         # Content-Range, atau 200 penuh bila tanpa Range.
         # NEW: Jika query param z,x,y diberikan -> ekstrak single MVT tile (bukan byte range).
-        f = ROOT / "tiles" / "petak.pmtiles"
+        # fname allowlist ketat (anti traversal): kph_<kode>/bounds_<divre>/petak.
+        if not re.fullmatch(r"(kph_\d+|bounds_\d+|petak)\.pmtiles", fname or ""):
+            return self._json({"error": "nama file tile tidak dikenal"}, 404)
+        f = ROOT / "tiles" / fname
         if not f.is_file():
-            return self._json({"error": "petak.pmtiles belum dibangun"}, 404)
+            return self._json({"error": f"{fname} belum dibangun"}, 404)
 
         # Check for z/x/y query params (protomaps-leaflet tile request)
         qs = parse_qs(urlparse(self.path).query)
@@ -2328,6 +2450,9 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError) as e:
             return self._json({"error": str(e)[:200]}, 400)
 
+    def _serve_pmtiles(self):
+        return self._serve_pmtiles_file("petak.pmtiles")
+
     def _rebuild_pmtiles(self):
         """Rebuild petak.pmtiles full chain: export NDJSON dari DB lalu build.
         Export gagal -> fallback build dari NDJSON lama (PMTiles kemarin tetap
@@ -2372,6 +2497,21 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 output = {"ok": True, "stdout": result.stdout.strip()[-500:]}
             out["build"] = output
+            # Lanjutan ter-scope (best-effort, tak menggugurkan legacy): per-KPH
+            # petak + per-DIVRE bounds + manifest. Gagal di sini = legacy tetap ok.
+            try:
+                scoped = subprocess.run(
+                    [sys.executable, str(ROOT / "scripts" / "build_scoped_tiles.py")],
+                    cwd=str(ROOT), capture_output=True, text=True, timeout=600)
+                try:
+                    out["scoped"] = json.loads(scoped.stdout.strip().splitlines()[-1])
+                except Exception:
+                    out["scoped"] = {"ok": scoped.returncode == 0,
+                                     "tail": (scoped.stdout + scoped.stderr)[-500:]}
+            except subprocess.TimeoutExpired:
+                out["scoped"] = {"ok": False, "error": "scoped build timeout (>600s)"}
+            except Exception as e:  # noqa: BLE001
+                out["scoped"] = {"ok": False, "error": str(e)[:200]}
             return self._json(out)
         except subprocess.TimeoutExpired:
             return self._json({**out, "error": "build timeout (>120s)"}, 500)
@@ -2390,6 +2530,21 @@ class Handler(BaseHTTPRequestHandler):
                                           "mtime": s.st_mtime}
             except OSError:
                 st[name.split("/")[1]] = {"exists": False}
+        # File ter-scope (kph_*/bounds_*) + manifest — ringkas per pola.
+        try:
+            _scoped = {}
+            for f in sorted((ROOT / "tiles").glob("kph_*.pmtiles")):
+                _scoped[f.name] = {"bytes": f.stat().st_size, "mtime": f.stat().st_mtime}
+            for f in sorted((ROOT / "tiles").glob("bounds_*.pmtiles")):
+                _scoped[f.name] = {"bytes": f.stat().st_size, "mtime": f.stat().st_mtime}
+            if _scoped:
+                st["scoped"] = _scoped
+            _mf = ROOT / "tiles" / "manifest.json"
+            if _mf.is_file():
+                st["manifest"] = {"exists": True, "bytes": _mf.stat().st_size,
+                                  "mtime": _mf.stat().st_mtime}
+        except OSError:
+            pass
         try:
             nd = ROOT / "tiles" / "petak.ndjson"
             if nd.is_file():
@@ -2923,7 +3078,124 @@ class Handler(BaseHTTPRequestHandler):
                         return self._unauth()
                 except Exception:
                     return self._unauth()
+            # Kunci scope: sesi user ber-scope sempit dilarang ambil file
+            # global (pakai /api/tiles/scope/). Tanpa sesi (sistem/token-only,
+            # mis. ANNA) = lolos seperti dulu. Klien dashboard sudah migrasi.
+            try:
+                _sess = _session_from_cookie(self)
+            except Exception:
+                _sess = None
+            if _sess:
+                try:
+                    _jj = _sess.get("jabatan")
+                    _jab = (str(_jj.get("kode_jabatan") or "").strip().upper()
+                            if isinstance(_jj, dict) else str(_jj or "").strip().upper())
+                except Exception:
+                    _jab = ""
+                if _jab not in ("DIREKSI", "ADMINISTRATOR"):
+                    try:
+                        _sc = _wilayah_scope_from_session(self)
+                    except Exception:
+                        _sc = {}
+                    if any(_sc.get(k) for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph")) or _sc.get("kode_tpg_list"):
+                        return self._json({"error": "di luar scope tile — pakai file scope (/api/tiles/scope/)"}, 403)
             return self._serve_pmtiles()
+        if p.startswith("/api/tiles/scope/"):
+            # File tile ter-scope jabatan: kph/<kode>.pmtiles | bounds_<divre>.pmtiles
+            # Auth ganda: token (atau ?token=, tile fetch tak bisa header) DAN
+            # sesi login dalam scope (fail-closed untuk user ber-scope).
+            if not self._token_ok():
+                try:
+                    _qs = parse_qs(urlparse(self.path).query)
+                    _qt = (_qs.get("token",[""])[0] or _qs.get("t",[""])[0] or "").strip()
+                    if _qt and secrets.compare_digest(_qt, API_TOKEN):
+                        pass
+                    else:
+                        return self._unauth()
+                except Exception:
+                    return self._unauth()
+            _rest = (p or "")[len("/api/tiles/scope/"):]
+            _m1 = re.fullmatch(r"kph/(\d+)\.pmtiles", _rest or "")
+            _m2 = re.fullmatch(r"bounds_(\d+)\.pmtiles", _rest or "")
+            if _m1:
+                _kind, _kode, _fname = "kph", _m1.group(1), "kph_%s.pmtiles" % _m1.group(1)
+            elif _m2:
+                _kind, _kode, _fname = "divre", _m2.group(1), "bounds_%s.pmtiles" % _m2.group(1)
+            else:
+                return self._json({"error": "jalur tile scope tidak dikenal"}, 404)
+            _ok, _msg = _tiles_scope_ok(self, _kind, _kode)
+            if not _ok:
+                try:
+                    _alog(f"tiles scope DENY {_kind}={_kode[:16]} ({_msg})", "warn")
+                except Exception:
+                    pass
+                return self._json({"error": _msg or "di luar scope tile"}, 403)
+            return self._serve_pmtiles_file(_fname)
+        if p == "/api/tiles/bounds_geo":
+            # Geometri outline KPH (dissolve, BUKAN batas resmi) sebagai GeoJSON
+            # ringan untuk choropleth overview — transport terverifikasi ganti
+            # tile bila paint vector bermasalah. Sumber: tiles/bounds_*.ndjson.
+            # Auth ganda: token + sesi dalam scope (fail-closed).
+            if not self._token_ok():
+                return self._unauth()
+            try:
+                _qs = parse_qs(urlparse(self.path).query)
+                _dv = (_qs.get("divre", [""])[0] or "").strip()
+            except Exception:
+                _dv = ""
+            if not re.fullmatch(r"\d+", _dv or ""):
+                return self._json({"error": "param divre wajib (angka)"}, 400)
+            _ok, _msg = _tiles_scope_ok(self, "divre", _dv)
+            if not _ok:
+                return self._json({"error": _msg or "di luar scope tile"}, 403)
+            try:
+                _bf = ROOT / "tiles" / ("bounds_%s.ndjson" % _dv)
+                if not _bf.is_file():
+                    return self._json({"ok": True, "features": [], "note": "bounds belum dibangun"})
+                feats = []
+                for _ln in _bf.read_text(encoding="utf-8").splitlines():
+                    _ln = _ln.strip()
+                    if not _ln:
+                        continue
+                    try:
+                        _d = json.loads(_ln)
+                        _g, _pr = _d.get("geometry"), _d.get("properties") or {}
+                        if isinstance(_g, dict) and _g.get("type") in ("Polygon", "MultiPolygon"):
+                            feats.append({"type": "Feature", "geometry": _g,
+                                          "properties": {"kode_kph": str(_pr.get("kode_kph") or ""),
+                                                         "kph": str(_pr.get("kph") or ""),
+                                                         "kode_divre": str(_pr.get("kode_divre") or _dv)}})
+                    except Exception:
+                        continue
+                return self._json({"ok": True, "features": feats})
+            except Exception as e:
+                return self._json({"error": str(e)[:200]}, 500)
+        if p == "/api/tiles/manifest":
+            # Inventory file tile, disaring ke scope sesi (tanpa sesi = utuh).
+            if not self._token_ok():
+                return self._unauth()
+            try:
+                _mf = ROOT / "tiles" / "manifest.json"
+                _data = json.loads(_mf.read_text(encoding="utf-8")) if _mf.is_file() else {"files": []}
+            except Exception:
+                _data = {"files": []}
+            try:
+                _sess = _session_from_cookie(self)
+            except Exception:
+                _sess = None
+            if _sess and isinstance(_data.get("files"), list):
+                _kept = []
+                for _e in _data["files"]:
+                    _scp = (_e or {}).get("scope") or {}
+                    _lv = str(_scp.get("level") or "")
+                    if _lv in ("kph", "divre"):
+                        _ok, _ = _tiles_scope_ok(self, _lv, str(_scp.get("kode") or ""))
+                        if not _ok:
+                            continue
+                    _kept.append(_e)
+                _data = dict(_data)
+                _data["files"] = _kept
+            return self._json(_data)
         if p == "/api/tiles/rebuild":
             if not self._token_ok():
                 return self._unauth()

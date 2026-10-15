@@ -76,6 +76,8 @@ def main():
     ap.add_argument("--out", dest="out", default="tiles/petak.pmtiles")
     ap.add_argument("--min-zoom", type=int, default=8)
     ap.add_argument("--max-zoom", type=int, default=15)
+    ap.add_argument("--layer", default="petak",
+                    help="nama layer MVT (petak | kph)")
     args = ap.parse_args()
 
     feats = []
@@ -126,7 +128,7 @@ def main():
                     layer_feats = [{"geometry": ft["geometry"],
                                     "properties": ft["properties"]} for ft in in_tile]
                     raw = mvt_encode(
-                        {"name": "petak", "features": layer_feats},
+                        {"name": args.layer, "features": layer_feats},
                         default_options={"quantize_bounds": (wb, sb, eb, nb),
                                          "extents": EXTENTS},
                     )
@@ -146,7 +148,7 @@ def main():
             "center_lat_e7": int(cy * 1e7),
             "center_zoom": args.min_zoom,
         }
-        metadata = {"name": "petak", "format": "pbf",
+        metadata = {"name": args.layer, "format": "pbf",
                     "minzoom": args.min_zoom, "maxzoom": args.max_zoom,
                     "bounds": f"{glo[0]},{glo[1]},{glo[2]},{glo[3]}",
                     "center": f"{cx},{cy},{args.min_zoom}",

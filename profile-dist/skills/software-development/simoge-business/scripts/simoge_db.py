@@ -370,6 +370,32 @@ def petak_effectiveness(tahun, **kw):
     """, (tahun,))
 
 
+@template("efektivitas_per_kph")
+def efektivitas_per_kph(tahun, **kw):
+    """Porsi bongkor/kurang/terpenuhi per KPH (choropleth overview DIREKSI/DIVRE).
+    Definisi kategori persis petak_efektivitas_map. Scoped wilayah via
+    _wilayah_where (server clamp sesi login). Klien klasifikasikan warna:
+    merah bila bongkor>=25%, kuning bila kurang>=30% atau terpenuhi<60%,
+    hijau sisanya; tooltip tampilkan angka."""
+    w, wv = _wilayah_where(kw)
+    return q(f"""
+        SELECT p.kode_kph, MAX(p.kph) AS kph, MAX(p.kode_divre) AS kode_divre,
+               COUNT(*) AS total_petak,
+               SUM(COALESCE(a.penyadap, 0) = 0) AS bongkor,
+               SUM(COALESCE(a.penyadap, 0) > 0 AND COALESCE(a.luas_andil, 0) < p.luas_baku) AS kurang,
+               SUM(COALESCE(a.penyadap, 0) > 0 AND COALESCE(a.luas_andil, 0) >= p.luas_baku) AS terpenuhi
+        FROM getah_petak p
+        LEFT JOIN (
+            SELECT kode_evapot, COUNT(DISTINCT id_penyadap) AS penyadap,
+                   SUM(luas_andil) AS luas_andil
+            FROM getah_andil GROUP BY kode_evapot
+        ) a ON a.kode_evapot = p.kode_evapot
+        WHERE p.tahun_rtt = %s{w}
+        GROUP BY p.kode_kph
+        ORDER BY p.kode_kph
+    """, tuple([tahun] + wv))
+
+
 @template("petak_bongkor")
 def petak_bongkor(tahun, **kw):
     """Petak bongkor: tidak ada penyadap sama sekali."""

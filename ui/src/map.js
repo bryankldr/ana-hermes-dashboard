@@ -9,7 +9,7 @@ import {
   BUSINESS_OPTIONS, katOptionsFor,
   getSpatialState, setBusiness, setFilters, setDataset, setMetrics, subscribeSpatial
 } from './spatialMapState.js';
-import { loadBusinessData, fetchWilayahOptions, fetchAktivitasPoints, resolveTemplate } from './businessAdapter.js';
+import { loadBusinessData, fetchWilayahOptions, fetchAktivitasPoints, resolveTemplate, queryStats } from './businessAdapter.js';
 import { initSpatialChart } from './spatialChart.js';
 import { initSpatialReport } from './spatialReport.js';
 import { initSpatialArchive } from './spatialArchive.js';
@@ -645,7 +645,7 @@ function updateLegend(biz, kat) {
           }
           const ov = (L.overlays && typeof L.overlays === 'object') ? L.overlays : {};
           for (const id of Object.keys(ov)) {
-            if (id === 'Aktivitas' || id === 'PMTilesPetak') continue; // otomatis (zoom/tier), jangan dipaksa
+            if (id === 'Aktivitas' || id === 'PMTilesPetak' || id === 'KphBounds') continue; // otomatis (zoom/tier), jangan dipaksa
             try {
               if (id === 'Label') {
                 if (esriRemembered === '0' && ov[id]) continue; // Esri diblokir: jangan paksa label
@@ -1412,19 +1412,20 @@ function updateLegend(biz, kat) {
     // PMTiles = base netral (tanpa analisa) untuk semua business di Z<=11.
     const want = z <= 11 ? 'pmtiles' : 'geojson';
     if (want !== _tier) {
-      const tok = document.querySelector('meta[name="ana-token"]')?.content || '';
       if (want === 'pmtiles') {
-        if (_ctl && typeof _ctl.set_pmtiles === 'function') {
-          _ctl.set_pmtiles({ url: '/api/tiles/petak.pmtiles', visible: true, token: tok });
-        }
+        // File petak ter-scope + overview choropleth (ganti URL global legacy).
+        _scheduleOverview();
       } else {
-        // Aktifkan GeoJSON (warna analisa + popup per-polygon), sembunyikan PMTiles
+        // Aktifkan GeoJSON (warna analisa + popup per-polygon), sembunyikan PMTiles + bounds
         if (_ctl && typeof _ctl.set_pmtiles_visibility === 'function') {
           _ctl.set_pmtiles_visibility(false);
         }
+        try { _ctl.set_pmtiles_group_visible && _ctl.set_pmtiles_group_visible('bounds', false); } catch (_) {}
+        if (_ovOn) { _ovOn = false; try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {} }
       }
       _tier = want;
     }
+    _scheduleOverview(); // selaraskan sumber tile scope (murah bila kunci sama)
     // Selalu enforce (bukan hanya saat tier berubah): reload filter me-render
     // ulang polygon dalam keadaan visible, dan tier guard lama return dini
     // sehingga polygon segar tetap tampil menutupi PMTiles di Z rendah.
@@ -1432,6 +1433,262 @@ function updateLegend(biz, kat) {
       if (_ctl && typeof _ctl.set_petak_polygons_visibility === 'function') {
         _ctl.set_petak_polygons_visibility(want === 'geojson');
       }
+    } catch (_) {}
+  }
+
+  // ── Overview choropleth KPH + tile petak ter-scope ──
+  // Aturan akses: DIVRE = KPH se-divre; ADM = KPH-nya + bounds netral;
+  // DIREKSI = semua. Server menegakkan ulang per request tile (fail-closed).
+  // z≤10 + bisnis petak + scope >1 KPH → choropleth bounds berwarna agregat
+  // live (merah ≥25% bongkor / kuning ≥30% kurang atau terpenuhi <60% /
+  // hijau sisanya); z≤10 single-KPH (ADM) → petak detail + outline netral.
+  // Tak pernah reload data bisnis (hanya layer) → anti loop.
+  let _tileManifest = null;
+  let _ovKey = '', _ovTimer = null, _ovOn = false;
+  const _tokPm = () => { try { return document.querySelector('meta[name="ana-token"]')?.content || ''; } catch (_) { return ''; } };
+  async function _tileManifestLoad() {
+    if (_tileManifest) return _tileManifest;
+    try {
+      const r = await fetch('/api/tiles/manifest', { headers: { 'X-Ana-Token': _tokPm() }, credentials: 'same-origin' });
+      const j = await r.json().catch(() => ({}));
+      if (j && Array.isArray(j.files)) { _tileManifest = j; return j; }
+    } catch (_) {}
+    return null;
+  }
+  function _scopeKphList() {
+    // KPH dalam scope login (value=kode). Tanpa cache wilayah = [].
+    try {
+      const scope = _userScope();
+      const all = ((_wilayahCache && _wilayahCache.kph) || []).map(function(o){ return String(o.value); });
+      if (scope.jabatan === 'DIREKSI' || scope.jabatan === 'ADMINISTRATOR') return all;
+      if (scope.kph) return all.filter(function(v){ return v === scope.kph; });
+      if (scope.divre) {
+        const out = [];
+        for (const v of all) {
+          try { if (String(_chainOf('kph', v).divre || '') === String(scope.divre)) out.push(v); } catch (_) {}
+        }
+        return out;
+      }
+      for (const L of ['bkph', 'rph']) {
+        const v = scope[L];
+        if (v) { try { const k = _chainOf(L, v).kph; if (k) return [String(k)]; } catch (_) {} }
+      }
+      return all; // tanpa scope = terbuka (server tetap clamp)
+    } catch (_) { return []; }
+  }
+  function _scopeDivreList() {
+    try {
+      const scope = _userScope();
+      const all = ((_wilayahCache && _wilayahCache.divre) || []).map(function(o){ return String(o.value); });
+      if (scope.jabatan === 'DIREKSI' || scope.jabatan === 'ADMINISTRATOR') return all;
+      if (scope.divre) return [scope.divre];
+      const k = _scopeKphList()[0];
+      if (k) { try { const d = _chainOf('kph', k).divre; if (d) return [String(d)]; } catch (_) {} }
+      return all;
+    } catch (_) { return []; }
+  }
+  function _ovColor(r) {
+    try {
+      const t = Number(r.total_petak) || 0;
+      if (!t) return null;
+      const b = Number(r.bongkor || 0) / t, k = Number(r.kurang || 0) / t, s = Number(r.terpenuhi || 0) / t;
+      if (b >= 0.25) return '#EF4444';
+      if (k >= 0.30 || s < 0.60) return '#EAB308';
+      return '#22C55E';
+    } catch (_) { return null; }
+  }
+  function _ovLegend() {
+    try {
+      updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua');
+      if (legend) legend.innerHTML = '<span class="lg" title="porsi bongkor ≥25%"><i style="background:#EF4444"></i> KPH rawan</span><span class="lg" title="porsi kurang ≥30% atau terpenuhi <60%"><i style="background:#EAB308"></i> KPH perhatian</span><span class="lg" title="selain itu"><i style="background:#22C55E"></i> KPH baik</span><span class="lg" title="overview choropleth KPH (z≤10) — angka per KPH di panel insight">overview KPH</span>' + legend.innerHTML;
+    } catch (_) {}
+  }
+  function _ovInsight(rows) {
+    // Angka per KPH menyertai warna (tooltip angka).
+    try {
+      if (!insightBox || !Array.isArray(rows) || !rows.length) return;
+      const lines = rows.map(function(r) {
+        return esc(String(r.kph || r.kode_kph)) + ' ' + (r.total_petak || 0) + ' petak — B' + (r.bongkor || 0) + ' K' + (r.kurang || 0) + ' T' + (r.terpenuhi || 0);
+      });
+      insightBox.dataset.lastBiz = 'petak';
+      insightBox.dataset.lastExpl = lines.join(' · ');
+      insightBox.dataset.lastFeat = String(rows.length);
+      insightBox.dataset.lastCounts = '{}';
+      updateHead();
+    } catch (_) {}
+  }
+  function _scheduleOverview() {
+    try { clearTimeout(_ovTimer); } catch (_) {}
+    _ovTimer = setTimeout(function() { try { _refreshOverview(); } catch (_) {} }, 500);
+  }
+  async function _refreshOverview() {
+    try {
+      if (!_ctl || typeof _ctl.set_pmtiles_sources !== 'function') return;
+      const biz = bizSel?.value || 'petak';
+      const z = map.getZoom();
+      const tahun = parseInt(fTahun?.value) || new Date().getFullYear();
+      const tok = _tokPm();
+      const man = await _tileManifestLoad();
+      const have = new Set(((man && man.files) || []).map(function(f){ return f.name; }));
+      const kphList = _scopeKphList();
+      try { log('map', 'MAP', 'overview check z' + map.getZoom() + ' biz=' + biz + ' kph=' + kphList.length + ' divre=' + _scopeDivreList().join(',')); } catch (_) {}
+      // 1. Grup petak: reconcile ke file scope (ganti URL global legacy).
+      const petakSrc = [];
+      for (const k of kphList) {
+        const nm = 'kph_' + k + '.pmtiles';
+        if (have.size && !have.has(nm)) continue; // belum dibangun → fallback di bawah
+        petakSrc.push({ url: '/api/tiles/scope/kph/' + k + '.pmtiles', kind: 'petak' });
+      }
+      if (!petakSrc.length) {
+        // Fallback legacy bila manifest tak ada / file belum dibangun.
+        try { _ctl.set_pmtiles({ url: '/api/tiles/petak.pmtiles', visible: map.getZoom() <= 11, token: tok }); } catch (_) {}
+      } else {
+        try { _ctl.set_pmtiles_sources('petak', petakSrc, { token: tok }); } catch (_) {}
+      }
+      // Reconcile menambah layer ke peta; di tier geojson (z>10) grup petak
+      // harus tetap sembunyi (detail dari GeoJSON, bukan tile).
+      try { if (map.getZoom() > 11) _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {}
+      // 2. Choropleth overview: petak + z≤10 + scope >1 KPH.
+      const multi = kphList.length !== 1;
+      const key = biz + '|' + z + '|' + tahun + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
+      const wantOv = (biz === 'petak' && z <= 10 && multi && kphList.length > 0);
+      if (!wantOv) {
+        try { window.__spatialOverview = { key: key, wantOv: false, kph: kphList.length, on: false }; } catch (_) {}
+        if (_ovOn) {
+          _ovOn = false;
+          try { _ovHideGeo(); } catch (_) {}
+          try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {}
+        }
+        _ovKey = key;
+        // ADM single-KPH: outline netral konteks tetangga (tanpa warna bisnis).
+        if (biz === 'petak' && z <= 10 && kphList.length === 1) { _neutralBounds(); }
+        else { try { _ovHideGeo(); } catch (_) {} }
+        return;
+      }
+      if (key === _ovKey && _ovOn) return; // sudah tampil
+      _ovKey = key;
+      let rows = [];
+      try {
+        const rr = await queryStats('efektivitas_per_kph', { tahun }, { timeoutMs: 10000 });
+        if (rr && rr.ok && Array.isArray(rr.rows)) rows = rr.rows;
+      } catch (_) {}
+      const colors = {};
+      for (const r of rows) {
+        try { const c = _ovColor(r); if (c) colors[String(r.kode_kph)] = c; } catch (_) {}
+      }
+      // Render via GeoJSON (renderer terverifikasi) dari endpoint bounds_geo;
+      // file tile tetap dibangun sebagai arsip/inventaris multi-divre.
+      const shown = await _ovShowGeo(colors, rows, false);
+      try { _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {} // choropleth ganti petak di overview
+      if (!shown) { _ovOn = false; return; }
+      _ovOn = true;
+      try { log('map', 'MAP', 'overview ON kph berwarna=' + Object.keys(colors).length); } catch (_) {}
+      try { window.__spatialOverview = { key: key, wantOv: !!wantOv, kph: kphList.length, on: true, colored: Object.keys(colors).length }; } catch (_) {}
+      _ovInsight(rows);
+      _ovLegend();
+    } catch (_) {}
+  }
+  let _ovLayer = null; // L.geoJSON choropleth (terisolasi dari fitur petak)
+  function _ovEnsureLayer() {
+    try {
+      if (_ovLayer) return _ovLayer;
+      _ovLayer = window.L.geoJSON([], {
+        style: function(ft) {
+          const p = (ft && ft.properties) || {};
+          return { color: '#FFFFFF', weight: 1.5, opacity: 0.9,
+                   fillColor: p._fill || '#FFFFFF', fillOpacity: p._fill ? 0.45 : 0.0 };
+        },
+        onEachFeature: function(ft, layer) {
+          try { window.__spatialOvCalls = (window.__spatialOvCalls || 0) + 1; } catch (_) {}
+          try {
+            const p = (ft && ft.properties) || {};
+            const nm = p.kph || p.kode_kph || 'KPH';
+            let tip = '<b>' + esc(String(nm)) + '</b>';
+            if (p._b != null) tip += '<br>B' + p._b + ' K' + p._k + ' T' + p._t + ' dari ' + p._n + ' petak';
+            else tip += '<br>Klik untuk filter KPH ini';
+            layer.bindTooltip(tip, { sticky: true, direction: 'top' });
+            layer.on('click', function() {
+              try {
+                const kode = String(p.kode_kph || '');
+                if (!kode || !fKph) return;
+                let has = false;
+                for (const o of fKph.options) { if (o.value === kode) { has = true; break; } }
+                if (!has) return; // di luar scope menu
+                fKph.value = kode;
+                try {
+                  const bb = layer.getBounds && layer.getBounds();
+                  if (bb && bb.isValid && bb.isValid()) map.fitBounds(bb.pad(0.1));
+                } catch (_) {}
+                renderWilayah(); updateHead(); renderChips(); scheduleReload();
+              } catch (_) {}
+            });
+          } catch (_) {}
+        },
+      });
+      return _ovLayer;
+    } catch (_) { return null; }
+  }
+  async function _ovFetchBounds() {
+    // Geometri dissolve per divre dalam scope (scope ditegakkan server).
+    const out = [];
+    for (const d of _scopeDivreList()) {
+      try {
+        const r = await fetch('/api/tiles/bounds_geo?divre=' + encodeURIComponent(d), {
+          headers: { 'X-Ana-Token': _tokPm() }, credentials: 'same-origin',
+        });
+        const j = await r.json().catch(() => ({}));
+        if (j && Array.isArray(j.features)) for (const f of j.features) out.push(f);
+      } catch (_) {}
+    }
+    return out;
+  }
+  function _ovHideGeo() {
+    try { if (_ovLayer && map.hasLayer(_ovLayer)) map.removeLayer(_ovLayer); } catch (_) {}
+    try { if (_ovLayer) _ovLayer.clearLayers(); } catch (_) {}
+  }
+  function _ovShowGeo(colors, rows, neutral) {
+    // Return true bila ada yang tampil. numbers: kode -> {b,k,t,n}.
+    try {
+      const layer = _ovEnsureLayer();
+      if (!layer) return false;
+      return _ovFetchBounds().then(function(feats) {
+        try {
+          if (!feats.length) { _ovHideGeo(); return false; }
+          const nums = {};
+          for (const r of (rows || [])) {
+            try { nums[String(r.kode_kph)] = { b: r.bongkor || 0, k: r.kurang || 0, t: r.terpenuhi || 0, n: r.total_petak || 0 }; } catch (_) {}
+          }
+          const gj = [];
+          for (const f of feats) {
+            try {
+              const p = (f && f.properties) || {};
+              const kode = String(p.kode_kph || '');
+              const g = f.geometry;
+              if (!kode || !g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
+              const props = { kode_kph: kode, kph: p.kph || kode };
+              if (!neutral && colors && colors[kode]) {
+                props._fill = colors[kode];
+                const m = nums[kode] || {};
+                props._b = m.b || 0; props._k = m.k || 0; props._t = m.t || 0; props._n = m.n || 0;
+              }
+              gj.push({ type: 'Feature', geometry: g, properties: props });
+            } catch (_) {}
+          }
+          if (!gj.length) { _ovHideGeo(); return false; }
+          layer.clearLayers();
+          layer.addData({ type: 'FeatureCollection', features: gj });
+          if (!map.hasLayer(layer)) layer.addTo(map);
+          try { window.__spatialOvLayer = layer; } catch (_) {}
+          return true;
+        } catch (_) { _ovHideGeo(); return false; }
+      }).catch(function() { try { _ovHideGeo(); } catch (_) {} return false; });
+    } catch (_) { return false; }
+  }
+  async function _neutralBounds() {
+    // Outline KPH netral se-divre untuk konteks (ADM): tanpa warna bisnis.
+    try {
+      const shown = await _ovShowGeo(null, [], true);
+      void shown;
     } catch (_) {}
   }
 
@@ -1720,6 +1977,7 @@ function updateLegend(biz, kat) {
         // dropdown bisnis ke nilai basi (bug reset-saat-refresh).
         try { const st = collectState(); setBusiness(st.business); setFilters(st.filters); } catch (_) {}
         renderChips();
+        _scheduleOverview(); // scope login berubah → sumber tile + overview ikut
         if (_autoKicked && !_loading) scheduleReload();
       } catch (_) {}
     };
@@ -1769,6 +2027,8 @@ function updateLegend(biz, kat) {
     // Titik simpan: opsi siap — persistensikan apa pun yang tampil saat ini
     // (pilihan user yang dibuat sebelum fetch selesai ikut tersimpan).
     try { _savePanelStateGated({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {}
+    // Sumber tile mengikuti scope terbaru (choropleth/overview bila cocok).
+    _scheduleOverview();
     // Pesan mis-scope (bila ada) menang atas status sumber.
     if (_wilScopeMsg) _setWilStatus('scope', _wilScopeMsg);
     else _setWilStatus(src);
