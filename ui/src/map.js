@@ -1839,6 +1839,15 @@ function updateLegend(biz, kat) {
             if (!ll) return;
             const pt = map.latLngToContainerPoint(ll);
             const el = mk.getElement && mk.getElement();
+            // KPH mengecil mengikuti zoom jauh (Z≤7 kecil, Z8 sedang, Z9-10
+            // normal) agar tak mendominasi; tetap terbaca. Ukur setelahnya.
+            try {
+              if (L === 'kph' && el) {
+                const z = map.getZoom();
+                const sp = el.querySelector && el.querySelector('span');
+                if (sp) sp.style.fontSize = z <= 7 ? '10px' : (z <= 8 ? '11px' : '12px');
+              }
+            } catch (_) {}
             const w = el ? (el.offsetWidth || 60) : 60;
             // Histeresis: yang sedang tampil dipertahankan dulu dalam prioritas
             // sama — geser kecil tak membuat label berkedip tukar.
