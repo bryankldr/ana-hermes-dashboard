@@ -378,7 +378,12 @@ export class LeafletAdapter {
       // fallback to WARNA_STYLE if mapping not supplied but field is warna/kategori
       if (LeafletAdapter.WARNA_STYLE[key]) return { ...(this.baseStyle||{}), ...LeafletAdapter.WARNA_STYLE[key] };
     }
-    // 2) auto: properties.warna -> business color (no opts needed)
+    // 2) auto: properties.warna_hex (gradasi server) didahulukan — kunci
+    // `warna` diskrit tetap untuk KPI/hitungan. Hex tak valid = abaikan.
+    const hx = feature.properties?.warna_hex;
+    if (typeof hx === 'string' && /^#[0-9a-fA-F]{6}$/.test(hx)) {
+      return { ...(this.baseStyle||{}), color: hx, fillColor: hx };
+    }
     const w = String(feature.properties?.warna || '').toLowerCase();
     if (w && LeafletAdapter.WARNA_STYLE[w]) {
       return { ...(this.baseStyle||{}), ...LeafletAdapter.WARNA_STYLE[w] };
