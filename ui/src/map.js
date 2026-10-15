@@ -449,6 +449,7 @@ export function initMapPanel({ log = () => {} } = {}) {
     } catch (_) {}
   }
   syncKatVisibility();
+  _restorePanelState(); // refresh-safe: pulihkan bisnis+filter tersimpan
 
   function updateHead() {
     if (shPeriode) shPeriode.textContent = curPerLabel();
@@ -502,6 +503,71 @@ function updateLegend(biz, kat) {
   // DOM, disimpan di memori agar collectState → resolveTemplate → server utuh.
   let _viewportExtra = {};
   const _KNOWN_TPL = ['petak_bongkor_map','petak_efektivitas_map','petak_multi_penyadap_map','idle_petak_map','aktivitas_petak_map','aktivitas_top_petak','rkap_map','matriks_map','kph_summary_map','petak_with_geometry'];
+
+  // ── Persistensi filter panel (refresh-safe) ──
+  // Bisnis + filter (waktu/wilayah/kategori/pembaharuan) tersimpan di
+  // localStorage per-perangkat; refresh memulihkan, reset manual menghapus.
+  // Kunci perangkat (bukan user): nilai wilayah di luar scope login dibuang
+  // renderWilayah() saat pulih — aman untuk perangkat bersama.
+  // Ephemeral, tak disimpan: subset/template ANA + viewport peta.
+  const _PANEL_KEY = 'ana_spatial_panel_v1';
+  let _panelReady = false; // true setelah opsi wilayah pertama terisi
+  let _pendingWilayah = null;
+  function _savePanelState(st) {
+    if (!_panelReady) return; // jangan timpa simpanan dengan inisialisasi kosong
+    try {
+      const f = (st && st.filters) || {};
+      const keep = {};
+      for (const k of ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke']) {
+        const v = f[k];
+        keep[k] = (v == null) ? '' : String(v);
+      }
+      localStorage.setItem(_PANEL_KEY, JSON.stringify({ business: (st && st.business) || 'petak', filters: keep, at: Date.now() }));
+    } catch (_) {}
+  }
+  function _readPanelState() {
+    try {
+      const raw = localStorage.getItem(_PANEL_KEY);
+      if (!raw) return null;
+      const j = JSON.parse(raw);
+      if (!j || typeof j !== 'object' || !j.filters) return null;
+      return j;
+    } catch (_) { return null; }
+  }
+  function _setSel(elm, val, allow) {
+    if (!elm || val == null || val === '') return false;
+    const v = String(val);
+    if (allow && !allow(v)) return false;
+    try {
+      const has = [...elm.options].some(function(o){ return o.value === v; });
+      if (!has) return false;
+      elm.value = v;
+      return true;
+    } catch (_) { return false; }
+  }
+  function _restorePanelState() {
+    const s = _readPanelState();
+    if (!s) return;
+    try {
+      const f = s.filters || {};
+      if (bizSel && s.business) {
+        const b = String(s.business);
+        if ([...bizSel.options].some(function(o){ return o.value === b; })) bizSel.value = b;
+      }
+      syncKatVisibility();
+      _setSel(fBulan, f.bulan, function(v){ return /^[1-9]$|^1[0-2]$/.test(v); });
+      _setSel(fTahun, f.tahun);
+      _setSel(fPeriode, f.periode, function(v){ return v === '0' || v === '1' || v === '2'; });
+      _setSel(fPemKe, f.pembaharuan_ke, function(v){ return v === '' || ['1','2','3','4'].includes(v); });
+      const kc = String(f.kategori || '');
+      if (kc && katSel && [...katSel.options].some(function(o){ return o.value === kc; })) katSel.value = kc;
+      // Wilayah dipulihkan susulan setelah opsi DB terisi (lihat _populateDropdowns).
+      const w = {};
+      for (const k of ['divre','kph','bkph','rph','tpg']) if (String(f[k] || '') !== '') w[k] = String(f[k]);
+      _pendingWilayah = Object.keys(w).length ? w : null;
+      updateHead(); renderChips();
+    } catch (_) {}
+  }
 
   function collectState() {
     const base = {
@@ -787,6 +853,7 @@ function updateLegend(biz, kat) {
     _setProgress(12, 'memuat ' + st.business + ' ' + st.filters.tahun + '-' + String(st.filters.bulan).padStart(2,'0') + (String(st.filters.periode) === '0' ? '-FULL' : '-P' + st.filters.periode) + '…');
     setBusiness(st.business);
     setFilters(st.filters);
+    _savePanelState(st); // refresh-safe: ingat bisnis+filter terakhir
     updateHead(); renderChips();
     const prevStat = stat?.textContent || '';
     if (stat) stat.textContent = 'memuat ' + st.business + '…';
@@ -1060,7 +1127,8 @@ function updateLegend(biz, kat) {
     if (fTpg && !fTpg.disabled) fTpg.value='';
     try { renderWilayah(); } catch (_) {} // kembalikan opsi anak penuh sesuai scope
     if (katSel) katSel.value='semua'; if (bizSel) bizSel.value='petak';
-    _spatialWarna = '';   // reset filter = buang juga subset warna dari ANA
+    _spatialWarna = ''; _spatialTemplate = null; // reset manual = buang semua titipan ANA
+    try { localStorage.removeItem('ana_spatial_panel_v1'); } catch (_) {} // refresh mulai dari default lagi
     syncKatVisibility(); updateLegend('petak','semua'); updateHead(); renderChips(); reloadBusiness();
   });
   btnRefresh?.addEventListener('click', reloadBusiness);
@@ -1509,6 +1577,30 @@ function updateLegend(biz, kat) {
     _wilayahCache = opts;
     _buildWIdx();
     renderWilayah();
+    // Pulihkan wilayah tersimpan (sekali): set nilai yang opsinya ada, lalu
+    // renderWilayah() menegakkan scope+cascade (di luar scope dibuang).
+    // reload susulan aman di semua state (diantre via _pending bila loading).
+    if (_pendingWilayah) {
+      const pw = _pendingWilayah; _pendingWilayah = null;
+      try {
+        const SEL = _wSel();
+        let touched = false;
+        for (const L of _WLEVELS) {
+          const v = pw[L];
+          const sel = SEL[L];
+          if (!v || !sel || sel.disabled) continue;
+          const has = [...sel.options].some(function(o){ return o.value === v; });
+          if (has && sel.value !== v) { sel.value = v; touched = true; }
+        }
+        if (touched) {
+          renderWilayah();
+          try { const st = collectState(); setFilters(st.filters); } catch (_) {}
+          renderChips();
+          if (_autoKicked) scheduleReload();
+        }
+      } catch (_) {}
+    }
+    _panelReady = true;
     // Pesan mis-scope (bila ada) menang atas status sumber.
     if (_wilScopeMsg) _setWilStatus('scope', _wilScopeMsg);
     else _setWilStatus(src);
