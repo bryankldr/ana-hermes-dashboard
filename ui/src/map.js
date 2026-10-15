@@ -1031,8 +1031,19 @@ function updateLegend(biz, kat) {
       kpiBox?.classList.add('collapsed');
     }
   }
-  bizSel?.addEventListener('change', () => { syncKatVisibility(); updateLegend(bizSel.value, katSel?.value || 'semua'); updateHead(); renderChips(); scheduleReload(); });
-  katSel?.addEventListener('change', () => { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });
+  bizSel?.addEventListener('change', () => {
+    // Ganti bisnis manual = reset kategori ke Semua + buang subset/template
+    // ANA (_spatialWarna/_spatialTemplate), agar konteks lama tak terbawa
+    // (nyasar) ke bisnis baru. Jalur ANA (spatial_set) tak lewat listener
+    // ini (set .value programatik tak fire change) — tetap utuh.
+    try { if (katSel) katSel.value = 'semua'; } catch (_) {}
+    _spatialWarna = ''; _spatialTemplate = null;
+    syncKatVisibility(); updateLegend(bizSel.value, katSel?.value || 'semua'); updateHead(); renderChips(); scheduleReload(); });
+  katSel?.addEventListener('change', () => {
+    // Kategori manual = niat eksplisit user: buang subset/template ANA agar
+    // tak menimpa pilihan (kasus nyasar yang sama). Jalur ANA tak fire change.
+    _spatialWarna = ''; _spatialTemplate = null;
+    updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });
   // Waktu + pembaharuan_ke pakai listener generik; wilayah sudah punya cascade-specific
   [fBulan, fTahun, fPeriode, fPemKe].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
   fApply?.addEventListener('click', reloadBusiness);
