@@ -204,10 +204,15 @@ export async function fetchWilayahOptions(tahun) {
     divre: [], kph: [], bkph: [], rph: [], tpg: [],
   };
   try {
+    // Timeout eksplisit: tanpa ini fetch gantung = _populateDropdowns tak
+    // pernah jalan = menu wilayah kosong + persistensi mati selamanya.
+    let _sig = undefined;
+    try { if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) _sig = AbortSignal.timeout(15000); } catch (_) {}
     const res = await fetch('/api/simoge/query', {
       method: 'POST', headers: headers(),
       credentials: 'same-origin',
       body: JSON.stringify({ template: 'wilayah_labels', params: {} }),
+      ...(_sig ? { signal: _sig } : {}),
     });
     const data = await res.json();
     const r0 = data.rows?.[0];

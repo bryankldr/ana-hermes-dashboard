@@ -1607,6 +1607,9 @@ function updateLegend(biz, kat) {
       } catch (_) {}
     }
     _panelReady = true;
+    // Titik simpan: opsi siap — persistensikan apa pun yang tampil saat ini
+    // (pilihan user yang dibuat sebelum fetch selesai ikut tersimpan).
+    try { _savePanelState({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {}
     // Pesan mis-scope (bila ada) menang atas status sumber.
     if (_wilScopeMsg) _setWilStatus('scope', _wilScopeMsg);
     else _setWilStatus(src);
