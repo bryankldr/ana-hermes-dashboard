@@ -251,7 +251,13 @@ export function initMapPanel({ log = () => {} } = {}) {
     if (stat) stat.textContent = 'leaflet gagal dimuat';
     return el;
   }
-  const map = window.L.map(box, { zoomControl: false, attributionControl: false }).setView(CENTER, 11);
+  const map = window.L.map(box, {
+    zoomControl: false, attributionControl: false,
+    // Canvas renderer: ratusan polygon + ribuan pin/garis tetap mulus
+    // (SVG = ribuan node DOM = jank tiap render/zoom). Popup/tooltip/
+    // dash/bringToFront tetap didukung. Animasi zoom/pan eksplisit.
+    preferCanvas: true, zoomAnimation: true, fadeAnimation: true, inertia: true,
+  }).setView(CENTER, 11);
   const dark = window.L.tileLayer('/api/tiles/esri/dark/{z}/{x}/{y}', { maxZoom: 18, attribution: 'Esri' });
   const sat = window.L.tileLayer('/api/tiles/esri/sat/{z}/{x}/{y}', { maxZoom: 18, attribution: 'Esri, Maxar, Earthstar Geographics' });
   // Label di pane sendiri: filter redup imagery tak kena teks (cegah halo/bayangan).

@@ -655,6 +655,7 @@ export class LeafletAdapter {
     this.features.clear();
     this._petakCenterByEvapot.clear();
     this._petakRingByEvapot.clear();
+    try { if (this._pinGeoCache) this._pinGeoCache.clear(); } catch (_) {} // ring basi ikut dibuang
     // garis ikut hilang saat polygon di-clear (filter ganti), rebuild setelah set_features lagi
     if (this.aktivitasLines) { try { this.aktivitasLines.clearLayers(); } catch (_) {} }
     this.state.count = 0;
@@ -739,7 +740,23 @@ _rebuildAktivitasLines() {
 // Ray-casting ke ring polygon kode_evapot. Butuh poligon termuat; kalau belum
 // (polygon belum di-set atau lewat limit) return false → treated sebagai luar →
 // garis digambar ke center, sama seperti perilaku sebelumnya.
+// Memo: hasil per (evapot, koordinat) di-cache — rebuild garis (tiap toggle
+// zoom/visibility) tak mengulang ray-casting O(ring) ribuan kali. Cache
+// dibuang di clear_features (ring ikut di-clear di sana).
 _pinInsidePolygon(ev, lat, lng) {
+  try {
+    const c = (this._pinGeoCache || (this._pinGeoCache = new Map()));
+    const k = 'i|' + ev + '|' + Number(lat).toFixed(6) + '|' + Number(lng).toFixed(6);
+    if (c.has(k)) return c.get(k);
+    const r = this._pinInsidePolygonRaw(ev, lat, lng);
+    if (c.size > 20000) c.clear();
+    c.set(k, r);
+    return r;
+  } catch (_) {
+    return this._pinInsidePolygonRaw(ev, lat, lng);
+  }
+}
+_pinInsidePolygonRaw(ev, lat, lng) {
   const ring = this._petakRingByEvapot && this._petakRingByEvapot.get(ev);
   if (!ring || ring.length < 3) return false;
   let c = false;
@@ -758,7 +775,21 @@ _pinInsidePolygon(ev, lat, lng) {
 // Titik terdekat pada ring ke (lat,lng) — projeksi orthogonal per segment
 // dalam meter-lokal. Dipakai sebagai ujung garis, bukan center polygon: center
 // bisa jauh dari tepi sehingga garis terlihat "menembus" petak.
+// Memo seperti _pinInsidePolygon (lihat atas).
 _nearestOnPolygon(ev, lat, lng) {
+  try {
+    const c = (this._pinGeoCache || (this._pinGeoCache = new Map()));
+    const k = 'n|' + ev + '|' + Number(lat).toFixed(6) + '|' + Number(lng).toFixed(6);
+    if (c.has(k)) return c.get(k);
+    const r = this._nearestOnPolygonRaw(ev, lat, lng);
+    if (c.size > 20000) c.clear();
+    c.set(k, r);
+    return r;
+  } catch (_) {
+    return this._nearestOnPolygonRaw(ev, lat, lng);
+  }
+}
+_nearestOnPolygonRaw(ev, lat, lng) {
   const ring = this._petakRingByEvapot && this._petakRingByEvapot.get(ev);
   const c = this._petakCenterByEvapot && this._petakCenterByEvapot.get(ev);
   if (!ring || ring.length < 2) return c ? { lat: c.lat, lng: c.lng } : null;
