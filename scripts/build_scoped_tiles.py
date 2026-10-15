@@ -81,6 +81,20 @@ def main():
                 out["errors"].append({"divre": divre, "tahap": "build", **bld})
     else:
         out["errors"].append({"tahap": "bounds_export", **bexp})
+    oexp = _sh(["scripts/export_kph_overview.py", "--tahun", str(args.tahun)])
+    out["overview_export"] = oexp.get("detail") or oexp
+    if oexp.get("ok"):
+        import glob as _glob
+        for _nd in sorted(_glob.glob(str(ROOT / "tiles" / "overview_*.ndjson"))):
+            _name = pathlib.Path(_nd).stem  # overview_<divre>
+            bld = _sh(["scripts/build_pmtiles.py", "--in", f"tiles/{_name}.ndjson",
+                       "--out", f"tiles/{_name}.pmtiles",
+                       "--layer", "petak", "--min-zoom", "4", "--max-zoom", "10"])
+            out.setdefault("overview", []).append({"file": _name, "build": bld.get("detail") or bld})
+            if not bld.get("ok"):
+                out["errors"].append({"file": _name, "tahap": "build", **bld})
+    else:
+        out["errors"].append({"tahap": "overview_export", **oexp})
     # manifest (sumber kebenaran inventory untuk klien + status)
     try:
         files = []
@@ -90,6 +104,8 @@ def main():
                 scope = {"level": "kph", "kode": f.stem[4:]}
             elif f.stem.startswith("bounds_"):
                 scope = {"level": "divre", "kode": f.stem[7:]}
+            elif f.stem.startswith("overview_"):
+                scope = {"level": "divre", "kode": f.stem[9:], "kind": "overview"}
             elif f.stem == "petak":
                 scope = {"level": "legacy"}
             files.append({"name": f.name, "scope": scope,
