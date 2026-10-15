@@ -33,6 +33,23 @@
   <!-- ?v= bumped manual tiap ubah CSS/JS: tanpa ini browser pakai cache lama
        dan perbaikan panel chart tak akan terlihat. -->
   <link rel="stylesheet" href="styles/map.css?v=20261014f">
+  <!-- Boot gate (anti kilas panel disabled saat refresh): seluruh #hud
+       tersembunyi sampai LayoutManager selesai terapkan layout/disabled,
+       diganti tabir loading. Inline di HTML (no-store) agar selalu segar.
+       visibility (bukan display) supaya measure() tetap akurat. -->
+  <style>
+    body:not(.layout-ready) #hud { visibility: hidden; }
+    #bootVeil { position: fixed; inset: 0; z-index: 9999; display: flex;
+      flex-direction: column; gap: 14px; align-items: center; justify-content: center;
+      background: #020f2a; color: #9db4d8;
+      font: 12px/1.5 system-ui, sans-serif; letter-spacing: .18em; }
+    body.layout-ready #bootVeil { display: none; }
+    #bootVeil .boot-spin { width: 34px; height: 34px; border-radius: 50%;
+      border: 3px solid rgba(45,242,255,.18); border-top-color: #2df2ff;
+      animation: bootspin 1s linear infinite; }
+    @keyframes bootspin { to { transform: rotate(360deg); } }
+  </style>
+  <noscript><style>#bootVeil { display: none; } body:not(.layout-ready) #hud { visibility: visible; }</style></noscript>
   <script defer src="vendor/xterm.js"></script>
   <script defer src="vendor/xterm-addon-fit.js"></script>
   <script defer src="vendor/leaflet/leaflet.js"></script>
@@ -41,6 +58,7 @@
   <script src="vendor/qrcode-generator.js"></script>
 </head>
 <body>
+<div id="bootVeil" aria-hidden="true"><div class="boot-spin"></div><div>MEMUAT</div></div>
 <div class="hud" id="hud">
 
   <!-- ═══ BACKGROUND LAYERS ═══ -->

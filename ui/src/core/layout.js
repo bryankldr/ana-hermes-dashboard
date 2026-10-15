@@ -89,7 +89,11 @@ export class LayoutManager {
 
   async loadConfig() {
     try {
-      const res = await fetch(LAYOUT_URL, { headers: { 'X-Ana-Token': getToken() } });
+      // Timeout: fetch gantung = tabir boot selamanya. Gagal/timeout tetap
+      // lanjut (finally): panel tampil tak terkonfigurasi, bukan veil abadi.
+      let _sig;
+      try { _sig = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(10000) : undefined; } catch (_) { _sig = undefined; }
+      const res = await fetch(LAYOUT_URL, { headers: { 'X-Ana-Token': getToken() }, ...(_sig ? { signal: _sig } : {}) });
       if (!res.ok) return;
       const data = await res.json();
       if (!data || typeof data !== 'object') return;
@@ -130,6 +134,9 @@ export class LayoutManager {
     } catch (_) {}
     finally {
       this._loaded = true;
+      // Boot gate selesai: tampilkan HUD (disabled sudah diterapkan di atas).
+      // Selalu dipasang — bahkan saat fetch gagal — agar tak veil selamanya.
+      try { document.body.classList.add('layout-ready'); } catch (_) {}
       if (this._pendingSave) { this._pendingSave = false; this.save(); }
     }
   }
