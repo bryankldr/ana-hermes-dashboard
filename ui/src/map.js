@@ -1571,7 +1571,10 @@ function updateLegend(biz, kat) {
     window.__spatialApplyUserScope = function() {
       try {
         renderWilayah();
-        try { const st = collectState(); setFilters(st.filters); } catch (_) {}
+        // Sinkron PENUH (bisnis + filter): setFilters saja memancarkan snap
+        // hibrida {bisnis basi + filter baru} yang membuat subscribe menimpa
+        // dropdown bisnis ke nilai basi (bug reset-saat-refresh).
+        try { const st = collectState(); setBusiness(st.business); setFilters(st.filters); } catch (_) {}
         renderChips();
         if (_autoKicked && !_loading) scheduleReload();
       } catch (_) {}
@@ -1611,7 +1614,7 @@ function updateLegend(biz, kat) {
         }
         if (touched) {
           renderWilayah();
-          try { const st = collectState(); setFilters(st.filters); } catch (_) {}
+          try { const st = collectState(); setBusiness(st.business); setFilters(st.filters); } catch (_) {}
           renderChips();
           try { console.info('[spatial-persist] wilayah pulih', JSON.stringify(pw)); } catch (_) {}
           if (_autoKicked) scheduleReload();
