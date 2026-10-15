@@ -512,6 +512,7 @@ function updateLegend(biz, kat) {
   const _PANEL_KEY = 'ana_spatial_panel_v1';
   let _panelReady = false; // true setelah opsi wilayah pertama terisi
   let _pendingWilayah = null;
+  let _lastSavedFilt = null; // kunci filter terakhir yang tersimpan (anti-clobber)
   function _savePanelState(st) {
     if (!_panelReady) return; // jangan timpa simpanan dengan inisialisasi kosong
     try {
@@ -526,6 +527,17 @@ function updateLegend(biz, kat) {
       try { window.__spatialPersist = { ...(window.__spatialPersist || {}), saved: snap }; } catch (_) {}
       try { console.info('[spatial-persist] save', snap.business, JSON.stringify(keep)); } catch (_) {}
     } catch (_) {}
+  }
+  function _savePanelStateGated(st) {
+    // Simpan hanya bila kunci filter NON-viewport berubah: pan/zoom murni tak
+    // menimpa simpanan (anti-clobber antar tab yang menampilkan filter beda).
+    try {
+      const k = _filtKey(st);
+      if (k === _lastSavedFilt) return false;
+      _lastSavedFilt = k;
+      _savePanelState(st);
+      return true;
+    } catch (_) { return false; }
   }
   function _readPanelState() {
     try {
@@ -858,7 +870,7 @@ function updateLegend(biz, kat) {
     _setProgress(12, 'memuat ' + st.business + ' ' + st.filters.tahun + '-' + String(st.filters.bulan).padStart(2,'0') + (String(st.filters.periode) === '0' ? '-FULL' : '-P' + st.filters.periode) + '…');
     setBusiness(st.business);
     setFilters(st.filters);
-    _savePanelState(st); // refresh-safe: ingat bisnis+filter terakhir
+    _savePanelStateGated(st); // refresh-safe: simpan hanya bila filter berubah
     updateHead(); renderChips();
     const prevStat = stat?.textContent || '';
     if (stat) stat.textContent = 'memuat ' + st.business + '…';
@@ -1609,7 +1621,7 @@ function updateLegend(biz, kat) {
     _panelReady = true;
     // Titik simpan: opsi siap — persistensikan apa pun yang tampil saat ini
     // (pilihan user yang dibuat sebelum fetch selesai ikut tersimpan).
-    try { _savePanelState({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {}
+    try { _savePanelStateGated({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {}
     // Pesan mis-scope (bila ada) menang atas status sumber.
     if (_wilScopeMsg) _setWilStatus('scope', _wilScopeMsg);
     else _setWilStatus(src);
@@ -1680,8 +1692,8 @@ function updateLegend(biz, kat) {
 
   subscribeSpatial(function(snap){
     try {
-      if (bizSel && bizSel.value !== snap.business) { bizSel.value = snap.business; syncKatVisibility(); updateLegend(snap.business, snap.filters?.kategori || katSel?.value || 'semua'); }
-      if (katSel && katSel.value !== snap.filters.kategori) { katSel.value = snap.filters.kategori; try { updateLegend(snap.business, snap.filters.kategori); } catch(_){} }
+      if (bizSel && bizSel.value !== snap.business) { try { console.info('[spatial-persist] subscribe timpa bisnis', bizSel.value, '->', snap.business); } catch (_) {} bizSel.value = snap.business; syncKatVisibility(); updateLegend(snap.business, snap.filters?.kategori || katSel?.value || 'semua'); }
+      if (katSel && katSel.value !== snap.filters.kategori) { try { console.info('[spatial-persist] subscribe timpa kategori', katSel.value, '->', snap.filters.kategori); } catch (_) {} katSel.value = snap.filters.kategori; try { updateLegend(snap.business, snap.filters.kategori); } catch(_){} }
       const _pk = String(snap.filters?.pembaharuan_ke ?? '');
       if (fPemKe && fPemKe.value !== _pk && (_pk === '' || ['1','2','3','4'].includes(_pk))) fPemKe.value = _pk;
       updateHead(); renderChips();
@@ -1762,7 +1774,7 @@ function updateLegend(biz, kat) {
           else delete _viewportExtra[_k];
         }
         // Merge into spatial_set handler logic
-        if (a.business !== undefined && bizSel) bizSel.value = String(a.business);
+        if (a.business !== undefined && bizSel && bizSel.value !== String(a.business)) { try { console.info('[spatial-persist] ANA timpa bisnis', bizSel.value, '->', String(a.business)); } catch (_) {} bizSel.value = String(a.business); }
         _spatialWarna = String((a.filters && a.filters.warna) || a.warna || '').trim();
         // Apply defaults for empty time filters (same as spatial_set)
         const _defWaktu = { bulan: String(d.getMonth()+1), tahun: '2026', periode: d.getDate()<=15?'1':'2' };
@@ -1813,7 +1825,7 @@ function updateLegend(biz, kat) {
           }
         } catch (_) {}
         const f = (a.filters && typeof a.filters === 'object') ? a.filters : {};
-        if (a.business !== undefined && bizSel) bizSel.value = String(a.business);
+        if (a.business !== undefined && bizSel && bizSel.value !== String(a.business)) { try { console.info('[spatial-persist] ANA timpa bisnis', bizSel.value, '->', String(a.business)); } catch (_) {} bizSel.value = String(a.business); }
         _spatialWarna = String((a.filters && a.filters.warna) || a.warna || '').trim();
         // Kontrak penuh solusi A: "" = reset eksplisit dari server (bukan skip).
         // Waktu kosong → default panel (bulan berjalan/2026/P berjalan); wilayah
