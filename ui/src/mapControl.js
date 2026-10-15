@@ -1008,9 +1008,11 @@ set_aktivitas_visibility(visible) {
       return this._pmGroups[gid];
     } catch (_) { return new Map(); }
   }
-  _mkPolySym(fill, op, width) {
+  _mkPolySym(fill, op, width, stroke) {
+    // stroke default = warna fill yang sama (bentuk kecil terbaca 1 warna
+    // jelas dari zoom jauh; batas detail muncul di GeoJSON zoom besar).
     return new window.protomapsL.PolygonSymbolizer({
-      fill, opacity: op ?? 0.38, stroke: '#FFFFFF', width: width ?? 1, strokeOpacity: 0.9,
+      fill, opacity: op ?? 0.38, stroke: stroke ?? fill, width: width ?? 1, strokeOpacity: 0.9,
     });
   }
   _petakRules() {

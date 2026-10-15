@@ -477,6 +477,7 @@ export function initMapPanel({ log = () => {} } = {}) {
 function updateLegend(biz, kat) {
     if (!legend) return;
     const k = String(kat||'').toLowerCase();
+    const _ovLine = '<span class="lg" title="porsi bongkor ≥25%"><i style="background:#EF4444"></i> KPH rawan</span><span class="lg" title="porsi kurang ≥30% atau terpenuhi <60%"><i style="background:#EAB308"></i> KPH perhatian</span><span class="lg" title="selain itu"><i style="background:#22C55E"></i> KPH baik</span><span class="lg" title="overview choropleth KPH (z≤10) — angka per KPH di panel insight">overview KPH</span>';
     if (biz === 'petak' && k === 'idle') {
       legend.innerHTML = '<span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Aktif (hijau)</span>' + _legendAttrib();
     } else if (biz === 'petak' && k === 'multi_penyadap') {
@@ -496,6 +497,12 @@ function updateLegend(biz, kat) {
     } else {
       legend.innerHTML = '<span class="lg"><i style="background:#2DF2FF"></i> Matriks</span>' + _legendAttrib();
     }
+    // Guard anti-kedip: overview aktif = bar overview selalu menyertai,
+    // dari manapun updateLegend dipanggil (features-loaded, subscribe, ANA).
+    // TDZ-aman: _ovOn dideklarasikan belakangan.
+    try {
+      if (_ovOn && legend.innerHTML.indexOf('overview KPH') === -1) legend.innerHTML = _ovLine + legend.innerHTML;
+    } catch (_) {}
   }
   updateLegend('petak', katSel?.value || 'semua');
 
@@ -1498,10 +1505,8 @@ function updateLegend(biz, kat) {
     } catch (_) { return null; }
   }
   function _ovLegend() {
-    try {
-      updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua');
-      if (legend) legend.innerHTML = '<span class="lg" title="porsi bongkor ≥25%"><i style="background:#EF4444"></i> KPH rawan</span><span class="lg" title="porsi kurang ≥30% atau terpenuhi <60%"><i style="background:#EAB308"></i> KPH perhatian</span><span class="lg" title="selain itu"><i style="background:#22C55E"></i> KPH baik</span><span class="lg" title="overview choropleth KPH (z≤10) — angka per KPH di panel insight">overview KPH</span>' + legend.innerHTML;
-    } catch (_) {}
+    // Guard di updateLegend menyertakan bar overview bila _ovOn (anti duplikat).
+    try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {}
   }
   function _ovInsight(rows) {
     // Angka per KPH menyertai warna (tooltip angka).
@@ -1576,11 +1581,34 @@ function updateLegend(biz, kat) {
       for (const r of rows) {
         try { const c = _ovColor(r); if (c) colors[String(r.kode_kph)] = c; } catch (_) {}
       }
-      // Render via GeoJSON (renderer terverifikasi) dari endpoint bounds_geo;
-      // file tile tetap dibangun sebagai arsip/inventaris multi-divre.
-      const shown = await _ovShowGeo(colors, rows, false);
+      if (!Object.keys(colors).length) {
+        // Agregat kosong/gagal: jangan tampilkan outline putih tanpa warna.
+        _ovOn = false;
+        try { _ovHideGeo(); } catch (_) {}
+        try { log('map', 'MAP', 'overview off: agregat kosong'); } catch (_) {}
+        return;
+      }
+      // Render: tile overview SOLID per divre (warna bake) + hit-layer transparan
+      // (tooltip + klik drill). Aturan warna statis = pola tile petak.
+      const oSrc = [];
+      for (const d of _scopeDivreList()) {
+        oSrc.push({ url: '/api/tiles/scope/overview_' + d + '.pmtiles', kind: 'petak',
+                    rules: _ovTileRules(), maxDataZoom: 10 });
+      }
+      let ovOk = false;
+      try {
+        const rr = _ctl.set_pmtiles_sources('bounds', oSrc, { token: tok });
+        ovOk = !!(rr && (rr.added > 0 || (rr.active || []).length > 0));
+      } catch (_) { ovOk = false; }
+      // Fallback: tanpa file overview (belum dibangun) = mode lama.
+      if (!ovOk) {
+        _ovOn = false;
+        try { log('map', 'MAP', 'overview off: file overview tak ada'); } catch (_) {}
+        return;
+      }
       try { _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {} // choropleth ganti petak di overview
-      if (!shown) { _ovOn = false; return; }
+      // Hit-layer transparan utk tooltip + klik (binding post-hoc, pola terverifikasi).
+      try { await _ovHitLayer(rows, false); } catch (_) {}
       _ovOn = true;
       try { log('map', 'MAP', 'overview ON kph berwarna=' + Object.keys(colors).length); } catch (_) {}
       try { window.__spatialOverview = { key: key, wantOv: !!wantOv, kph: kphList.length, on: true, colored: Object.keys(colors).length }; } catch (_) {}
@@ -1588,41 +1616,28 @@ function updateLegend(biz, kat) {
       _ovLegend();
     } catch (_) {}
   }
-  let _ovLayer = null; // L.geoJSON choropleth (terisolasi dari fitur petak)
+  // Rules tile overview SOLID (fill penuh, bukan transparan/gradasi).
+  function _ovTileRules() {
+    try {
+      const P = window.protomapsL;
+      const mk = function(fill) {
+        return new P.PolygonSymbolizer({ fill: fill, opacity: 0.92, stroke: fill, width: 1.5, strokeOpacity: 0.9 });
+      };
+      const wf = function(w) { return function(z, f) { return String((f && f.props && f.props.warna) || '').toLowerCase() === w; }; };
+      return [
+        { dataLayer: 'petak', symbolizer: mk('#EF4444'), filter: wf('merah') },
+        { dataLayer: 'petak', symbolizer: mk('#EAB308'), filter: wf('kuning') },
+        { dataLayer: 'petak', symbolizer: mk('#22C55E'), filter: wf('hijau') },
+      ];
+    } catch (_) { return []; }
+  }
+  let _ovLayer = null; // hit-layer transparan (tooltip + klik drill)
   function _ovEnsureLayer() {
     try {
       if (_ovLayer) return _ovLayer;
       _ovLayer = window.L.geoJSON([], {
-        style: function(ft) {
-          const p = (ft && ft.properties) || {};
-          return { color: '#FFFFFF', weight: 1.5, opacity: 0.9,
-                   fillColor: p._fill || '#FFFFFF', fillOpacity: p._fill ? 0.45 : 0.0 };
-        },
-        onEachFeature: function(ft, layer) {
-          try { window.__spatialOvCalls = (window.__spatialOvCalls || 0) + 1; } catch (_) {}
-          try {
-            const p = (ft && ft.properties) || {};
-            const nm = p.kph || p.kode_kph || 'KPH';
-            let tip = '<b>' + esc(String(nm)) + '</b>';
-            if (p._b != null) tip += '<br>B' + p._b + ' K' + p._k + ' T' + p._t + ' dari ' + p._n + ' petak';
-            else tip += '<br>Klik untuk filter KPH ini';
-            layer.bindTooltip(tip, { sticky: true, direction: 'top' });
-            layer.on('click', function() {
-              try {
-                const kode = String(p.kode_kph || '');
-                if (!kode || !fKph) return;
-                let has = false;
-                for (const o of fKph.options) { if (o.value === kode) { has = true; break; } }
-                if (!has) return; // di luar scope menu
-                fKph.value = kode;
-                try {
-                  const bb = layer.getBounds && layer.getBounds();
-                  if (bb && bb.isValid && bb.isValid()) map.fitBounds(bb.pad(0.1));
-                } catch (_) {}
-                renderWilayah(); updateHead(); renderChips(); scheduleReload();
-              } catch (_) {}
-            });
-          } catch (_) {}
+        style: function() {
+          return { color: '#FFFFFF', weight: 0, opacity: 0, fillColor: '#FFFFFF', fillOpacity: 0, interactive: true };
         },
       });
       return _ovLayer;
@@ -1646,49 +1661,84 @@ function updateLegend(biz, kat) {
     try { if (_ovLayer && map.hasLayer(_ovLayer)) map.removeLayer(_ovLayer); } catch (_) {}
     try { if (_ovLayer) _ovLayer.clearLayers(); } catch (_) {}
   }
-  function _ovShowGeo(colors, rows, neutral) {
-    // Return true bila ada yang tampil. numbers: kode -> {b,k,t,n}.
+  function _ovBindHit(layer, nums) {
+    // Binding post-hoc (pola terverifikasi): tooltip + klik drill per fitur.
+    try {
+      layer.eachLayer(function(ll) {
+        try {
+          const p = (ll.feature && ll.feature.properties) || {};
+          const nm = p.kph || p.kode_kph || 'KPH';
+          let tip = '<b>' + esc(String(nm)) + '</b>';
+          const m = nums[String(p.kode_kph || '')] || null;
+          if (m) tip += '<br>B' + m.b + ' K' + m.k + ' T' + m.t + ' dari ' + m.n + ' petak';
+          else tip += '<br>Klik untuk filter KPH ini';
+          ll.bindTooltip(tip, { sticky: true, direction: 'top' });
+          ll.on('click', function() {
+            try {
+              const kode = String((ll.feature && ll.feature.properties && ll.feature.properties.kode_kph) || '');
+              if (!kode || !fKph) return;
+              let has = false;
+              for (const o of fKph.options) { if (o.value === kode) { has = true; break; } }
+              if (!has) return; // di luar scope menu
+              fKph.value = kode;
+              try {
+                const bb = ll.getBounds && ll.getBounds();
+                if (bb && bb.isValid && bb.isValid()) map.fitBounds(bb.pad(0.1));
+              } catch (_) {}
+              renderWilayah(); updateHead(); renderChips(); scheduleReload();
+            } catch (_) {}
+          });
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+  async function _ovShowHit(rows, neutral) {
+    // Return true bila hit-layer tampil. numbers: kode -> {b,k,t,n}.
     try {
       const layer = _ovEnsureLayer();
       if (!layer) return false;
-      return _ovFetchBounds().then(function(feats) {
+      const feats = await _ovFetchBounds();
+      if (!feats.length) { _ovHideGeo(); return false; }
+      const nums = {};
+      for (const r of (rows || [])) {
+        try { nums[String(r.kode_kph)] = { b: r.bongkor || 0, k: r.kurang || 0, t: r.terpenuhi || 0, n: r.total_petak || 0 }; } catch (_) {}
+      }
+      const gj = [];
+      for (const f of feats) {
         try {
-          if (!feats.length) { _ovHideGeo(); return false; }
-          const nums = {};
-          for (const r of (rows || [])) {
-            try { nums[String(r.kode_kph)] = { b: r.bongkor || 0, k: r.kurang || 0, t: r.terpenuhi || 0, n: r.total_petak || 0 }; } catch (_) {}
-          }
-          const gj = [];
-          for (const f of feats) {
-            try {
-              const p = (f && f.properties) || {};
-              const kode = String(p.kode_kph || '');
-              const g = f.geometry;
-              if (!kode || !g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
-              const props = { kode_kph: kode, kph: p.kph || kode };
-              if (!neutral && colors && colors[kode]) {
-                props._fill = colors[kode];
-                const m = nums[kode] || {};
-                props._b = m.b || 0; props._k = m.k || 0; props._t = m.t || 0; props._n = m.n || 0;
-              }
-              gj.push({ type: 'Feature', geometry: g, properties: props });
-            } catch (_) {}
-          }
-          if (!gj.length) { _ovHideGeo(); return false; }
-          layer.clearLayers();
-          layer.addData({ type: 'FeatureCollection', features: gj });
-          if (!map.hasLayer(layer)) layer.addTo(map);
-          try { window.__spatialOvLayer = layer; } catch (_) {}
-          return true;
-        } catch (_) { _ovHideGeo(); return false; }
-      }).catch(function() { try { _ovHideGeo(); } catch (_) {} return false; });
-    } catch (_) { return false; }
+          const p = (f && f.properties) || {};
+          const kode = String(p.kode_kph || '');
+          const g = f.geometry;
+          if (!kode || !g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
+          gj.push({ type: 'Feature', geometry: g,
+                    properties: { kode_kph: kode, kph: p.kph || kode } });
+        } catch (_) {}
+      }
+      if (!gj.length) { _ovHideGeo(); return false; }
+      layer.clearLayers();
+      layer.addData({ type: 'FeatureCollection', features: gj });
+      if (!map.hasLayer(layer)) layer.addTo(map);
+      _ovBindHit(layer, neutral ? {} : nums);
+      try { window.__spatialOvLayer = layer; } catch (_) {}
+      return true;
+    } catch (_) { try { _ovHideGeo(); } catch (_) {} return false; }
   }
   async function _neutralBounds() {
-    // Outline KPH netral se-divre untuk konteks (ADM): tanpa warna bisnis.
+    // Outline KPH netral se-divre untuk konteks (ADM): tile netral + hit-layer.
     try {
-      const shown = await _ovShowGeo(null, [], true);
-      void shown;
+      const tok = _tokPm();
+      const man = await _tileManifestLoad();
+      const have = new Set(((man && man.files) || []).map(function(f){ return f.name; }));
+      const bSrc = [];
+      for (const d of _scopeDivreList()) {
+        const nm = 'bounds_' + d + '.pmtiles';
+        if (have.size && !have.has(nm)) continue;
+        bSrc.push({ url: '/api/tiles/scope/bounds_' + d + '.pmtiles', kind: 'kph', maxDataZoom: 10,
+                    rules: _ctl.kph_bounds_rules({}, { neutral: true }) });
+      }
+      if (!bSrc.length) return;
+      _ctl.set_pmtiles_sources('bounds', bSrc, { token: tok });
+      await _ovShowHit([], true);
     } catch (_) {}
   }
 
