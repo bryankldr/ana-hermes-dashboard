@@ -471,13 +471,16 @@ def kph_summary_map(tahun, limit=1000, aggregated_level="kode_kph", bounds=None,
         name_join = "LEFT JOIN bkph b ON b.kode_bkph = p.kode_bkph"
         name_col = "b.bkph AS nama_wilayah"
     
-    # Use MIN(ST_AsGeoJSON(ST_Centroid(...))) as representative centroid.
-    # pp.polygon = GeoJSON longtext (tanpa kolom geom) — parse dulu.
+    # Centroid = RATA-RATA titik tengah semua polygon (tengah wilayah),
+    # bukan polygon pertama (MIN) yang bisa di tepi. pp.polygon = GeoJSON
+    # longtext (tanpa kolom geom) — parse dulu per baris lalu rata-ratakan.
     return q(f"""
         SELECT p.{effective_level} AS kode_wilayah, {name_col},
                COUNT(*) AS total_petak,
                ROUND(SUM(p.luas_baku), 2) AS total_luas_ha,
-               MIN(ST_AsGeoJSON(ST_Centroid(ST_GeomFromGeoJSON(pp.polygon)))) AS centroid,
+               CONCAT('{{"type": "Point", "coordinates": [',
+                      ROUND(AVG(ST_X(ST_Centroid(ST_GeomFromGeoJSON(pp.polygon)))), 6), ',',
+                      ROUND(AVG(ST_Y(ST_Centroid(ST_GeomFromGeoJSON(pp.polygon)))), 6), ']}}') AS centroid,
                SUM(CASE WHEN COALESCE(a.penyadap, 0) = 0 THEN 1 ELSE 0 END) AS bongkor,
                SUM(CASE WHEN COALESCE(a.penyadap, 0) > 0 AND COALESCE(a.luas_andil, 0) < p.luas_baku THEN 1 ELSE 0 END) AS kurang,
                SUM(CASE WHEN COALESCE(a.luas_andil, 0) >= p.luas_baku THEN 1 ELSE 0 END) AS terpenuhi,
