@@ -507,6 +507,24 @@ export class LeafletAdapter {
       const p = f.properties || {};
       try {
         const escH = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        // Marker agregat wilayah (kph_summary_map, centroid Point): BUKAN petak.
+        // Tampilkan ringkasan wilayah + angka, bukan template petak kosong.
+        if (p._geom_type === 'centroid' || (p.kode_wilayah && !p.nomor_petak)) {
+          const nm = escH(p.nama_wilayah || p.kode_wilayah || 'Wilayah');
+          const tot = escH(p.total_petak ?? '-');
+          const aggHtml = `<div style="font-family:var(--font-mono,monospace);font-size:13px;line-height:1.45;min-width:220px">`
+            + `<div style="font-weight:700;font-size:14px">Ringkasan ${nm}</div>`
+            + `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px;margin-top:6px">`
+            + `<span style="opacity:.6">Petak</span><span>${tot}</span>`
+            + `<span style="opacity:.6">Bongkor</span><span style="color:#EF4444">${escH(p.bongkor ?? '-')}</span>`
+            + `<span style="opacity:.6">Kurang</span><span style="color:#EAB308">${escH(p.kurang ?? '-')}</span>`
+            + `<span style="opacity:.6">Terpenuhi</span><span style="color:#22C55E">${escH(p.terpenuhi ?? '-')}</span>`
+            + `<span style="opacity:.6">Luas</span><span>${escH(p.total_luas_ha ?? '-')} ha</span>`
+            + `<span style="opacity:.6">Efektivitas</span><span>${escH(p.avg_efektivitas_pct ?? '-)}%</span>`
+            + `</div><div style="font-size:10px;opacity:.5;margin-top:5px">titik tengah agregat — zoom masuk untuk detail petak</div></div>`;
+          layer.bindPopup(aggHtml, { maxWidth: 280, minWidth: 220 });
+          try { layer.bindTooltip(nm, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
+        } else {
         const nomor = escH(p.nomor_petak || id);
         const wkey = String(p.warna || '').toLowerCase();
         const wcol = (LeafletAdapter.WARNA_STYLE[wkey] || {}).fillColor || '#2DF2FF';
@@ -608,6 +626,7 @@ export class LeafletAdapter {
         try { layer.bindTooltip('Petak ' + nomor, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
         // Lazy-load L+P ditangani listener popupopen level map (constructor)
         // — handler per-layer tak fire untuk L.geoJSON GROUP.
+        } // tutup cabang petak (agregat centroid ditangani di atas)
       } catch (_) {}
       layer.on('click', () => { this.select_feature(id); });
       layer.addTo(host);

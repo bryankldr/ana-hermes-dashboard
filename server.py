@@ -445,6 +445,14 @@ def _tiles_scope_ok(handler, kind, kode):
             if uk and _kph_divre_map().get(uk) == kode:
                 return True, ""
             return False, "di luar scope tile"
+        if kind == "overview":
+            # Tile overview berwarna = DIVRE ke atas saja. ADM (walau punya
+            # divre di scope) DITOLAK tegas — ia hanya dapat bounds netral.
+            if jab in ("DIVRE",):
+                if scope.get("kode_divre") and kode == str(scope.get("kode_divre")).strip():
+                    return True, ""
+                return False, "di luar scope tile"
+            return False, "overview khusus DIVRE ke atas"
         return False, "jenis scope tak dikenal"
     except Exception:
         return False, "gagal cek scope"
@@ -1120,8 +1128,10 @@ def _simoge_features(result):
         props["_geom_type"] = geom_type
         # Stable feature id untuk diff inkremental client (mapControl dedup by id,
         # map.js incremental {full:false}). Polygon: nomor_petak unik per baris.
-        # Agregat (kph_summary_map): level+kode wilayah agar centroid stabil.
+        # Agregat (kph_summary_map): kode_wilayah (dulu join key yang tak ada di
+        # rows sehingga id jatuh ke "|||" -> tooltip "Petak |||").
         _fid = (str(r.get("nomor_petak") or "").strip()
+                or str(r.get("kode_wilayah") or "").strip()
                 or "|".join(str(r.get(k) or "") for k in
                             ("aggregated_level", "kode_bkph", "kode_kph", "kode_divre"))
                 or str(len(feats)))
@@ -2360,7 +2370,7 @@ class Handler(BaseHTTPRequestHandler):
         # Content-Range, atau 200 penuh bila tanpa Range.
         # NEW: Jika query param z,x,y diberikan -> ekstrak single MVT tile (bukan byte range).
         # fname allowlist ketat (anti traversal): kph_<kode>/bounds_<divre>/petak.
-        if not re.fullmatch(r"(kph_\d+|bounds_\d+|petak)\.pmtiles", fname or ""):
+        if not re.fullmatch(r"(kph_\d+|bounds_\d+|overview_\d+|petak)\.pmtiles", fname or ""):
             return self._json({"error": "nama file tile tidak dikenal"}, 404)
         f = ROOT / "tiles" / fname
         if not f.is_file():
@@ -2536,6 +2546,8 @@ class Handler(BaseHTTPRequestHandler):
             for f in sorted((ROOT / "tiles").glob("kph_*.pmtiles")):
                 _scoped[f.name] = {"bytes": f.stat().st_size, "mtime": f.stat().st_mtime}
             for f in sorted((ROOT / "tiles").glob("bounds_*.pmtiles")):
+                _scoped[f.name] = {"bytes": f.stat().st_size, "mtime": f.stat().st_mtime}
+            for f in sorted((ROOT / "tiles").glob("overview_*.pmtiles")):
                 _scoped[f.name] = {"bytes": f.stat().st_size, "mtime": f.stat().st_mtime}
             if _scoped:
                 st["scoped"] = _scoped
@@ -3102,6 +3114,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_pmtiles()
         if p.startswith("/api/tiles/scope/"):
             # File tile ter-scope jabatan: kph/<kode>.pmtiles | bounds_<divre>.pmtiles
+            # | overview_<divre>.pmtiles (berwarna, DIVRE ke atas saja).
             # Auth ganda: token (atau ?token=, tile fetch tak bisa header) DAN
             # sesi login dalam scope (fail-closed untuk user ber-scope).
             if not self._token_ok():
@@ -3117,7 +3130,10 @@ class Handler(BaseHTTPRequestHandler):
             _rest = (p or "")[len("/api/tiles/scope/"):]
             _m1 = re.fullmatch(r"kph/(\d+)\.pmtiles", _rest or "")
             _m2 = re.fullmatch(r"bounds_(\d+)\.pmtiles", _rest or "")
-            if _m1:
+            _m3 = re.fullmatch(r"overview_(\d+)\.pmtiles", _rest or "")
+            if _m3:
+                _kind, _kode, _fname = "overview", _m3.group(1), "overview_%s.pmtiles" % _m3.group(1)
+            elif _m1:
                 _kind, _kode, _fname = "kph", _m1.group(1), "kph_%s.pmtiles" % _m1.group(1)
             elif _m2:
                 _kind, _kode, _fname = "divre", _m2.group(1), "bounds_%s.pmtiles" % _m2.group(1)
@@ -3188,7 +3204,13 @@ class Handler(BaseHTTPRequestHandler):
                 for _e in _data["files"]:
                     _scp = (_e or {}).get("scope") or {}
                     _lv = str(_scp.get("level") or "")
-                    if _lv in ("kph", "divre"):
+                    # File overview berwarna = DIVRE ke atas saja (ADM ditolak
+                    # tegas walau se-divre) — aturan sama seperti endpoint.
+                    if str(_scp.get("kind") or "") == "overview":
+                        _ok, _ = _tiles_scope_ok(self, "overview", str(_scp.get("kode") or ""))
+                        if not _ok:
+                            continue
+                    elif _lv in ("kph", "divre"):
                         _ok, _ = _tiles_scope_ok(self, _lv, str(_scp.get("kode") or ""))
                         if not _ok:
                             continue
