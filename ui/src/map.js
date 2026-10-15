@@ -1608,7 +1608,7 @@ function updateLegend(biz, kat) {
       }
       try { _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {} // choropleth ganti petak di overview
       // Hit-layer transparan utk tooltip + klik (binding post-hoc, pola terverifikasi).
-      try { await _ovHitLayer(rows, false); } catch (_) {}
+      try { await _ovShowHit(rows, false); } catch (_) {}
       _ovOn = true;
       try { log('map', 'MAP', 'overview ON kph berwarna=' + Object.keys(colors).length); } catch (_) {}
       try { window.__spatialOverview = { key: key, wantOv: !!wantOv, kph: kphList.length, on: true, colored: Object.keys(colors).length }; } catch (_) {}
@@ -1670,7 +1670,11 @@ function updateLegend(biz, kat) {
           const nm = p.kph || p.kode_kph || 'KPH';
           let tip = '<b>' + esc(String(nm)) + '</b>';
           const m = nums[String(p.kode_kph || '')] || null;
-          if (m) tip += '<br>B' + m.b + ' K' + m.k + ' T' + m.t + ' dari ' + m.n + ' petak';
+          // Angka berwarna sesuai bisnis: B merah, K kuning, T hijau.
+          if (m) tip += '<br><span style="color:#EF4444;font-weight:700">B ' + m.b + '</span> '
+            + '<span style="color:#EAB308;font-weight:700">K ' + m.k + '</span> '
+            + '<span style="color:#22C55E;font-weight:700">T ' + m.t + '</span>'
+            + '<span style="opacity:.65"> dari ' + m.n + ' petak</span>';
           else tip += '<br>Klik untuk filter KPH ini';
           ll.bindTooltip(tip, { sticky: true, direction: 'top' });
           ll.on('click', function() {
