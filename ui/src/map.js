@@ -449,7 +449,6 @@ export function initMapPanel({ log = () => {} } = {}) {
     } catch (_) {}
   }
   syncKatVisibility();
-  _restorePanelState(); // refresh-safe: pulihkan bisnis+filter tersimpan
 
   function updateHead() {
     if (shPeriode) shPeriode.textContent = curPerLabel();
@@ -593,6 +592,7 @@ function updateLegend(biz, kat) {
       filters: base,
     };
   }
+  _restorePanelState(); // refresh-safe: pulihkan bisnis+filter tersimpan (di sini agar const di atas sudah terinisialisasi)
 
   function renderChips() {
     if (!chipsBox) return;
