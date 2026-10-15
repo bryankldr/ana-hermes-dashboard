@@ -513,6 +513,7 @@ function updateLegend(biz, kat) {
   let _panelReady = false; // true setelah opsi wilayah pertama terisi
   let _pendingWilayah = null;
   let _lastSavedFilt = null; // kunci filter terakhir yang tersimpan (anti-clobber)
+  let _vpRestored = false; // viewport dipulihkan dari simpanan -> lewati fit pertama
   function _savePanelState(st) {
     if (!_panelReady) return; // jangan timpa simpanan dengan inisialisasi kosong
     try {
@@ -523,16 +524,26 @@ function updateLegend(biz, kat) {
         keep[k] = (v == null) ? '' : String(v);
       }
       const snap = { business: (st && st.business) || 'petak', filters: keep, at: Date.now() };
+      // Fokus peta = posisi aktual (bukan _viewportExtra yang dikosongkan tiap
+      // ganti filter): refresh kembali ke area yang sedang dilihat.
+      try {
+        const bb = map.getBounds();
+        snap.filters.bounds = [+bb.getWest().toFixed(6), +bb.getSouth().toFixed(6), +bb.getEast().toFixed(6), +bb.getNorth().toFixed(6)];
+        snap.filters.zoom = map.getZoom();
+      } catch (_) {}
       localStorage.setItem(_PANEL_KEY, JSON.stringify(snap));
       try { window.__spatialPersist = { ...(window.__spatialPersist || {}), saved: snap }; } catch (_) {}
       try { console.info('[spatial-persist] save', snap.business, JSON.stringify(keep)); } catch (_) {}
     } catch (_) {}
   }
   function _savePanelStateGated(st) {
-    // Simpan hanya bila kunci filter NON-viewport berubah: pan/zoom murni tak
-    // menimpa simpanan (anti-clobber antar tab yang menampilkan filter beda).
+    // Simpan bila kunci filter ATAU posisi peta berubah: pan/zoom murni ikut
+    // tersimpan (fokus menetap), tapi tab yang tak bergerak tak menimpa
+    // simpanan tab lain (anti-clobber).
     try {
-      const k = _filtKey(st);
+      let vk = '';
+      try { vk = '|vp:' + map.getBounds().toBBoxString() + 'z' + map.getZoom(); } catch (_) {}
+      const k = _filtKey(st) + vk;
       if (k === _lastSavedFilt) return false;
       _lastSavedFilt = k;
       _savePanelState(st);
@@ -581,6 +592,19 @@ function updateLegend(biz, kat) {
       const w = {};
       for (const k of ['divre','kph','bkph','rph','tpg']) if (String(f[k] || '') !== '') w[k] = String(f[k]);
       _pendingWilayah = Object.keys(w).length ? w : null;
+      // Fokus peta: kembali ke area + zoom terakhir. Listener moveend/zoomend
+      // (_pushViewport) baru dipasang sesudahnya, jadi tanpa reload umpan-balik.
+      try {
+        let b = f.bounds;
+        if (typeof b === 'string') b = b.split(',').map(Number);
+        const z = parseInt(f.zoom);
+        if (Array.isArray(b) && b.length === 4 && b.every(function(v){ return Number.isFinite(v); })
+            && b[0] < b[2] && b[1] < b[3] && Number.isFinite(z)) {
+          map.setView([(b[1] + b[3]) / 2, (b[0] + b[2]) / 2], Math.max(0, Math.min(18, z)));
+          _vpRestored = true; // fit otomatis pertama dilewati (hormati fokus ini)
+          try { console.info('[spatial-persist] viewport pulih z' + z); } catch (_) {}
+        }
+      } catch (_) {}
       updateHead(); renderChips();
     } catch (_) {}
   }
@@ -989,15 +1013,20 @@ function updateLegend(biz, kat) {
               // Fit SEKALI per ganti filter (first load / ANNA spatial_set).
               // Pan/zoom user murni render tanpa fit — tanpa ini fit_all fire
               // moveend → _pushViewport → reload lagi + snapback ke extent lama.
+              // Pengecualian: viewport baru dipulihkan dari simpanan (refresh) —
+              // hormati fokus user, jangan timpa dengan fit.
               try {
                 const _fk = _filtKey(st);
                 if (_fk !== _lastFittedFilt) {
                   _lastFittedFilt = _fk;
+                  if (_vpRestored) { _vpRestored = false; }
+                  else {
                   _suppressVp = true;
                   try { _ctl?.fit_all?.(0.05); } catch (_) {}
                   // moveend dari fit animasi datang async — resync key dulu,
                   // baru buka suppress agar gesture user berikutnya lolos.
                   setTimeout(() => { try { _lastVp = _readVp().key; } catch (_) {} _suppressVp = false; }, 500);
+                  }
                 }
               } catch (_) {}
             }
@@ -1146,6 +1175,7 @@ function updateLegend(biz, kat) {
     if (katSel) katSel.value='semua'; if (bizSel) bizSel.value='petak';
     _spatialWarna = ''; _spatialTemplate = null; // reset manual = buang semua titipan ANA
     try { localStorage.removeItem('ana_spatial_panel_v1'); } catch (_) {} // refresh mulai dari default lagi
+    try { map.setView(CENTER, 11); } catch (_) {} // reset manual = fokus awal juga
     syncKatVisibility(); updateLegend('petak','semua'); updateHead(); renderChips(); reloadBusiness();
   });
   btnRefresh?.addEventListener('click', reloadBusiness);
