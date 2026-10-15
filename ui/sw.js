@@ -1,7 +1,7 @@
 /* ANA PWA service worker — universal (Chrome, Edge, Firefox, Safari, Samsung) */
 // Bump versi tiap ada perubahan auth/device agar tablet/HP tak terjebak
 // login.js basi (cache-first .js + loop "sesi tidak terbaca").
-const CACHE = 'ana-v38-kpi-filter';
+const CACHE = 'ana-v39-spatial-persist';
 const PRECACHE = [
   '/', '/index.html', '/login.html', '/login.css', '/login.js', '/landing.css',
   'assets/simoge_hero_1.png', 'assets/simoge_hero_2.png',
@@ -72,6 +72,15 @@ self.addEventListener('fetch', e => {
         },
       });
     })());
+    return;
+  }
+  // kode aplikasi /src: network-first + fallback cache. File ini berubah
+  // tiap deploy; cache-first bikin browser menjalankan JS basi.
+  if (path.startsWith('/src/') || path === '/main.js') {
+    e.respondWith(fetch(req).then(r => {
+      if (r.ok) { const c = r.clone(); caches.open(CACHE).then(cache=>cache.put(req,c)).catch(()=>{}); }
+      return r;
+    }).catch(()=>caches.match(req)));
     return;
   }
   // static assets: cache-first
