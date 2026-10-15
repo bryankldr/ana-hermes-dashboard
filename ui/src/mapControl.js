@@ -486,6 +486,9 @@ export class LeafletAdapter {
     const seen = new Set();
     let added = 0;
     for (const f of feats) {
+      // Mode label wilayah: lingkaran centroid agregat dilewati (label nama
+      // digambar panel via _refreshLabels) — bukan data hilang.
+      if (opts.skipPoints && f.geometry?.type === 'Point') continue;
       const id = String(f.id ?? f.properties?.id ?? f.properties?.nomor_petak ?? f.n ?? added);
       seen.add(id);
       if (this.features.has(id)) continue;

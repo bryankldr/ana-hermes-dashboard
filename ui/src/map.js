@@ -876,7 +876,10 @@ function updateLegend(biz, kat) {
     _progressTimer = setTimeout(() => { wrap.classList.add('hidden'); if (f) f.style.width = '0%'; }, ok ? 900 : 2200);
     if (btnRefresh) btnRefresh.disabled = false;
   }
-  async function _drainBusinessQueue(mapId, incremental) {
+  async function _drainBusinessQueue(mapId, incremental, tpl) {
+  // tpl = template panel sendiri (res.template): bila ringkasan agregat,
+  // titik centroid dilewati (label nama wilayah digambar terpisah).
+  // ANA push mentah (id lain) tak tersentuh.
     // Eksekusi langsung perintah set_features milik kita (by map_id) tanpa tunggu interval bridge.
     // Menutup race: bridge poll (400ms) vs clear_features. Id lain tetap dieksekusi spt bridge.
     // incremental=true (pan/zoom, filter sama) → teruskan {full:false} agar
@@ -907,7 +910,7 @@ function updateLegend(biz, kat) {
           const fn = _ctl?.[cmd.op];
           const a = cmd.args || {};
           if (typeof fn === 'function' && (cmd.op === 'set_features' || cmd.op === 'clear_features')) {
-            if (cmd.op === 'set_features') await fn.call(_ctl, a.geojson ?? a, { fit: a.fit ?? true, pad: a.pad, ...(incremental || a.full === false ? { full: false } : {}) });
+            if (cmd.op === 'set_features') await fn.call(_ctl, a.geojson ?? a, { fit: a.fit ?? true, pad: a.pad, ...(incremental || a.full === false ? { full: false } : {}), ...(cmd.id === mapId && tpl === 'kph_summary_map' ? { skipPoints: true } : {}) });
             else await fn.call(_ctl);
             if (cmd.id === mapId) executed = true;
           } else if (typeof fn === 'function') {
@@ -1048,7 +1051,7 @@ function updateLegend(biz, kat) {
           _setProgress(64, 'menunggu render ' + res.features + ' polygon di peta…');
           // drain langsung: jangan tunggu interval bridge.
           // teruskan _wantIncremental agar pan/zoom diff-by-id (anti flicker).
-          try { await _drainBusinessQueue(res.map_id, _wantIncremental); } catch (_) {}
+          try { await _drainBusinessQueue(res.map_id, _wantIncremental, res.template); } catch (_) {}
           // Fix ganti-bisnis blank: enforce tier visibility SETELAH drain,
           // sebelum cek ok. Tanpa ini polygon baru nempel tapi hidden bila
           // _tierMode basi (sisa zoom rendah sesi sebelumnya) — count>0
@@ -1433,6 +1436,7 @@ function updateLegend(biz, kat) {
       _tier = want;
     }
     _scheduleOverview(); // selaraskan sumber tile scope (murah bila kunci sama)
+    _scheduleLabels(); // label wilayah mengikuti zoom (murah: kunci + cache)
     // Selalu enforce (bukan hanya saat tier berubah): reload filter me-render
     // ulang polygon dalam keadaan visible, dan tier guard lama return dini
     // sehingga polygon segar tetap tampil menutupi PMTiles di Z rendah.
@@ -1763,6 +1767,103 @@ function updateLegend(biz, kat) {
     } catch (_) {}
   }
 
+  // ── Label nama wilayah (pengganti lingkaran centroid agregat) ──
+  // z≤8: BKPH; z9-10: BKPH+RPH; z11-12: TPG kecil; >12: sembunyi.
+  // Permanen (bukan hover) di jangkauannya; klik = drill filter wilayah.
+  // Data: kph_summary_map per level (centroid+nma+count), cache per kunci.
+  let _labelGroups = null;
+  let _labelCache = {};
+  let _labelTimer = null;
+  const _LABEL_STYLE = {
+    bkph: 'font-size:13px;font-weight:800;color:#fff;text-shadow:0 1px 4px #000,0 0 8px #000;letter-spacing:.06em;white-space:nowrap;',
+    rph: 'font-size:11px;font-weight:700;color:#FFE9A8;text-shadow:0 1px 3px #000,0 0 6px #000;white-space:nowrap;',
+    tpg: 'font-size:10px;font-weight:600;color:#9BDCFF;text-shadow:0 1px 3px #000,0 0 6px #000;white-space:nowrap;',
+  };
+  function _labelLevels() {
+    const z = map.getZoom();
+    if (z <= 8) return ['bkph'];
+    if (z <= 10) return ['bkph', 'rph'];
+    if (z <= 12) return ['tpg'];
+    return [];
+  }
+  function _labelKey(level) {
+    const f = collectState().filters;
+    return level + '|' + f.tahun + '|' + [f.divre, f.kph, f.bkph, f.rph, f.tpg].join(',');
+  }
+  function _ensureLabelGroups() {
+    if (_labelGroups) return _labelGroups;
+    _labelGroups = {};
+    for (const L of ['bkph', 'rph', 'tpg']) _labelGroups[L] = window.L.layerGroup();
+    return _labelGroups;
+  }
+  function _scheduleLabels() {
+    try { clearTimeout(_labelTimer); } catch (_) {}
+    _labelTimer = setTimeout(function() { try { _refreshLabels(); } catch (_) {} }, 600);
+  }
+  async function _refreshLabels() {
+    try {
+      const groups = _ensureLabelGroups();
+      const want = _labelLevels();
+      for (const L of ['bkph', 'rph', 'tpg']) {
+        const g = groups[L];
+        const on = want.indexOf(L) !== -1;
+        if (on && !map.hasLayer(g)) g.addTo(map);
+        if (!on && map.hasLayer(g)) map.removeLayer(g);
+      }
+      if (!want.length) return;
+      const st = collectState();
+      const w = {};
+      const _ck = { divre: 'kode_divre', kph: 'kode_kph', bkph: 'kode_bkph', rph: 'kode_rph', tpg: 'kode_tpg' };
+      for (const k of Object.keys(_ck)) if (st.filters[k]) w[_ck[k]] = st.filters[k];
+      for (const L of want) {
+        const key = _labelKey(L);
+        let rows = _labelCache[key];
+        if (!rows) {
+          try {
+            const rr = await queryStats('kph_summary_map', { tahun: parseInt(st.filters.tahun) || 2026, limit: 200, aggregated_level: 'kode_' + L, ...w }, { timeoutMs: 10000 });
+            rows = (rr && rr.ok && Array.isArray(rr.rows)) ? rr.rows : [];
+          } catch (_) { rows = []; }
+          _labelCache[key] = rows;
+          try { const ks = Object.keys(_labelCache); if (ks.length > 12) delete _labelCache[ks[0]]; } catch (_) {}
+        }
+        _buildLabelLevel(L, rows);
+      }
+    } catch (_) {}
+  }
+  function _buildLabelLevel(L, rows) {
+    try {
+      const g = _ensureLabelGroups()[L];
+      g.clearLayers();
+      const selMap = { bkph: fBkph, rph: fRph, tpg: fTpg };
+      for (const r of (rows || [])) {
+        let pt = null;
+        try {
+          const c = typeof r.centroid === 'string' ? JSON.parse(r.centroid) : r.centroid;
+          const co = c && c.coordinates;
+          if (Array.isArray(co) && Number.isFinite(co[0]) && Number.isFinite(co[1])) pt = [co[1], co[0]];
+        } catch (_) {}
+        if (!pt) continue;
+        const nm = String(r.nama_wilayah || r.kode_wilayah || '');
+        if (!nm) continue;
+        const kode = String(r.kode_wilayah || '');
+        const mk = window.L.marker(pt, { interactive: true, keyboard: false,
+          icon: window.L.divIcon({ className: 'wil-label', html: '<span style="' + _LABEL_STYLE[L] + '">' + esc(nm) + '</span>', iconSize: null }) });
+        mk.on('click', function() {
+          try {
+            const sel = selMap[L];
+            if (!sel || !kode) return;
+            let has = false;
+            for (const o of sel.options) { if (o.value === kode) { has = true; break; } }
+            if (!has) return; // di luar scope menu
+            sel.value = kode;
+            renderWilayah(); updateHead(); renderChips(); scheduleReload();
+          } catch (_) {}
+        });
+        mk.addTo(g);
+      }
+    } catch (_) {}
+  }
+
   // 1 tombol sembunyikan toolbar + filter + pencarian sekaligus.
   // Default tampil; klik → collapsed jadi 1 tombol 30x30 (seperti layer).
   $sel('#spatialToolsToggle')?.addEventListener('click', function() {
@@ -2049,6 +2150,7 @@ function updateLegend(biz, kat) {
         try { const st = collectState(); setBusiness(st.business); setFilters(st.filters); } catch (_) {}
         renderChips();
         _scheduleOverview(); // scope login berubah → sumber tile + overview ikut
+        _scheduleLabels(); // + label wilayah ikut scope
         if (_autoKicked && !_loading) scheduleReload();
       } catch (_) {}
     };
@@ -2100,6 +2202,7 @@ function updateLegend(biz, kat) {
     try { _savePanelStateGated({ business: bizSel?.value || 'petak', filters: collectState().filters }); } catch (_) {}
     // Sumber tile mengikuti scope terbaru (choropleth/overview bila cocok).
     _scheduleOverview();
+    _scheduleLabels();
     // Pesan mis-scope (bila ada) menang atas status sumber.
     if (_wilScopeMsg) _setWilStatus('scope', _wilScopeMsg);
     else _setWilStatus(src);
