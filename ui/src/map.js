@@ -1776,6 +1776,18 @@ function updateLegend(biz, kat) {
   let _labelGroups = null;
   let _labelCache = {};
   let _labelTimer = null;
+  let _labelBuilt = {}; // level -> kunci terakhir yang sudah dibangun (anti rebuild)
+  let _labelFetching = {}; // level -> kunci yang sedang di-fetch (anti dobel)
+  // CSS sekali suntik (tanpa ubah file CSS): transisi halus + sembunyi
+  // seketika selama animasi zoom (kelas bawaan Leaflet), muncul fade-in sesudahnya.
+  try {
+    if (!document.getElementById('wilAnimCss')) {
+      const _st = document.createElement('style');
+      _st.id = 'wilAnimCss';
+      _st.textContent = '.wil-label>span{transition:opacity .22s ease;}.leaflet-zoom-anim .wil-label>span{opacity:0 !important;}';
+      document.head.appendChild(_st);
+    }
+  } catch (_) {}
   const _LABEL_STYLE = {
     kph: 'font-size:14px;font-weight:800;color:#fff;text-shadow:0 1px 4px #000,0 0 8px #000;letter-spacing:.06em;white-space:nowrap;',
     bkph: 'font-size:13px;font-weight:800;color:#fff;text-shadow:0 1px 4px #000,0 0 8px #000;letter-spacing:.06em;white-space:nowrap;',
@@ -1828,11 +1840,15 @@ function updateLegend(biz, kat) {
             const pt = map.latLngToContainerPoint(ll);
             const el = mk.getElement && mk.getElement();
             const w = el ? (el.offsetWidth || 60) : 60;
-            items.push({ mk, el, pr: (_LABEL_PR[L] ?? 9), x0: pt.x - w / 2 - 4, x1: pt.x + w / 2 + 4, y0: pt.y - 9, y1: pt.y + 9 });
+            // Histeresis: yang sedang tampil dipertahankan dulu dalam prioritas
+            // sama — geser kecil tak membuat label berkedip tukar.
+            let vis = false;
+            try { vis = !!el && el.style.display !== 'none'; } catch (_) {}
+            items.push({ mk, el, vis, pr: (_LABEL_PR[L] ?? 9), x0: pt.x - w / 2 - 4, x1: pt.x + w / 2 + 4, y0: pt.y - 9, y1: pt.y + 9 });
           } catch (_) {}
         });
       }
-      items.sort((a, b) => a.pr - b.pr);
+      items.sort((a, b) => (a.pr - b.pr) || ((b.vis ? 1 : 0) - (a.vis ? 1 : 0)));
       const kept = [];
       for (const it of items) {
         let clash = false;
@@ -1861,6 +1877,9 @@ function updateLegend(biz, kat) {
       for (const k of Object.keys(_ck)) if (st.filters[k]) w[_ck[k]] = st.filters[k];
       for (const L of want) {
         const key = _labelKey(L);
+        if (_labelBuilt[L] === key) continue; // sudah tampil untuk kunci ini
+        if (_labelFetching[L] === key) continue; // fetch berjalan, jangan dobel
+        _labelFetching[L] = key;
         let rows = _labelCache[key];
         if (!rows) {
           try {
@@ -1870,7 +1889,13 @@ function updateLegend(biz, kat) {
           _labelCache[key] = rows;
           try { const ks = Object.keys(_labelCache); if (ks.length > 12) delete _labelCache[ks[0]]; } catch (_) {}
         }
-        _buildLabelLevel(L, rows);
+        // Bangun ulang hanya bila kunci berubah sejak bangun terakhir
+        // (tugas fetch lain mungkin sudah membangun duluan).
+        if (_labelBuilt[L] !== key) {
+          _buildLabelLevel(L, rows);
+          _labelBuilt[L] = key;
+        }
+        try { delete _labelFetching[L]; } catch (_) {}
       }
     } catch (_) {}
     _scheduleDeclutter(); // rapikan tumpukan setelah bangun ulang
