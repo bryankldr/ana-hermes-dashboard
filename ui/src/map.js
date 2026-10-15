@@ -1775,16 +1775,20 @@ function updateLegend(biz, kat) {
   let _labelCache = {};
   let _labelTimer = null;
   const _LABEL_STYLE = {
+    kph: 'font-size:14px;font-weight:800;color:#fff;text-shadow:0 1px 4px #000,0 0 8px #000;letter-spacing:.06em;white-space:nowrap;',
     bkph: 'font-size:13px;font-weight:800;color:#fff;text-shadow:0 1px 4px #000,0 0 8px #000;letter-spacing:.06em;white-space:nowrap;',
     rph: 'font-size:11px;font-weight:700;color:#FFE9A8;text-shadow:0 1px 3px #000,0 0 6px #000;white-space:nowrap;',
     tpg: 'font-size:10px;font-weight:600;color:#9BDCFF;text-shadow:0 1px 3px #000,0 0 6px #000;white-space:nowrap;',
   };
+  const _LABEL_PREFIX = { kph: 'KPH', bkph: 'BKPH', rph: 'RPH', tpg: 'TPG' };
   function _labelLevels() {
+    // Disepakati: Z<=10 KPH; Z11 BKPH; Z12 BKPH+RPH; Z13 RPH+TPG; Z14+ TPG.
     const z = map.getZoom();
-    if (z <= 8) return ['bkph'];
-    if (z <= 10) return ['bkph', 'rph'];
-    if (z <= 12) return ['tpg'];
-    return [];
+    if (z <= 10) return ['kph'];
+    if (z === 11) return ['bkph'];
+    if (z === 12) return ['bkph', 'rph'];
+    if (z === 13) return ['rph', 'tpg'];
+    return ['tpg'];
   }
   function _labelKey(level) {
     const f = collectState().filters;
@@ -1793,7 +1797,7 @@ function updateLegend(biz, kat) {
   function _ensureLabelGroups() {
     if (_labelGroups) return _labelGroups;
     _labelGroups = {};
-    for (const L of ['bkph', 'rph', 'tpg']) _labelGroups[L] = window.L.layerGroup();
+    for (const L of ['kph', 'bkph', 'rph', 'tpg']) _labelGroups[L] = window.L.layerGroup();
     return _labelGroups;
   }
   function _scheduleLabels() {
@@ -1804,7 +1808,7 @@ function updateLegend(biz, kat) {
     try {
       const groups = _ensureLabelGroups();
       const want = _labelLevels();
-      for (const L of ['bkph', 'rph', 'tpg']) {
+      for (const L of ['kph', 'bkph', 'rph', 'tpg']) {
         const g = groups[L];
         const on = want.indexOf(L) !== -1;
         if (on && !map.hasLayer(g)) g.addTo(map);
@@ -1834,7 +1838,7 @@ function updateLegend(biz, kat) {
     try {
       const g = _ensureLabelGroups()[L];
       g.clearLayers();
-      const selMap = { bkph: fBkph, rph: fRph, tpg: fTpg };
+      const selMap = { kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg };
       for (const r of (rows || [])) {
         let pt = null;
         try {
@@ -1845,9 +1849,10 @@ function updateLegend(biz, kat) {
         if (!pt) continue;
         const nm = String(r.nama_wilayah || r.kode_wilayah || '');
         if (!nm) continue;
+        const label = ((_LABEL_PREFIX[L] || '') + ' ' + nm).trim();
         const kode = String(r.kode_wilayah || '');
         const mk = window.L.marker(pt, { interactive: true, keyboard: false,
-          icon: window.L.divIcon({ className: 'wil-label', html: '<span style="' + _LABEL_STYLE[L] + '">' + esc(nm) + '</span>', iconSize: null }) });
+          icon: window.L.divIcon({ className: 'wil-label', html: '<span style="' + _LABEL_STYLE[L] + '">' + esc(label) + '</span>', iconSize: null }) });
         mk.on('click', function() {
           try {
             const sel = selMap[L];
