@@ -451,8 +451,9 @@ export class LeafletAdapter {
           return true;
         } catch (_) { return false; }
       };
-      // Popup Leaflet: konten di DOM popup (bila masih terbuka) + pesan update
-      // agar render saat fetch selesai walau user sudah buka duluan.
+      // Popup Leaflet: konten di DOM popup (bila masih terbuka) + modal
+      // terpusat + pesan update agar render saat fetch selesai walau user
+      // sudah buka duluan.
       let done = false;
       try {
         const el = popup && popup.getElement ? popup.getElement() : null;
@@ -460,7 +461,7 @@ export class LeafletAdapter {
       } catch (_) {}
       if (!done) {
         try {
-          const popups = document.querySelectorAll('.leaflet-popup-content');
+          const popups = document.querySelectorAll('.leaflet-popup-content, #anaSpatialModalBody');
           for (const pc of popups) { if (paint(pc)) { done = true; break; } }
         } catch (_) {}
       }
@@ -470,7 +471,7 @@ export class LeafletAdapter {
     } catch (_) {
       // gagal = biarkan nama saja; jangan rusak popup
       try {
-        const dets = [...document.querySelectorAll('.leaflet-popup-content [data-pemdetail]')];
+        const dets = [...document.querySelectorAll('.leaflet-popup-content [data-pemdetail], #anaSpatialModalBody [data-pemdetail]')];
         const det = dets.find(el => el.getAttribute('data-pemdetail') === evapotKey);
         if (det) det.textContent = '';
       } catch (_) {}
@@ -525,7 +526,7 @@ export class LeafletAdapter {
             + `<span style="opacity:.6">Luas</span><span>${escH(p.total_luas_ha ?? '-')} ha</span>`
             + `<span style="opacity:.6">Efektivitas</span><span>${escH(p.avg_efektivitas_pct ?? '-')}%</span>`
             + `</div><div style="font-size:10px;opacity:.5;margin-top:5px">titik tengah agregat — zoom masuk untuk detail petak</div></div>`;
-          layer.bindPopup(aggHtml, { maxWidth: 280, minWidth: 220 });
+          try { layer._anaPopHtml = aggHtml; } catch (_) {}
           try { layer.bindTooltip(nm, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
         } else {
         const nomor = escH(p.nomor_petak || id);
@@ -624,14 +625,14 @@ export class LeafletAdapter {
           (penyadapList.length && evapotKey ? `<button data-petakopen="${escH(evapotKey)}" data-kodetpg="${escH(String(p.kode_tpg || ''))}" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid rgba(45,242,255,.5);background:rgba(45,242,255,.1);color:#fff;font-size:13px;font-weight:700;cursor:pointer" onclick="window.__anaPetakOpen && window.__anaPetakOpen(this.dataset.petakopen, this.dataset.kodetpg ? Number(this.dataset.kodetpg) : null)">⤢ Perbesar — info lengkap</button>` : ''),
           `<div style="font-size:10px;opacity:.45;margin-top:5px">${escH(p.kode_evapot||'')}</div>`,
         ].filter(Boolean).join('');
-        layer.bindPopup(`<div style="font-family:var(--font-mono,monospace);font-size:13px;line-height:1.45;min-width:240px;max-width:320px">${rows}</div>`);
+        layer._anaPopHtml = `<div style="font-family:var(--font-mono,monospace);font-size:13px;line-height:1.45;min-width:240px;max-width:320px">${rows}</div>`;
         // Hover = nomor petak saja (identitas cepat). Detail di klik (popup).
         try { layer.bindTooltip('Petak ' + nomor, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
         // Lazy-load L+P ditangani listener popupopen level map (constructor)
         // — handler per-layer tak fire untuk L.geoJSON GROUP.
         } // tutup cabang petak (agregat centroid ditangani di atas)
       } catch (_) {}
-      layer.on('click', () => { this.select_feature(id); });
+      layer.on('click', () => { this.select_feature(id); try { showSpatialModal(layer._anaPopHtml); } catch (_) {} });
       layer.addTo(host);
       this.features.set(id, layer);
       // index center + ring untuk garis aktivitas (kode_evapot -> center / outer ring)
@@ -960,8 +961,8 @@ set_aktivitas_points(points, opts = {}) {
       + `</div>`;
     // popup pin = detail aktivitas (bukan identitas petak) — bedakan dari popup polygon
     // cegah bubble ke polygon di bawahnya
-    try { marker.on('click', (e) => { try { e.originalEvent && e.originalEvent.stopPropagation && e.originalEvent.stopPropagation(); } catch (_) {} if (window.L && window.L.DomEvent) try { window.L.DomEvent.stopPropagation(e); } catch (_) {} }); } catch (_) {}
-    marker.bindPopup(html, { maxWidth: 280, minWidth: 220 });
+    try { marker.on('click', (e) => { try { e.originalEvent && e.originalEvent.stopPropagation && e.originalEvent.stopPropagation(); } catch (_) {} if (window.L && window.L.DomEvent) try { window.L.DomEvent.stopPropagation(e); } catch (_) {} try { showSpatialModal(marker._anaPopHtml); } catch (_) {} }); } catch (_) {}
+    try { marker._anaPopHtml = html; } catch (_) {}
     // Hover polygon/pin = nomor petak saja (keluhan: perlu identitas cepat).
     // Info panjang tetap di klik (popup). Tooltip pin ringkas: nomor + jarak
     // GPS ke petak bila melenceng (tanpa ini tooltip 3 info, terlalu ramai).
@@ -1163,6 +1164,50 @@ set_aktivitas_visibility(visible) {
     }
   }
 }
+
+// Modal info terpusat (pengganti bindPopup Leaflet): desain konten SAMA
+// PERSIS, tampil fixed di tengah layar — peta tak auto-pan, posisi kartu tak
+// berubah saat zoom/pan, tanpa backdrop (peta tetap interaktif).
+// Dipakai popup petak, pin aktivitas, dan ringkasan agregat.
+function _ensureSpatialModal() {
+  try {
+    let box = document.getElementById('anaSpatialModal');
+    if (box) return box;
+    box = document.createElement('div');
+    box.id = 'anaSpatialModal';
+    box.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9998;display:none;max-width:min(92vw,340px);max-height:82vh;overflow:auto;background:#010813;border:1px solid rgba(45,242,255,.35);border-radius:8px;box-shadow:0 12px 48px rgba(0,0,0,.6);padding:14px 14px 12px;color:#fff;';
+    box.innerHTML = '<button id="anaSpatialModalX" aria-label="Tutup" style="position:absolute;top:6px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid rgba(45,242,255,.5);background:rgba(2,15,42,.9);color:#fff;font-size:15px;cursor:pointer;z-index:1">✕</button><div id="anaSpatialModalBody"></div>';
+    document.body.appendChild(box);
+    const x = document.getElementById('anaSpatialModalX');
+    if (x) x.addEventListener('click', () => { try { box.style.display = 'none'; } catch (_) {} });
+    if (!window.__anaSpatialModalEsc) {
+      window.__anaSpatialModalEsc = true;
+      document.addEventListener('keydown', (e) => {
+        if (e && e.key === 'Escape') { try { const b = document.getElementById('anaSpatialModal'); if (b) b.style.display = 'none'; } catch (_) {} }
+      });
+    }
+    return box;
+  } catch (_) { return null; }
+}
+function showSpatialModal(html) {
+  try {
+    const box = _ensureSpatialModal();
+    if (!box) return false;
+    const body = document.getElementById('anaSpatialModalBody');
+    if (body) body.innerHTML = html || '';
+    box.style.display = 'block';
+    // Lazy-load L·P penyadap seperti popup dulu (paint fallback mencakup modal).
+    try {
+      const det = body ? body.querySelector('[data-pemdetail]') : null;
+      const key = det ? det.getAttribute('data-pemdetail') : null;
+      if (key && window.__anaMap && typeof window.__anaMap._fillPenyadapDetail === 'function') {
+        window.__anaMap._fillPenyadapDetail(key, null);
+      }
+    } catch (_) {}
+    return true;
+  } catch (_) { return false; }
+}
+try { window.__anaSpatialModal = showSpatialModal; } catch (_) {}
 
 // Lightbox foto aktivitas: overlay tetap satu per halaman, klik foto/bidang
 // gelap/✕/Escape = tutup. Pasang sekali (guard id) walau adapter dibuat ulang.
