@@ -474,13 +474,6 @@ export function initMapPanel({ log = () => {} } = {}) {
   function _legendAttrib(){
   return '<span class="lg-attrib" title="Peta: Esri World Imagery + Dark Gray + Boundaries — via Leaflet">Leaflet \u00b7 Esri, Maxar, Earthstar Geographics</span>';
 }
-function _gradBar(css, ticks, title) {
-    // Bar gradasi + contek ambang; angka pasti tetap di tooltip/popup.
-    return '<span class="lg lg-grad"' + (title ? ' title="' + title + '"' : '') + '>'
-      + '<span style="display:inline-block;width:120px;height:10px;border-radius:3px;vertical-align:middle;background:' + css + '"></span>'
-      + '<span style="display:flex;justify-content:space-between;width:120px;font-size:8px;opacity:.75;margin-top:1px">'
-      + ticks.map(function(t){ return '<span>' + t + '</span>'; }).join('') + '</span></span>';
-  }
 function updateLegend(biz, kat) {
     if (!legend) return;
     const k = String(kat||'').toLowerCase();
@@ -489,21 +482,15 @@ function updateLegend(biz, kat) {
     } else if (biz === 'petak' && k === 'multi_penyadap') {
       legend.innerHTML = '<span class="lg"><i style="background:#EAB308"></i> 2 penyadap (kuning)</span><span class="lg"><i style="background:#F97316"></i> 3 (oranye)</span><span class="lg"><i style="background:#22C55E"></i> >3 (hijau)</span>' + _legendAttrib();
     } else if (biz === 'petak') {
-      // gradasi coverage: bongkor merah solid; berpenyadap kuning-hijau by andil/baku
-      legend.innerHTML = '<span class="lg" title="tidak ada penyadap"><i style="background:#EF4444"></i> Bongkor</span>'
-        + _gradBar('linear-gradient(90deg,#EAB308 0%,#86BC33 50%,#22C55E 100%)', ['0%','50%','&ge;100%'], 'Rasio luas_andil/luas_baku: kuning rendah - hijau penuh')
-        + _legendAttrib();
+      // diperjelas: merah tanpa penyadap, kuning luas_andil<luas_baku, hijau >=
+      legend.innerHTML = '<span class="lg" title="tidak ada penyadap"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="luas_andil < luas_baku"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg" title="luas_andil >= luas_baku"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span>' + _legendAttrib();
     } else if (biz === 'produksi') {
-      // gradasi capaian kontinu lewat titik 0/25/50/75/100/>100 (pita mitigasi tetap)
-      legend.innerHTML = _gradBar('linear-gradient(90deg,#EF4444 0%,#F97316 21%,#EAB308 42%,#22C55E 62%,#22C55E 83%,#3B82F6 100%)', ['0','25','50','75','100','&gt;100'], 'Pencapaian % thd target periode: merah &le;25, oranye &le;50, kuning &le;75, hijau &le;100, biru >100')
-        + _legendAttrib();
+      legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> 0-25%</span><span class="lg"><i style="background:#F97316"></i> 26-50%</span><span class="lg"><i style="background:#EAB308"></i> 51-75%</span><span class="lg"><i style="background:#22C55E"></i> 76-100%</span><span class="lg"><i style="background:#3B82F6"></i> &gt;100%</span>' + _legendAttrib();
     } else if (biz === 'aktivitas' && k === 'idle') {
       legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Aktif (hijau)</span><span class="lg" title="pin + garis dashed ke pusat petak"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1 cyan/2 oranye/3 merah</span>' + _legendAttrib();
     } else if (biz === 'aktivitas') {
-      // gradasi intensitas utk Aktif (hijau-biru by jumlah aktivitas 1..15+); bongkor/idle solid
-      legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg" title="ada aktivitas periode berjalan: hijau jarang - biru ramai (&ge;15x)"><i style="background:#22C55E"></i> Aktif</span>'
-        + _gradBar('linear-gradient(90deg,#22C55E 0%,#2EA4AA 50%,#3B82F6 100%)', ['1&times;','8&times;','15&times;+'], 'Intensitas aktivitas per petak periode berjalan')
-        + '<span class="lg" title="pin aktivitas + garis dashed ke pusat petak via kode_evapot; GPS bisa melenceng"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1/2/3 ● foto — garis ke petak</span>' + _legendAttrib();
+      // diperjelas: merah bongkor (tanpa penyadap / >2bln tanpa aktivitas), kuning idle (ada penyadap + aktivitas 2bln, tapi 0 di periode ini), hijau aktif (cur>0)
+      legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg" title="ada aktivitas periode berjalan"><i style="background:#22C55E"></i> Aktif (hijau)</span><span class="lg" title="pin aktivitas + garis dashed ke pusat petak via kode_evapot; GPS bisa melenceng"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1/2/3 ● foto — garis ke petak</span>' + _legendAttrib();
     } else if (biz === 'matriks' || biz === 'matrik') {
       legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg"><i style="background:#F97316"></i> Kurang & cap<50% (oranye)</span><span class="lg"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span><span class="lg"><i style="background:#3B82F6"></i> &gt;100% (biru)</span>' + _legendAttrib();
     } else {

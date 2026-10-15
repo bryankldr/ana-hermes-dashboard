@@ -191,83 +191,6 @@ _WILAYAH_COLS = ("kode_divre", "kode_kph", "kode_bkph", "kode_rph", "kode_tpg")
 _WILAYAH_NAMES = {"kode_divre": "divre", "kode_kph": "kph", "kode_bkph": "bkph",
                   "kode_rph": "rph", "kode_tpg": "nama_tpg"}
 
-
-# -- gradasi warna polygon (bisnis kontinu): kunci `warna` (diskrit) tetap
-# untuk KPI/hitungan; `warna_hex` memberi warna render kontinu per fitur.
-# Klien pakai warna_hex bila ada, else WARNA_STYLE (tanpa regresi).
-_GRAD_PRODUKSI = ((0, "EF4444"), (25, "F97316"), (50, "EAB308"),
-                  (75, "22C55E"), (100, "22C55E"), (120, "3B82F6"))
-_GRAD_COVERAGE = ((0, "EAB308"), (1, "22C55E"))          # rasio andil/baku
-_GRAD_AKTIF = ((1, "22C55E"), (15, "3B82F6"))            # intensitas 1..15+
-
-
-def _lerp_hex(stops, x):
-    """Interpolasi linear heksa antar stop ((nilai, 'RRGGBB'), ...). Clamp tepi."""
-    try:
-        x = float(x)
-    except (TypeError, ValueError):
-        return None
-    if not stops:
-        return None
-    if x <= stops[0][0]:
-        return "#" + stops[0][1]
-    for (x0, c0), (x1, c1) in zip(stops, stops[1:]):
-        if x <= x1:
-            t = (x - x0) / (x1 - x0) if x1 != x0 else 1.0
-            r0, g0, b0 = int(c0[0:2], 16), int(c0[2:4], 16), int(c0[4:6], 16)
-            r1, g1, b1 = int(c1[0:2], 16), int(c1[2:4], 16), int(c1[4:6], 16)
-            return "#%02X%02X%02X" % (round(r0 + (r1 - r0) * t),
-                                      round(g0 + (g1 - g0) * t),
-                                      round(b0 + (b1 - b0) * t))
-    return "#" + stops[-1][1]
-
-
-def _paint_produksi(row):
-    """Gradasi capaian; target-nol (warna NULL) = tanpa hex (fallback klien)."""
-    if row.get("warna") is None:
-        return None
-    try:
-        return _lerp_hex(_GRAD_PRODUKSI, float(row.get("pencapaian_pct") or 0))
-    except (TypeError, ValueError):
-        return None
-
-
-def _paint_coverage(row):
-    """Bongkor = merah solid; berpenyadap = kuning-hijau by andil/baku."""
-    try:
-        if (row.get("kategori") or row.get("warna")) in ("bongkor", "merah"):
-            return "#EF4444"
-        baku = float(row.get("luas_baku") or 0)
-        if baku <= 0:
-            return None
-        return _lerp_hex(_GRAD_COVERAGE, float(row.get("luas_andil") or 0) / baku)
-    except (TypeError, ValueError):
-        return None
-
-
-def _paint_aktivitas(row):
-    """Bongkor merah solid, idle kuning solid, aktif hijau-biru by intensitas."""
-    try:
-        kat = str(row.get("kategori") or row.get("warna") or "").lower()
-        if kat in ("bongkor", "merah"):
-            return "#EF4444"
-        if kat in ("idle", "kuning"):
-            return "#EAB308"
-        return _lerp_hex(_GRAD_AKTIF, float(row.get("jumlah_aktivitas") or 0))
-    except (TypeError, ValueError):
-        return None
-
-
-def _paint_rows(rows, painter):
-    for _r in (rows or []):
-        try:
-            _h = painter(_r)
-        except Exception:
-            _h = None
-        if _h:
-            _r["warna_hex"] = _h
-    return rows
-
 def _require_level(level):
     """GROUP BY dinamis hanya dari allowlist — cegah injeksi via param `level`."""
     if level not in _WILAYAH_COLS:
@@ -554,7 +477,7 @@ def petak_efektivitas_map(tahun, limit=1000, bounds=None, **kw):
     w, wv = _wilayah_where(kw)
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
-    _paint_out = q(f"""
+    return q(f"""
         SELECT p.nomor_petak, p.kode_evapot, p.luas_baku, p.tahun_rtt,
                p.target_rkap, p.kode_divre, p.kode_kph, p.kode_bkph, p.kode_rph, p.kode_tpg,
                p.divre AS divre_nama, p.kph AS kph_nama, p.bkph AS bkph_nama, p.rph AS rph_nama, p.nama_tpg AS tpg_nama,
@@ -584,8 +507,6 @@ def petak_efektivitas_map(tahun, limit=1000, bounds=None, **kw):
         ORDER BY a.luas_andil / NULLIF(p.luas_baku, 0)
         LIMIT %s
     """, tuple([tahun] + wv + bv + [lim]))
-    _paint_rows(_paint_out.get("rows"), _paint_coverage)
-    return _paint_out
 
 
 @template("petak_multi_penyadap_map")
@@ -631,7 +552,7 @@ def rkap_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     w, wv = _wilayah_where(kw)
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
-    _paint_out = q(f"""
+    return q(f"""
         SELECT p.nomor_petak, p.kode_evapot, p.luas_baku, p.target_rkap,
                p.kode_divre, p.kode_kph, p.kode_bkph, p.kode_rph, p.kode_tpg,
                p.divre AS divre_nama, p.kph AS kph_nama, p.bkph AS bkph_nama, p.rph AS rph_nama, p.nama_tpg AS tpg_nama,
@@ -664,8 +585,6 @@ def rkap_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
         GROUP BY p.kode_evapot
         LIMIT %s
     """, tuple([pct] * 7 + [d0, dlast, tahun] + wv + bv + [lim]))
-    _paint_rows(_paint_out.get("rows"), _paint_produksi)
-    return _paint_out
 
 
 @template("idle_petak")
@@ -967,7 +886,7 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     pw, pv = _pembaharuan_where(kw, "s")
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
-    _paint_out = q(f"""
+    return q(f"""
         SELECT p.nomor_petak, p.kode_evapot, p.luas_baku, p.target_rkap,
                p.kode_divre, p.kode_kph, p.kode_bkph, p.kode_rph, p.kode_tpg, p.tahun_rtt,
                p.divre AS divre_nama, p.kph AS kph_nama, p.bkph AS bkph_nama, p.rph AS rph_nama, p.nama_tpg AS tpg_nama,
@@ -1029,8 +948,6 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     """, tuple([d0, e1] + pv + [dprev, eprev] + pv + [d2s, d2e] + pv
                + [d0, e1] + pv + [d2s, d2e] + pv
                + [tahun] + wv + bv + [lim]))
-    _paint_rows(_paint_out.get("rows"), _paint_aktivitas)
-    return _paint_out
 
 
 @template("matriks_map")
