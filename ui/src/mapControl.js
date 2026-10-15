@@ -520,7 +520,7 @@ export class LeafletAdapter {
             + `<span style="opacity:.6">Kurang</span><span style="color:#EAB308">${escH(p.kurang ?? '-')}</span>`
             + `<span style="opacity:.6">Terpenuhi</span><span style="color:#22C55E">${escH(p.terpenuhi ?? '-')}</span>`
             + `<span style="opacity:.6">Luas</span><span>${escH(p.total_luas_ha ?? '-')} ha</span>`
-            + `<span style="opacity:.6">Efektivitas</span><span>${escH(p.avg_efektivitas_pct ?? '-)}%</span>`
+            + `<span style="opacity:.6">Efektivitas</span><span>${escH(p.avg_efektivitas_pct ?? '-')}%</span>`
             + `</div><div style="font-size:10px;opacity:.5;margin-top:5px">titik tengah agregat — zoom masuk untuk detail petak</div></div>`;
           layer.bindPopup(aggHtml, { maxWidth: 280, minWidth: 220 });
           try { layer.bindTooltip(nm, { sticky: true, direction: 'top', offset: [0, -4] }); } catch (_) {}
