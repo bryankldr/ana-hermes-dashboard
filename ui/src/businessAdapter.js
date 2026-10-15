@@ -319,6 +319,11 @@ export async function fetchAktivitasPoints(state, { limit, timeoutMs = 10000 } =
   if (['1','2','3','4'].includes(String(f.pembaharuan_ke || ''))) {
     wilayah.pembaharuan_ke = String(f.pembaharuan_ke);
   }
+  // Kategori petak → filter pin (selaras polygon): aktif = pin periode ini;
+  // idle = pin PERIODE LALU pada petak kini-idle (bukti); bongkor = kosong
+  // (definisi: tanpa aktivitas periode berjalan). Selain itu = semua pin.
+  const _kk = String(f.kategori || '').toLowerCase();
+  if (['aktif','idle','bongkor'].includes(_kk)) wilayah.kategori = _kk;
   // adaptif: jika caller tidak tentukan limit, pakai 1000 (cukup untuk 517 petak aktif tanpa truncate 300)
   // map.js boleh override dengan limit = min(1200, max(600, polyFeatures*2))
   const effLimit = Number.isFinite(limit) ? Math.max(50, Math.min(2000, parseInt(limit))) : 1000;

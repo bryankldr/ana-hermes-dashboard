@@ -1294,11 +1294,24 @@ def aktivitas_recent(limit=20, **kw):
     _tahun = kw.pop("tahun", None)
     _bulan = kw.pop("bulan", None)
     _periode = kw.pop("periode", None)
+    # Filter kategori petak (selaras definisi idle_petak_map: aktif cur>0;
+    # idle cur=0+ada penyadap+ada aktivitas 61 hari; bongkor sisanya).
+    # - aktif  : baris periode berjalan (≡ semua baris, tanpa predikat).
+    # - idle   : baris PERIODE LALU pada petak yang kini idle (bukti + label).
+    # - bongkor: SELALU KOSONG secara definisi — petak bongkor (cur=0) tak
+    #   punya baris periode berjalan; baris apa pun di periode ini membuat
+    #   petaknya aktif menurut prioritas CASE (cur>0 menang). AND 1=0 di
+    #   bawah menjaga bentuk respons (total 0, jujur) tanpa query mahal.
+    # Selain itu = tanpa filter (perilaku lama).
+    kat = str(kw.pop("kategori", "") or "").strip().lower()
+    if kat not in ("aktif", "idle", "bongkor"):
+        kat = ""
     w, wv = _wilayah_where(kw)
     has_w = bool(w)
     pw, pv = _pembaharuan_where(kw, "s")
     date_where = ""
     date_vals = []
+    d0 = d1 = None
     try:
         y = int(_tahun) if _tahun is not None and str(_tahun).strip() != "" else None
         m = int(_bulan) if _bulan is not None and str(_bulan).strip() != "" else None
@@ -1309,6 +1322,31 @@ def aktivitas_recent(limit=20, **kw):
             date_vals = [d0, d1]
     except Exception:
         pass
+    # Predikat kategori (butuh rentang tanggal valid; tanpa itu diabaikan).
+    kat_where = ""
+    kat_vals = []
+    if kat and date_where:
+        import datetime as _dt
+        _d0 = _dt.date.fromisoformat(d0)
+        _d2 = _d0 - _dt.timedelta(days=61)
+        d2s, d2e = _d2.isoformat(), (_d0 - _dt.timedelta(days=1)).isoformat()
+        _andil = ("EXISTS (SELECT 1 FROM getah_andil a WHERE a.kode_evapot = s.kode_evapot"
+                  " AND a.id_penyadap IS NOT NULL)")
+        _two = ("EXISTS (SELECT 1 FROM getah_aktivitas_sadap t WHERE t.kode_evapot = s.kode_evapot"
+                " AND t.tgl_pembaharuan BETWEEN %s AND %s)")
+        if kat == "idle":
+            # Baris periode LALU; petak harus idle SEKARANG (cur=0 implisit karena
+            # ... di bawah dibuktikan via NOT EXISTS; penyadap ada; ramai 61 hari).
+            rd0, rd1 = _prev_period_bounds(y, m, pr)
+            date_where = " AND s.tgl_pembaharuan BETWEEN %s AND %s"
+            date_vals = [rd0, rd1]
+            kat_where = (f" AND NOT EXISTS (SELECT 1 FROM getah_aktivitas_sadap c"
+                         f" WHERE c.kode_evapot = s.kode_evapot AND c.tgl_pembaharuan BETWEEN %s AND %s)"
+                         f" AND {_andil} AND {_two}")
+            kat_vals = [d0, d1, d2s, d2e]
+        elif kat == "bongkor":
+            kat_where = " AND 1 = 0"
+            kat_vals = []
 
     # Kolom popup + join sama untuk 3 cabang. Cuma JOIN getah_petak (untuk
     # nomor_petak) yang bergantung pada filter wilayah — Left Join supaya petak
@@ -1321,7 +1359,9 @@ def aktivitas_recent(limit=20, **kw):
             s.cuaca, s.akses_lokasi,
             py.nama_penyadap,
             u.first_name AS user_first, u.last_name AS user_last,
-            jb.nama_jabatan"""
+            jb.nama_jabatan,
+            COUNT(*) OVER () AS _total,
+            SUM(s.latitude IS NULL OR s.latitude = 0 OR s.longitude IS NULL OR s.longitude = 0) OVER () AS _no_coord"""
     joins = """FROM getah_aktivitas_sadap s
             LEFT JOIN directus_files f ON f.id = s.aktivitas_photo
             LEFT JOIN getah_penyadap py ON py.id = s.id_penyadap
@@ -1333,10 +1373,10 @@ def aktivitas_recent(limit=20, **kw):
             SELECT {cols}, p.nomor_petak
             {joins}
             JOIN getah_petak p ON p.kode_evapot = s.kode_evapot AND p.tahun_rtt = %s
-            WHERE 1=1{w}{date_where}{pw}
+            WHERE 1=1{w}{date_where}{kat_where}{pw}
             ORDER BY s.tgl_pembaharuan DESC, s.id DESC
             LIMIT %s
-        """, tuple([tahun_rtt] + wv + date_vals + pv + [limit]))
+        """, tuple([tahun_rtt] + wv + date_vals + kat_vals + pv + [limit]))
     # Fallback tanpa filter wilayah: petak tetap di-join supaya nomor_petak muncul.
     # tahun_rtt diambil dari tgl_pembaharuan (perpetuum RTT), bukan default keras.
     if not date_where:
@@ -1354,10 +1394,10 @@ def aktivitas_recent(limit=20, **kw):
         {joins}
         LEFT JOIN getah_petak p ON p.kode_evapot = s.kode_evapot
              AND p.tahun_rtt = YEAR(s.tgl_pembaharuan)
-        WHERE 1=1{date_where}{pw}
+        WHERE 1=1{date_where}{kat_where}{pw}
         ORDER BY s.tgl_pembaharuan DESC, s.id DESC
         LIMIT %s
-    """, tuple(date_vals + pv + [limit]))
+    """, tuple(date_vals + kat_vals + pv + [limit]))
 
 
 @template("petak_adjacent")

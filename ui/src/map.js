@@ -542,7 +542,7 @@ function updateLegend(biz, kat) {
         try { _ly.base = _ctl?.get_state?.()?.basemap || null; } catch (_) {}
         try {
           for (const o of (_ctl?.get_layers?.() || [])) {
-            if (o && o.id != null) _ly.overlays[String(o.id)] = !!o.visible;
+            if (o && o.id != null && String(o.id) !== 'Aktivitas' && String(o.id) !== 'PMTilesPetak') _ly.overlays[String(o.id)] = !!o.visible;
           }
         } catch (_) {}
         try { _ly.overlays.Label = map.hasLayer(refLbl); } catch (_) {}
@@ -639,6 +639,7 @@ function updateLegend(biz, kat) {
           }
           const ov = (L.overlays && typeof L.overlays === 'object') ? L.overlays : {};
           for (const id of Object.keys(ov)) {
+            if (id === 'Aktivitas' || id === 'PMTilesPetak') continue; // otomatis (zoom/tier), jangan dipaksa
             try {
               if (id === 'Label') {
                 if (esriRemembered === '0' && ov[id]) continue; // Esri diblokir: jangan paksa label
@@ -1112,23 +1113,46 @@ function updateLegend(biz, kat) {
         try {
           if (st.business === 'aktivitas' && _ctl && typeof _ctl.set_aktivitas_points === 'function') {
             const _tok = document.querySelector('meta[name="ana-token"]')?.content || '';
-            // 809 polygon → 1618 pin; DB punya 2064 Pem1 utuh, jadi cap lama
-            // 1200 memotong peta. 4000 masih di bawah cap DB (2000) & Leaflet
-            // circleMarker (~4k node). ponytail: markerCluster kalau >4000.
-            const pinLimit = Math.max(600, Math.min(4000, (res.features || 0) * 2 || 800));
+            // Cap pin longgar-tetap 4000 (batas aman Leaflet ~4k circleMarker):
+            // cap berbasis jumlah polygon TERBUKTI memotong data (polygon
+            // bisa tersaring viewport < total; pin periode penuh terpotong
+            // ke 600). Periode tersibuk ±2000 baris < 4000. ORDER BY tanggal
+            // DESC: bila >4000, yang terpotong = terlama (terdokumentasi).
+            const pinLimit = 4000;
             const r2 = await fetchAktivitasPoints({ business: st.business, filters: st.filters }, { limit: pinLimit });
             if (r2 && r2.ok && Array.isArray(r2.rows)) {
-              _ctl.set_aktivitas_points(r2.rows, { token: _tok });
+              // Return hitung marker yang benar-benar tampil (baris tanpa
+              // koordinat dilewati set_aktivitas_points) — itulah angka pin.
+              let _pins = r2.rows.length;
+              try {
+                const _pr = _ctl.set_aktivitas_points(r2.rows, { token: _tok });
+                if (_pr && Number.isFinite(_pr.count)) _pins = _pr.count;
+              } catch (_) { try { _ctl.set_aktivitas_points(r2.rows, { token: _tok }); } catch (_) {} }
               // Pin hanya tampil di Z>=12 (aturan zoom user 2026-10-04);
               // di bawah itu data tetap dimuat tapi layer hidden.
-              try { _ctl.set_aktivitas_visibility(map.getZoom() >= 12); } catch (_) {}
+              const _pz = map.getZoom();
+              try { _ctl.set_aktivitas_visibility(_pz >= 12); } catch (_) {}
               const fotoN = r2.rows.filter(function(x){ return x.aktivitas_photo || x.foto_file; }).length;
-              if (stat) stat.textContent += ' \u00b7 ' + r2.rows.length + ' aktivitas (' + fotoN + ' foto)';
+              // Hitungan jujur dari server (window total, pra-LIMIT): N pin
+              // dari M aktivitas, K tanpa koordinat (tak bisa jadi pin).
+              const _tot = (r2.rows[0] && r2.rows[0]._total != null) ? Number(r2.rows[0]._total) : r2.rows.length;
+              const _nc = (r2.rows[0] && r2.rows[0]._no_coord != null) ? Number(r2.rows[0]._no_coord) : 0;
+              const _kat = String(st.filters.kategori || 'semua').toLowerCase();
+              const _idleNote = (_kat === 'idle') ? ' (periode lalu)' : '';
+              if (stat) {
+                stat.textContent += ' \u00b7 ' + _pins + ' pin' + _idleNote + ' dari ' + _tot + ' aktivitas'
+                  + (_nc ? ' (' + _nc + ' tanpa koordinat)' : '')
+                  + ' (' + fotoN + ' foto)'
+                  + (_pz < 12 ? ' \u00b7 pin tersembunyi di zoom ini (\u226512 untuk tampil)' : '');
+                if (!r2.rows.length && (_kat === 'idle' || _kat === 'bongkor')) {
+                  stat.textContent += ' \u00b7 wajar: petak ' + _kat + ' tanpa aktivitas periode berjalan';
+                }
+              }
               // pin siap — polygon sudah confirmed via MAP_FEATURES_LOADED, pin hide terpisah
               if (_awaitingFeatures === null) { _setProgress(96, r2.rows.length + ' pin aktivitas'); _hideProgressSoon(true); }
               else { _setProgress(92, r2.rows.length + ' pin aktivitas — menunggu polygon…'); }
               _firstLoadDone = true;
-              log('map', 'MAP', 'aktivitas pin ' + r2.rows.length + ' (' + fotoN + ' foto)');
+              log('map', 'MAP', 'aktivitas pin ' + _pins + '/' + r2.rows.length + ' (' + fotoN + ' foto)');
             } else if (r2 && !r2.ok) {
               log('map', 'MAP', 'aktivitas pin gagal: ' + (r2.error || 'unknown').slice(0,60));
             }
@@ -1327,6 +1351,11 @@ function updateLegend(biz, kat) {
   }
   map.on('moveend', _pushViewport);
   map.on('zoomend', _pushViewport);
+  // Kunci viewport awal = posisi boot: moveend/zoomend dari setup
+  // (invalidateSize, fit pertama) tidak dianggap gerakan user sehingga tak
+  // memicu reload viewport balapan dengan kick awal (sumber hitungan
+  // polygon/pin tak stabil antar refresh).
+  try { _lastVp = _readVp().key; } catch (_) {}
   // Kontrol layer bawaan Leaflet mengutak-atik layer langsung (bypass state
   // _ctl): selaraskan state lewat API idempoten (tanpa efek ganda) agar
   // visibilitas ikut tersimpan via MAP_LAYER_CHANGED/MAP_STYLE_CHANGED.

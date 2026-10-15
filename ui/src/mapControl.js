@@ -786,16 +786,24 @@ set_aktivitas_points(points, opts = {}) {
   // Dedup: data sama (reload ganda filter+viewport overlap) → skip rebuild,
   // hanya enforce visibility. Tanpa ini clear+rebuild tiap respons membuat
   // pin flicker / sebagian hilang di Z13/14 lalu muncul lagi di Z12.
+  // Sidik kuat: panjang + id/tgl baris pertama-terakhir + hash FNV atas
+  // identitas penuh (id, evapot, tanggal, pembaharuan, lat, lng) tiap baris
+  // ke-3. Sidik lama (panjang string saja) bisa kolisi antar filter beda
+  // dengan jumlah sama → pin basi dipertahankan (filter tak cocok).
   try {
     const rows = Array.isArray(points) ? points : [];
     let h = rows.length + '|';
     if (rows.length) {
       const a = rows[0], b = rows[rows.length - 1];
-      h += String(a.id ?? a.kode_evapot) + ',' + String(a.latitude ?? a.lat) + '|'
-         + String(b.id ?? b.kode_evapot) + ',' + String(b.latitude ?? b.lat) + '|';
-      let s = 0;
-      for (let i = 0; i < rows.length; i += 7) { const r = rows[i]; s = (s * 31 + String(r.id ?? '').length + String(r.kode_evapot ?? '').length) | 0; }
-      h += s;
+      h += String(a.id ?? a.kode_evapot) + ',' + String(a.tgl_pembaharuan ?? '') + ',' + String(a.latitude ?? a.lat) + '|'
+         + String(b.id ?? b.kode_evapot) + ',' + String(b.tgl_pembaharuan ?? '') + ',' + String(b.latitude ?? b.lat) + '|';
+      let s = 2166136261;
+      for (let i = 0; i < rows.length; i += 3) {
+        const r = rows[i];
+        const key = String(r.id ?? '') + '~' + String(r.kode_evapot ?? '') + '~' + String(r.tgl_pembaharuan ?? '') + '~' + String(r.pembaharuan_ke ?? '') + '~' + String(r.latitude ?? r.lat ?? '') + '~' + String(r.longitude ?? r.lng ?? '');
+        for (let j = 0; j < key.length; j++) { s ^= key.charCodeAt(j); s = Math.imul(s, 16777619); }
+      }
+      h += (s >>> 0).toString(36);
     }
     if (h === this._aktivitasSig && this.aktivitasPoints.size > 0) {
       try {
@@ -820,6 +828,9 @@ set_aktivitas_points(points, opts = {}) {
     const lat = parseFloat(r.latitude ?? r.lat);
     const lng = parseFloat(r.longitude ?? r.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) { skipped++; continue; }
+    // GPS nol = sensor gagal (selaras definisi _no_coord server + garis):
+    // jangan jadi pin yatim di (0,0). Baris ini tetap dihitung skipped.
+    if (lat === 0 || lng === 0) { skipped++; continue; }
     // hard clamp BWB + small buffer (GPS drift) — keep all valid, skip obvious garbage
     if (lat < -9.5 || lat > -6.5 || lng < 112.5 || lng > 115.5) {
       // still show but dim — don't skip, just count (audit). Only skip NaN.
