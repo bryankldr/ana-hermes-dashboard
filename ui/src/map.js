@@ -1451,6 +1451,7 @@ function updateLegend(biz, kat) {
   // hijau sisanya); z≤10 single-KPH (ADM) → petak detail + outline netral.
   // Tak pernah reload data bisnis (hanya layer) → anti loop.
   let _tileManifest = null;
+  let _manWarned = false;
   let _ovKey = '', _ovTimer = null, _ovOn = false;
   const _tokPm = () => { try { return document.querySelector('meta[name="ana-token"]')?.content || ''; } catch (_) { return ''; } };
   async function _tileManifestLoad() {
@@ -1538,11 +1539,20 @@ function updateLegend(biz, kat) {
       const kphList = _scopeKphList();
       try { log('map', 'MAP', 'overview check z' + map.getZoom() + ' biz=' + biz + ' kph=' + kphList.length + ' divre=' + _scopeDivreList().join(',')); } catch (_) {}
       // 1. Grup petak: reconcile ke file scope (ganti URL global legacy).
+      // Manifest tak terbaca = JANGAN asumsikan semua file ada (fail-safe:
+      // request file tak ada = 404 + error vendor tiap zoom). Fallback legacy.
+      const manOk = !!(man && Array.isArray(man.files));
+      if (!manOk && !_manWarned) {
+        _manWarned = true;
+        try { log('map', 'MAP', 'manifest tile tak terbaca — pakai legacy sementara'); } catch (_) {}
+      }
       const petakSrc = [];
-      for (const k of kphList) {
-        const nm = 'kph_' + k + '.pmtiles';
-        if (have.size && !have.has(nm)) continue; // belum dibangun → fallback di bawah
-        petakSrc.push({ url: '/api/tiles/scope/kph/' + k + '.pmtiles', kind: 'petak' });
+      if (manOk) {
+        for (const k of kphList) {
+          const nm = 'kph_' + k + '.pmtiles';
+          if (!have.has(nm)) continue; // belum dibangun → lewati (tanpa 404)
+          petakSrc.push({ url: '/api/tiles/scope/kph/' + k + '.pmtiles', kind: 'petak' });
+        }
       }
       if (!petakSrc.length) {
         // Fallback legacy bila manifest tak ada / file belum dibangun.
@@ -1590,10 +1600,15 @@ function updateLegend(biz, kat) {
       }
       // Render: tile overview SOLID per divre (warna bake) + hit-layer transparan
       // (tooltip + klik drill). Aturan warna statis = pola tile petak.
+      // Hanya file yang ada di manifest (fail-safe anti-404 seperti di atas).
       const oSrc = [];
-      for (const d of _scopeDivreList()) {
-        oSrc.push({ url: '/api/tiles/scope/overview_' + d + '.pmtiles', kind: 'petak',
-                    rules: _ovTileRules(), maxDataZoom: 10 });
+      if (manOk) {
+        for (const d of _scopeDivreList()) {
+          const nm = 'overview_' + d + '.pmtiles';
+          if (!have.has(nm)) continue;
+          oSrc.push({ url: '/api/tiles/scope/overview_' + d + '.pmtiles', kind: 'petak',
+                      rules: _ovTileRules(), maxDataZoom: 10 });
+        }
       }
       let ovOk = false;
       try {
@@ -1734,11 +1749,13 @@ function updateLegend(biz, kat) {
       const man = await _tileManifestLoad();
       const have = new Set(((man && man.files) || []).map(function(f){ return f.name; }));
       const bSrc = [];
-      for (const d of _scopeDivreList()) {
-        const nm = 'bounds_' + d + '.pmtiles';
-        if (have.size && !have.has(nm)) continue;
-        bSrc.push({ url: '/api/tiles/scope/bounds_' + d + '.pmtiles', kind: 'kph', maxDataZoom: 10,
-                    rules: _ctl.kph_bounds_rules({}, { neutral: true }) });
+      if (man && Array.isArray(man.files)) {
+        for (const d of _scopeDivreList()) {
+          const nm = 'bounds_' + d + '.pmtiles';
+          if (!have.has(nm)) continue;
+          bSrc.push({ url: '/api/tiles/scope/bounds_' + d + '.pmtiles', kind: 'kph', maxDataZoom: 10,
+                      rules: _ctl.kph_bounds_rules({}, { neutral: true }) });
+        }
       }
       if (!bSrc.length) return;
       _ctl.set_pmtiles_sources('bounds', bSrc, { token: tok });
