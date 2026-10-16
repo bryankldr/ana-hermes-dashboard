@@ -1500,12 +1500,16 @@ function updateLegend(biz, kat) {
     // Guard di updateLegend menyertakan bar overview bila _ovOn (anti duplikat).
     try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {}
   }
-  function _ovInsight(rows) {
-    // Angka per KPH menyertai warna (tooltip angka).
+  function _ovInsight(rows, biz) {
+    // Angka per KPH menyertai warna (tooltip angka). Label B/K/T mengikuti
+    // bisnis: petak = Bongkor/Kurang/Terpenuhi; aktivitas = Bongkor/Idle/Aktif;
+    // produksi = pita cap ≤25 / 25-75 / >75.
     try {
       if (!insightBox || !Array.isArray(rows) || !rows.length) return;
+      const b = String(biz || 'petak');
+      const tag = b === 'aktivitas' ? ['B', 'I', 'A'] : b === 'produksi' ? ['≤25', '25-75', '>75'] : ['B', 'K', 'T'];
       const lines = rows.map(function(r) {
-        return esc(String(r.kph || r.kode_kph)) + ' ' + (r.total_petak || 0) + ' petak — B' + (r.bongkor || 0) + ' K' + (r.kurang || 0) + ' T' + (r.terpenuhi || 0);
+        return esc(String(r.kph || r.kode_kph)) + ' ' + (r.total_petak || 0) + ' petak — ' + tag[0] + (r.bongkor || 0) + ' ' + tag[1] + (r.kurang || 0) + ' ' + tag[2] + (r.terpenuhi || 0);
       });
       insightBox.dataset.lastBiz = 'petak';
       insightBox.dataset.lastExpl = lines.join(' · ');
@@ -1567,15 +1571,22 @@ function updateLegend(biz, kat) {
       // Reconcile menambah layer ke peta; di tier geojson (z>10) grup petak
       // harus tetap sembunyi (detail dari GeoJSON, bukan tile).
       try { if (map.getZoom() > 11) _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {}
-      // 2. Choropleth overview: petak + z≤10. Multi-KPH selalu;
-      // scope 1-KPH di DB tetap overview berwarna bila jabatan level atas
-      // (DIREKSI/ADMINISTRATOR/DIVRE) — bukan outline netral.
+      // 2. Choropleth overview: petak/aktivitas/produksi/matriks + z≤10.
+      // Multi-KPH selalu; scope 1-KPH di DB tetap overview berwarna bila
+      // jabatan level atas (DIREKSI/ADMINISTRATOR/DIVRE) — bukan outline netral.
+      // Warna tile = bake per-KPH sesuai bisnis (export_kph_overview per biz);
+      // agregat angka per bisnis via template *_per_kph (kolom selaras).
       const multi = kphList.length !== 1;
       let _jabTop = '';
       try { _jabTop = (_userScope().jabatan || '').toUpperCase(); } catch (_) {}
       const _isTop = (_jabTop === 'DIREKSI' || _jabTop === 'ADMINISTRATOR' || _jabTop === 'DIVRE');
-      const key = biz + '|' + z + '|' + tahun + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
-      const wantOv = (biz === 'petak' && z <= 10 && kphList.length > 0 && (multi || _isTop));
+      const _ovBiz = (biz === 'petak' || biz === 'aktivitas' || biz === 'produksi' || biz === 'matriks' || biz === 'matrik') ? biz : '';
+      const _kBulan = Math.max(1, Math.min(12, parseInt(fBulan?.value) || new Date().getMonth() + 1));
+      const _kP = parseInt(fPeriode?.value);
+      const _kPer = (_kP === 0 || _kP === 1 || _kP === 2) ? _kP : 1;
+      const _kPemke = (String(fPemKe?.value || '').trim() || '');
+      const key = _ovBiz + '|' + z + '|' + tahun + '|' + _kBulan + '|' + _kPer + '|' + _kPemke + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
+      const wantOv = (!!_ovBiz && z <= 10 && kphList.length > 0 && (multi || _isTop));
       if (!wantOv) {
         try { window.__spatialOverview = { key: key, wantOv: false, kph: kphList.length, on: false }; } catch (_) {}
         if (_ovOn) {
@@ -1585,15 +1596,27 @@ function updateLegend(biz, kat) {
         }
         _ovKey = key;
         // ADM single-KPH: outline netral konteks tetangga (tanpa warna bisnis).
-        if (biz === 'petak' && z <= 10 && kphList.length === 1) { _neutralBounds(); }
+        if (_ovBiz && z <= 10 && kphList.length === 1) { _neutralBounds(); }
         else { try { _ovHideGeo(); } catch (_) {} }
         return;
       }
       if (key === _ovKey && _ovOn) return; // sudah tampil
       _ovKey = key;
+      const _bulan = _kBulan;
+      const _periode = _kPer;
+      const _pemke = _kPemke;
+      const _ovTpl = _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
+        : _ovBiz === 'produksi' ? 'produksi_per_kph'
+        : _ovBiz === 'matriks' || _ovBiz === 'matrik' ? 'efektivitas_per_kph'
+        : 'efektivitas_per_kph';
+      const _ovParams = { tahun };
+      if (_ovBiz === 'aktivitas' || _ovBiz === 'produksi') {
+        _ovParams.bulan = _bulan; _ovParams.periode = _periode;
+        if (_ovBiz === 'aktivitas' && ['1', '2', '3', '4'].includes(_pemke)) _ovParams.pembaharuan_ke = _pemke;
+      }
       let rows = [];
       try {
-        const rr = await queryStats('efektivitas_per_kph', { tahun }, { timeoutMs: 10000 });
+        const rr = await queryStats(_ovTpl, _ovParams, { timeoutMs: 10000 });
         if (rr && rr.ok && Array.isArray(rr.rows)) rows = rr.rows;
       } catch (_) {}
       const colors = {};
@@ -1627,8 +1650,11 @@ function updateLegend(biz, kat) {
           const hit = _byBase2['overview_' + d + '.pmtiles'];
           if (!hit) continue;
           const suffix = hit.yr ? '_' + hit.yr : '';
+          // Petak = warna bake file; bisnis lain = geometri sama, warna dari
+          // agregat *_per_kph periode berjalan (filter per kode_kph).
+          const _rules = (_ovBiz === 'petak') ? _ovTileRules() : _ovTileRules(colors);
           oSrc.push({ url: '/api/tiles/scope/overview_' + d + suffix + '.pmtiles', kind: 'petak',
-                      rules: _ovTileRules(), maxDataZoom: 10 });
+                      rules: _rules, maxDataZoom: 10 });
         }
       }
       let ovOk = false;
@@ -1644,21 +1670,38 @@ function updateLegend(biz, kat) {
       }
       try { _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {} // choropleth ganti petak di overview
       // Hit-layer transparan utk tooltip + klik (binding post-hoc, pola terverifikasi).
-      try { await _ovShowHit(rows, false); } catch (_) {}
+      try { await _ovShowHit(rows, false, _ovBiz); } catch (_) {}
       _ovOn = true;
       try { log('map', 'MAP', 'overview ON kph berwarna=' + Object.keys(colors).length); } catch (_) {}
       try { window.__spatialOverview = { key: key, wantOv: !!wantOv, kph: kphList.length, on: true, colored: Object.keys(colors).length }; } catch (_) {}
-      _ovInsight(rows);
+      _ovInsight(rows, _ovBiz);
       _ovLegend();
     } catch (_) {}
   }
   // Rules tile overview SOLID (fill penuh, bukan transparan/gradasi).
-  function _ovTileRules() {
+  // Default: filter prop `warna` bawaan file (bisnis petak). Bila colors
+  // per-bisnis diberi (aktivitas/produksi/matriks), filter per kode_kph —
+  // geometri file sama, warna dari agregat *_per_kph periode berjalan.
+  function _ovTileRules(colors) {
     try {
       const P = window.protomapsL;
       const mk = function(fill) {
         return new P.PolygonSymbolizer({ fill: fill, opacity: 0.92, stroke: fill, width: 1.5, strokeOpacity: 0.9 });
       };
+      if (colors && typeof colors === 'object') {
+        const setOf = function(hex) {
+          const s = new Set();
+          for (const k of Object.keys(colors)) { if (colors[k] === hex) s.add(String(k)); }
+          return s;
+        };
+        const reds = setOf('#EF4444'), yels = setOf('#EAB308'), grns = setOf('#22C55E');
+        const kf = function(set) { return function(z, f) { try { return set.has(String((f && f.props && f.props.kode_kph) || '')); } catch (_) { return false; } }; };
+        return [
+          { dataLayer: 'petak', symbolizer: mk('#EF4444'), filter: kf(reds) },
+          { dataLayer: 'petak', symbolizer: mk('#EAB308'), filter: kf(yels) },
+          { dataLayer: 'petak', symbolizer: mk('#22C55E'), filter: kf(grns) },
+        ];
+      }
       const wf = function(w) { return function(z, f) { return String((f && f.props && f.props.warna) || '').toLowerCase() === w; }; };
       return [
         { dataLayer: 'petak', symbolizer: mk('#EF4444'), filter: wf('merah') },
@@ -1697,8 +1740,11 @@ function updateLegend(biz, kat) {
     try { if (_ovLayer && map.hasLayer(_ovLayer)) map.removeLayer(_ovLayer); } catch (_) {}
     try { if (_ovLayer) _ovLayer.clearLayers(); } catch (_) {}
   }
-  function _ovBindHit(layer, nums) {
+  function _ovBindHit(layer, nums, biz) {
     // Binding post-hoc (pola terverifikasi): tooltip + klik drill per fitur.
+    // Label tooltip mengikuti bisnis (aktivitas = B/I/A, produksi = pita cap).
+    const _bb = String(biz || 'petak');
+    const _tag = _bb === 'aktivitas' ? ['B', 'I', 'A'] : _bb === 'produksi' ? ['≤25', '25-75', '>75'] : ['B', 'K', 'T'];
     try {
       layer.eachLayer(function(ll) {
         try {
@@ -1706,10 +1752,10 @@ function updateLegend(biz, kat) {
           const nm = p.kph || p.kode_kph || 'KPH';
           let tip = '<b>' + esc(String(nm)) + '</b>';
           const m = nums[String(p.kode_kph || '')] || null;
-          // Angka berwarna sesuai bisnis: B merah, K kuning, T hijau.
-          if (m) tip += '<br><span style="color:#EF4444;font-weight:700">B ' + m.b + '</span> '
-            + '<span style="color:#EAB308;font-weight:700">K ' + m.k + '</span> '
-            + '<span style="color:#22C55E;font-weight:700">T ' + m.t + '</span>'
+          // Angka berwarna sesuai bisnis (label tag mengikuti bisnis).
+          if (m) tip += '<br><span style="color:#EF4444;font-weight:700">' + esc(_tag[0]) + ' ' + m.b + '</span> '
+            + '<span style="color:#EAB308;font-weight:700">' + esc(_tag[1]) + ' ' + m.k + '</span> '
+            + '<span style="color:#22C55E;font-weight:700">' + esc(_tag[2]) + ' ' + m.t + '</span>'
             + '<span style="opacity:.65"> dari ' + m.n + ' petak</span>';
           else tip += '<br>Klik untuk filter KPH ini';
           ll.bindTooltip(tip, { sticky: true, direction: 'top' });
@@ -1732,7 +1778,7 @@ function updateLegend(biz, kat) {
       });
     } catch (_) {}
   }
-  async function _ovShowHit(rows, neutral) {
+  async function _ovShowHit(rows, neutral, biz) {
     // Return true bila hit-layer tampil. numbers: kode -> {b,k,t,n}.
     try {
       const layer = _ovEnsureLayer();
@@ -1758,7 +1804,7 @@ function updateLegend(biz, kat) {
       layer.clearLayers();
       layer.addData({ type: 'FeatureCollection', features: gj });
       if (!map.hasLayer(layer)) layer.addTo(map);
-      _ovBindHit(layer, neutral ? {} : nums);
+      _ovBindHit(layer, neutral ? {} : nums, biz);
       try { window.__spatialOvLayer = layer; } catch (_) {}
       return true;
     } catch (_) { try { _ovHideGeo(); } catch (_) {} return false; }

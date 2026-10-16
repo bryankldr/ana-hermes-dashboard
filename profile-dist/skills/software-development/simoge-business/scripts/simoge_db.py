@@ -396,6 +396,82 @@ def efektivitas_per_kph(tahun, **kw):
     """, tuple([tahun] + wv))
 
 
+@template("aktivitas_per_kph")
+def aktivitas_per_kph(tahun, bulan, periode, **kw):
+    """Porsi aktif/idle/bongkor per KPH untuk choropleth overview bisnis aktivitas.
+    Definisi kategori persis aktivitas_petak_map: aktif = ada aktivitas periode
+    berjalan (hijau); bongkor = tanpa penyadap ATAU 0 aktivitas 2 bln (merah);
+    idle = sisanya (kuning). Klien klasifikasikan: merah bila bongkor>=25%,
+    kuning bila idle>=30%, hijau sisanya."""
+    d0, e1 = period_bounds(tahun, bulan, periode)
+    dprev, eprev = _prev_period_bounds(tahun, bulan, periode)
+    import datetime as _dt
+    _d0 = _dt.date.fromisoformat(d0)
+    _d2 = _d0 - _dt.timedelta(days=61)
+    d2s, d2e = _d2.isoformat(), (_d0 - _dt.timedelta(days=1)).isoformat()
+    pw, pv = _pembaharuan_where(kw, "s")
+    w, wv = _wilayah_where(kw)
+    return q(f"""
+        SELECT p.kode_kph, MAX(p.kph) AS kph, MAX(p.kode_divre) AS kode_divre,
+               COUNT(*) AS total_petak,
+               SUM(CASE WHEN COALESCE(a.penyadap, 0) = 0 THEN 1
+                        WHEN COALESCE(two.cnt, 0) = 0 THEN 1 ELSE 0 END) AS bongkor,
+               SUM(CASE WHEN COALESCE(act.cnt, 0) > 0 THEN 0
+                        WHEN COALESCE(a.penyadap, 0) = 0 THEN 0
+                        WHEN COALESCE(two.cnt, 0) = 0 THEN 0 ELSE 1 END) AS kurang,
+               SUM(CASE WHEN COALESCE(act.cnt, 0) > 0 THEN 1 ELSE 0 END) AS terpenuhi
+        FROM getah_petak p
+        LEFT JOIN (
+            SELECT kode_evapot, COUNT(DISTINCT id_penyadap) AS penyadap
+            FROM getah_andil GROUP BY kode_evapot
+        ) a ON a.kode_evapot = p.kode_evapot
+        LEFT JOIN (
+            SELECT kode_evapot, COUNT(*) AS cnt FROM getah_aktivitas_sadap s
+            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw} GROUP BY kode_evapot
+        ) act ON act.kode_evapot = p.kode_evapot
+        LEFT JOIN (
+            SELECT kode_evapot, COUNT(*) AS cnt FROM getah_aktivitas_sadap s
+            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw} GROUP BY kode_evapot
+        ) two ON two.kode_evapot = p.kode_evapot
+        WHERE p.tahun_rtt = %s{w}
+        GROUP BY p.kode_kph
+        ORDER BY p.kode_kph
+    """, tuple([d0, e1] + pv + [d2s, d2e] + pv + [tahun] + wv))
+
+
+@template("produksi_per_kph")
+def produksi_per_kph(tahun, bulan, periode, **kw):
+    """Porsi pita pencapaian RKAP per KPH untuk choropleth overview bisnis produksi.
+    achievement per petak = 100*actual_kumulatif/(target_rkap*pct_kumulatif/100).
+    Kolom output selaras efektivitas_per_kph agar klien reuse _ovColor:
+    bongkor = petak cap<=25 (merah), kurang = 25<cap<=75 (kuning),
+    terpenuhi = cap>75 (hijau)."""
+    d0y, _e1 = period_bounds(tahun, 1, 1)
+    _, dlast = period_bounds(tahun, bulan, periode)
+    total_pct = _target_pct(tahun, bulan, periode)
+    w, wv = _wilayah_where(kw)
+    return q(f"""
+        SELECT p.kode_kph, MAX(p.kph) AS kph, MAX(p.kode_divre) AS kode_divre,
+               COUNT(*) AS total_petak,
+               SUM(CASE WHEN COALESCE(prod.actual, 0) * 100.0
+                             / NULLIF(p.target_rkap * %s / 100, 0) <= 25 THEN 1 ELSE 0 END) AS bongkor,
+               SUM(CASE WHEN COALESCE(prod.actual, 0) * 100.0
+                             / NULLIF(p.target_rkap * %s / 100, 0) BETWEEN 25.0001 AND 75 THEN 1 ELSE 0 END) AS kurang,
+               SUM(CASE WHEN COALESCE(prod.actual, 0) * 100.0
+                             / NULLIF(p.target_rkap * %s / 100, 0) > 75 THEN 1 ELSE 0 END) AS terpenuhi
+        FROM getah_petak p
+        LEFT JOIN (
+            SELECT kode_evapot, SUM(COALESCE(berat_penerimaan, 0)) AS actual
+            FROM getah_aktivitas_penerimaan
+            WHERE tanggal BETWEEN %s AND %s
+            GROUP BY kode_evapot
+        ) prod ON prod.kode_evapot = p.kode_evapot
+        WHERE p.tahun_rtt = %s{w}
+        GROUP BY p.kode_kph
+        ORDER BY p.kode_kph
+    """, (total_pct, total_pct, total_pct, d0y, dlast, tahun, *wv))
+
+
 @template("petak_bongkor")
 def petak_bongkor(tahun, **kw):
     """Petak bongkor: tidak ada penyadap sama sekali."""
