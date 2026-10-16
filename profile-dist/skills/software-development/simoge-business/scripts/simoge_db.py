@@ -1155,8 +1155,10 @@ def keaktifan_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
 @template("aktivitas_kerja_map")
 def aktivitas_kerja_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     """Evaluasi Aktivitas per petak - efektivitas kerja via rasio pohon.
-    Per jenis: SUM(jml_phn_<jenis>) / jumlah_pohon. Semua jenis: rata-rata
-    6 rasio (hanya jenis berdata, cap 100%).
+    Per jenis: MAX(jml_phn_<jenis>) / jumlah_pohon (cakupan, bukan usaha -
+    pohon yg diulang 4 pembaharuan tetap 1 pohon tersentuh; NULLIF 0 agar
+    absen tak ikut MAX). Semua jenis: rata-rata 6 rasio berdata.
+    intensitas = SUM (usaha/pengulangan, kolom info terpisah).
     Merah = tanpa kerja; oranye <=50; kuning 51-79; hijau 80-99; biru =100."""
     d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     w, wv = _wilayah_where(kw)
@@ -1174,26 +1176,30 @@ def aktivitas_kerja_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     _phn = {"quare": "jml_phn_quare", "semprot_cas": "jml_phn_semprot_cas",
             "kerok": "jml_phn_kerok", "naik_batok": "jml_phn_naik_batok",
             "budaya_bersih": "jml_phn_bdy_bersih", "pulung": "jml_phn_pulung"}
-    _agg = ", ".join("COALESCE(SUM(s.%s),0) AS s_%s" % (c, c) for c in _phn.values())
+    _agg = ", ".join("MAX(NULLIF(s.%s,0)) AS m_%s, COALESCE(SUM(s.%s),0) AS s_%s" % (c, c, c, c) for c in _phn.values())
     if _jcol:
-        _pcol = "s_" + _phn.get(_jcol, "jml_phn_quare")
+        _pcol = "m_" + _phn.get(_jcol, "jml_phn_quare")
+        _icol = "s_" + _phn.get(_jcol, "jml_phn_quare")
         # Per jenis: rasio langsung, cap 100. NULL bila penyebut 0/tanpa data.
         _skor = ("CASE WHEN p.jumlah_pohon IS NULL OR p.jumlah_pohon <= 0 THEN NULL "
                  "WHEN COALESCE(phn.%s,0) <= 0 THEN 0 "
                  "ELSE LEAST(COALESCE(phn.%s,0) / p.jumlah_pohon * 100, 100) END" % (_pcol, _pcol))
     else:
         # Semua jenis: rata-rata rasio per jenis yg berdata (cap 100/jenis).
-        _rs = ["CASE WHEN COALESCE(phn.s_%s,0) > 0 AND COALESCE(p.jumlah_pohon,0) > 0 "
-               "THEN LEAST(COALESCE(phn.s_%s,0) / p.jumlah_pohon * 100, 100) ELSE NULL END" % (c, c)
+        _rs = ["CASE WHEN COALESCE(phn.m_%s,0) > 0 AND COALESCE(p.jumlah_pohon,0) > 0 "
+               "THEN LEAST(COALESCE(phn.m_%s,0) / p.jumlah_pohon * 100, 100) ELSE NULL END" % (c, c)
                for c in _phn.values()]
         _skor = ("((" + " + ".join("COALESCE((%s),0)" % r for r in _rs) + ") / NULLIF(" +
                  " + ".join("CASE WHEN (%s) IS NULL THEN 0 ELSE 1 END" % r for r in _rs) + ", 0))")
+        _icol = None
+    _int = " + ".join("COALESCE(phn.s_%s,0)" % c for c in _phn.values()) if _icol is None else "COALESCE(phn.%s,0)" % _icol
     return q(f"""
         SELECT p.nomor_petak, p.kode_evapot, p.luas_baku, p.target_rkap,
                p.kode_divre, p.kode_kph, p.kode_bkph, p.kode_rph, p.kode_tpg, p.tahun_rtt,
                p.divre AS divre_nama, p.kph AS kph_nama, p.bkph AS bkph_nama, p.rph AS rph_nama, p.nama_tpg AS tpg_nama,
                p.jumlah_pohon AS jumlah_pohon_petak,
                {_skor} AS pohon_pct,
+               ({_int}) AS intensitas,
                CASE
                    WHEN ({_skor}) IS NULL THEN 'nodata'
                    WHEN ({_skor}) <= 0 THEN 'sepi'
@@ -1226,7 +1232,7 @@ def aktivitas_kerja_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
 @template("aktivitas_efektivitas_per_kph")
 def aktivitas_efektivitas_per_kph(tahun, bulan, periode, **kw):
     """Rata-rata skor efektivitas pohon per KPH untuk overview bisnis aktivitas.
-    Skor per petak = rasio per-jenis (cap 100) dirata-rata dari jenis berdata.
+    Skor per petak = MAX per-jenis (cakupan) dirata-rata dari jenis berdata.
     Output: avg_skor + bucket counts selaras 5 warna polygon."""
     d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     w, wv = _wilayah_where(kw)
@@ -1242,14 +1248,14 @@ def aktivitas_efektivitas_per_kph(tahun, bulan, periode, **kw):
     _phn = {"quare": "jml_phn_quare", "semprot_cas": "jml_phn_semprot_cas",
             "kerok": "jml_phn_kerok", "naik_batok": "jml_phn_naik_batok",
             "budaya_bersih": "jml_phn_bdy_bersih", "pulung": "jml_phn_pulung"}
-    _agg = ", ".join("COALESCE(SUM(s.%s),0) AS s_%s" % (c, c) for c in _phn.values())
+    _agg = ", ".join("MAX(NULLIF(s.%s,0)) AS m_%s" % (c, c) for c in _phn.values())
     if _jcol:
-        _pcol = "s_" + _phn.get(_jcol, "jml_phn_quare")
+        _pcol = "m_" + _phn.get(_jcol, "jml_phn_quare")
         _sk = ("CASE WHEN COALESCE(phn.%s,0) <= 0 OR COALESCE(p.jumlah_pohon,0) <= 0 THEN 0 "
                "ELSE LEAST(COALESCE(phn.%s,0) / p.jumlah_pohon * 100, 100) END" % (_pcol, _pcol))
     else:
-        _rs = ["CASE WHEN COALESCE(phn.s_%s,0) > 0 AND COALESCE(p.jumlah_pohon,0) > 0 "
-               "THEN LEAST(COALESCE(phn.s_%s,0) / p.jumlah_pohon * 100, 100) ELSE NULL END" % (c, c)
+        _rs = ["CASE WHEN COALESCE(phn.m_%s,0) > 0 AND COALESCE(p.jumlah_pohon,0) > 0 "
+               "THEN LEAST(COALESCE(phn.m_%s,0) / p.jumlah_pohon * 100, 100) ELSE NULL END" % (c, c)
                for c in _phn.values()]
         _sk = ("((COALESCE((%s),0)) / NULLIF(" % " + ".join("COALESCE((%s),0)" % r for r in _rs) + \
                " + ".join("CASE WHEN (%s) IS NULL THEN 0 ELSE 1 END" % r for r in _rs) + ", 0))")
