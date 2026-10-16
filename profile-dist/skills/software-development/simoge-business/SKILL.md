@@ -156,6 +156,8 @@ show_on_map("aktivitas_per_penyadap_petak", tahun=2026, bulan=5, periode=0, id_p
 
 **Kolom aktivitas baru** — `tgl_aktivitas` (date aktivitas, beda dari `tgl_pembaharuan` = update date), `pulung` (flag aktivitas), dan `jml_phn_*` (jumlah pohon per jenis). `pulung` otomatis ikut `grup_by:"aktivitas"` via `AKTIVITAS_FLAGS` di `scripts/simoge_db.py`. Selalu filter periode pakai `tgl_pembaharuan`, bukan `tgl_aktivitas`.
 
+**Efektivitas pohon (coverage vs usaha):** skor per jenis = `MAX(NULLIF(jml_phn_<jenis>,0)) / jumlah_pohon` — satu pohon yang diulang 1-4 pembaharuan tetap 1 pohon tersentuh, jadi petak 1x vs 4x pembaharuan dengan cakupan sama dapat skor sama. Semua jenis = rata-rata rasio dari jenis berdata saja. `SUM` disimpan terpisah sebagai kolom `intensitas` (usaha/pengulangan), jangan pernah dilipat ke skor — SUM menggelembungkan skor dan selalu memenangkan frekuensi atas cakupan.
+
 ## Templates / Production KPI / Business Rules / Map / Transport
 - Templates (36 verified) — `describe()` / `list_templates()` ; detail `references/templates.md`
 - Production KPI `answer_production(tahun,bulan,periode,mode,**wilayah)` 1 call — `references/production_kpi.md`
