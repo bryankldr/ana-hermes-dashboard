@@ -181,6 +181,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '          <label>Bulan <select id="fBulan" class="spatial-mini">' + _numOpts([1,2,3,4,5,6,7,8,9,10,11,12], d0.getMonth()+1) + '</select></label>'
       + '          <label>Tahun <select id="fTahun" class="spatial-mini"><option value="2026" selected>2026</option><option value="2025">2025</option></select></label>'
       + '          <label>Periode <select id="fPeriode" class="spatial-mini"><option value="0">Penuh (P1+P2)</option><option value="1">P1 (1-15)</option><option value="2">P2 (16-akhir)</option></select></label>'
+      + '          <label>Sampai dengan <select id="fSampai" class="spatial-mini" title="Ya = Jan s/d periode · Tidak = periode saja"><option value="">Auto</option><option value="ya">Ya</option><option value="tidak">Tidak</option></select></label>'
       + '        </div>'
       + '      </div>'
       + '      <div class="spatial-fgroup">'
@@ -415,6 +416,7 @@ export function initMapPanel({ log = () => {} } = {}) {
   const btnRefresh = $sel('#spatialRefresh');
   const fBulan = $sel('#fBulan'), fTahun = $sel('#fTahun'), fPeriode = $sel('#fPeriode');
   const fPemKe = $sel('#fPemKe');
+  const fSampai = $sel('#fSampai');
   const fDivre = $sel('#fDivre'), fKph = $sel('#fKph'), fBkph = $sel('#fBkph'), fRph = $sel('#fRph'), fTpg = $sel('#fTpg');
   const fApply = $sel('#fApply'), fReset = $sel('#fReset');
   const chipsBox = $sel('#spatialChips');
@@ -536,7 +538,7 @@ function updateLegend(biz, kat) {
     try {
       const f = (st && st.filters) || {};
       const keep = {};
-      for (const k of ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke']) {
+      for (const k of ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke','sampai_dengan']) {
         const v = f[k];
         keep[k] = (v == null) ? '' : String(v);
       }
@@ -684,6 +686,7 @@ function updateLegend(biz, kat) {
       kategori: katSel?.value || 'semua',
       ...(_spatialWarna ? { warna: _spatialWarna } : {}),
       ...(fPemKe?.value ? { pembaharuan_ke: fPemKe.value } : {}),
+      ...(fSampai?.value ? { sampai_dengan: fSampai.value } : {}),
     };
     // Viewport extras (bounds/zoom/page_size/aggregated_level) — dari memori,
     // bukan dropdown. Tanpa ini bounds hilang sebelum resolveTemplate.
@@ -708,6 +711,7 @@ function updateLegend(biz, kat) {
     if (f.bulan || f.periode) items.push({k:'waktu', label:'Waktu', v: f.bulan + '/P' + f.periode + '/' + f.tahun});
     if (f.kategori && f.kategori !== 'semua') items.push({k:'kategori', label:'Kategori', v:f.kategori});
     if (f.pembaharuan_ke) items.push({k:'pemke', label:'Pem', v:String(f.pembaharuan_ke)});
+    if (f.sampai_dengan) items.push({k:'sampai', label:'S/d', v:String(f.sampai_dengan)});
     if (!items.length) { chipsBox.innerHTML = ''; return; }
     chipsBox.innerHTML = items.map(function(it){
       return '<span class="chip"><b>' + esc(it.label) + ':</b> ' + esc(it.v) + ' <i data-k="' + esc(it.k) + '" title="hapus">x</i></span>';
@@ -726,6 +730,7 @@ function updateLegend(biz, kat) {
         else if (k==='waktu'){ if(fBulan) fBulan.value=String(d.getMonth()+1); if(fPeriode) fPeriode.value=d.getDate()<=15?'1':'2'; }
         else if (k==='kategori' && katSel) { katSel.value='semua'; _spatialWarna = ''; }
         else if (k==='pemke' && fPemKe) fPemKe.value='';
+        else if (k==='sampai' && typeof fSampai !== 'undefined' && fSampai) fSampai.value='';
         updateHead(); renderChips(); scheduleReload();
       });
     });
@@ -1233,13 +1238,14 @@ function updateLegend(biz, kat) {
     _spatialWarna = ''; _spatialTemplate = null;
     updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });
   // Waktu + pembaharuan_ke pakai listener generik; wilayah sudah punya cascade-specific
-  [fBulan, fTahun, fPeriode, fPemKe].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
+  [fBulan, fTahun, fPeriode, fPemKe, fSampai].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
   fApply?.addEventListener('click', reloadBusiness);
   fReset?.addEventListener('click', function(){
     if (fBulan) fBulan.value=String(d.getMonth()+1);
     if (fTahun) fTahun.value='2026';
     if (fPeriode) fPeriode.value=d.getDate()<=15?'1':'2';
     if (fPemKe) fPemKe.value='';
+    if (typeof fSampai !== 'undefined' && fSampai) fSampai.value='';
     // Respect scope lock: only reset unlocked dropdowns
     if (fDivre && !fDivre.disabled) fDivre.value='';
     if (fKph && !fKph.disabled) fKph.value='';
@@ -1598,7 +1604,8 @@ function updateLegend(biz, kat) {
       const _kP = parseInt(fPeriode?.value);
       const _kPer = (_kP === 0 || _kP === 1 || _kP === 2) ? _kP : 1;
       const _kPemke = (String(fPemKe?.value || '').trim() || '');
-      const key = _ovBiz + '|' + z + '|' + tahun + '|' + _kBulan + '|' + _kPer + '|' + _kPemke + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
+      const _kSampai = (String((typeof fSampai !== 'undefined' && fSampai ? fSampai.value : '') || '').trim() || '');
+      const key = _ovBiz + '|' + z + '|' + tahun + '|' + _kBulan + '|' + _kPer + '|' + _kPemke + '|' + _kSampai + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
       const wantOv = (!!_ovBiz && z <= 10 && kphList.length > 0 && (multi || _isTop));
       if (!wantOv) {
         try { window.__spatialOverview = { key: key, wantOv: false, kph: kphList.length, on: false }; } catch (_) {}
@@ -1618,6 +1625,8 @@ function updateLegend(biz, kat) {
       const _bulan = _kBulan;
       const _periode = _kPer;
       const _pemke = _kPemke;
+      const _sampai = _kSampai;
+      if (['ya','tidak'].includes(_sampai)) _ovParams.sampai_dengan = _sampai;
       const _ovTpl = _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
         : _ovBiz === 'produksi' ? 'produksi_per_wilayah'
         : _ovBiz === 'matriks' || _ovBiz === 'matrik' ? 'efektivitas_per_kph'
@@ -2575,7 +2584,7 @@ function updateLegend(biz, kat) {
         for (const k of Object.keys(_defWaktu)) {
           if (f[k] === '') f[k] = _defWaktu[k];
         }
-        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe };
+        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe, sampai_dengan: (typeof fSampai !== 'undefined' ? fSampai : null) };
         for (const k of Object.keys(_map)) {
           const elm = _map[k];
           if (!elm || f[k] === undefined || f[k] === null) continue;
@@ -2629,7 +2638,7 @@ function updateLegend(biz, kat) {
         for (const k of Object.keys(_defWaktu)) {
           if (f[k] === '') f[k] = _defWaktu[k];
         }
-        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe };
+        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe, sampai_dengan: (typeof fSampai !== 'undefined' ? fSampai : null) };
         for (const k of Object.keys(_map)) {
           const elm = _map[k];
           if (!elm || f[k] === undefined || f[k] === null) continue;

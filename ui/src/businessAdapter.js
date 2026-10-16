@@ -52,6 +52,10 @@ export function resolveTemplate(state) {
       && ['1','2','3','4'].includes(String(f.pembaharuan_ke || ''))) {
     wilayah.pembaharuan_ke = String(f.pembaharuan_ke);
   }
+  // Sampai dengan Ya/Tidak — berlaku aktivitas/produksi/matriks.
+  if (['ya','tidak'].includes(String(f.sampai_dengan || '').toLowerCase())) {
+    wilayah.sampai_dengan = String(f.sampai_dengan).toLowerCase();
+  }
 
   const biz = state.business || 'petak';
   const kat = (f.kategori || 'semua').toLowerCase();

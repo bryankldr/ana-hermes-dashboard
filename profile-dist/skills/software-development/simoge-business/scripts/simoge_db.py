@@ -135,6 +135,28 @@ def period_bounds(year, month, periode):
     return f"{year:04d}-{month:02d}-16", f"{year:04d}-{month:02d}-{last:02d}"
 
 
+def _sampai_dengan(kw):
+    """Param resmi 'Sampai dengan' Ya/Tidak. Ya/1/true/y => kumulatif Jan-01 s/d akhir periode.
+    Default Tidak (snapshot periode saja) kecuali template produksi yang default Ya."""
+    v = kw.get("sampai_dengan", kw.get("sampaiDengan", kw.get("kumulatif", "")))
+    s = str(v or "").strip().lower()
+    return s in ("ya", "y", "1", "true", "t", "yes", "kumulatif")
+
+
+def _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False):
+    """Return (d0, d1) sesuai filter Sampai dengan.
+    Ya => Jan-01 s/d akhir periode; Tidak => periode saja (atau bulan penuh bila periode=0)."""
+    _, dlast = period_bounds(tahun, bulan, periode)
+    sd = _sampai_dengan(kw)
+    if kw.get("sampai_dengan", kw.get("sampaiDengan", kw.get("kumulatif", None))) in (None, ""):
+        sd = default_kumulatif
+    if sd:
+        d0y, _ = period_bounds(tahun, 1, 1)
+        return d0y, dlast
+    d0, _ = period_bounds(tahun, bulan, periode)
+    return d0, dlast
+
+
 def _prev_month(year, month):
     return (year, month - 1) if month > 1 else (year - 1, 12)
 
@@ -281,6 +303,28 @@ def _target_pct(tahun, bulan, periode):
     return float(rows[0]["p"] or 0)
 
 
+def _target_pct_sd(tahun, bulan, periode, kw, default_kumulatif=True):
+    """Persen target sesuai filter Sampai dengan. Ya (atau default produksi)
+    => kumulatif via _target_pct; Tidak => persen periode berjalan saja
+    (P1=ro_p1 bulan itu, P2=ro_p2, Penuh=p1+p2 bulan itu)."""
+    sd = _sampai_dengan(kw)
+    if kw.get("sampai_dengan", kw.get("sampaiDengan", kw.get("kumulatif", None))) in (None, ""):
+        sd = default_kumulatif
+    if sd:
+        return _target_pct(tahun, bulan, periode)
+    rows = q(
+        "SELECT COALESCE(SUM(ro_periode_1 + ro_periode_2), 0) AS p "
+        "FROM getah_target_ro_nps WHERE tahun = %s AND bulan = %s",
+        (tahun, bulan))["rows"] if periode in _FULL_P else q(
+        "SELECT COALESCE(SUM(ro_periode_1), 0) AS p "
+        "FROM getah_target_ro_nps WHERE tahun = %s AND bulan = %s",
+        (tahun, bulan))["rows"] if periode == 1 else q(
+        "SELECT COALESCE(SUM(ro_periode_2), 0) AS p "
+        "FROM getah_target_ro_nps WHERE tahun = %s AND bulan = %s",
+        (tahun, bulan))["rows"]
+    return float(rows[0]["p"] or 0)
+
+
 @template("petak_count")
 def petak_count(tahun, **kw):
     """Jumlah petak RTT per tahun."""
@@ -403,7 +447,7 @@ def aktivitas_per_kph(tahun, bulan, periode, **kw):
     berjalan (hijau); bongkor = tanpa penyadap ATAU 0 aktivitas 2 bln (merah);
     idle = sisanya (kuning). Klien klasifikasikan: merah bila bongkor>=25%,
     kuning bila idle>=30%, hijau sisanya."""
-    d0, e1 = period_bounds(tahun, bulan, periode)
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     dprev, eprev = _prev_period_bounds(tahun, bulan, periode)
     import datetime as _dt
     _d0 = _dt.date.fromisoformat(d0)
@@ -446,9 +490,8 @@ def produksi_per_kph(tahun, bulan, periode, **kw):
     Kolom output selaras efektivitas_per_kph agar klien reuse _ovColor:
     bongkor = petak cap<=25 (merah), kurang = 25<cap<=75 (kuning),
     terpenuhi = cap>75 (hijau)."""
-    d0y, _e1 = period_bounds(tahun, 1, 1)
-    _, dlast = period_bounds(tahun, bulan, periode)
-    total_pct = _target_pct(tahun, bulan, periode)
+    d0y, dlast = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=True)
+    total_pct = _target_pct_sd(tahun, bulan, periode, kw, default_kumulatif=True)
     w, wv = _wilayah_where(kw)
     return q(f"""
         SELECT p.kode_kph, MAX(p.kph) AS kph, MAX(p.kode_divre) AS kode_divre,
@@ -651,9 +694,8 @@ def rkap_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     """RKAP achievement + polygon + warna (merah/oranye/kuning/hijau/emas) untuk map.
     target_periode = target_rkap × persen skalar _target_pct (kumulatif s/d periode).
     Skalar — bukan JOIN target (12 baris persen × polygon ganda = target ganda)."""
-    pct = _target_pct(tahun, bulan, periode)
-    d0, _e1 = period_bounds(tahun, 1, 1)
-    _, dlast = period_bounds(tahun, bulan, periode)
+    pct = _target_pct_sd(tahun, bulan, periode, kw, default_kumulatif=True)
+    d0, dlast = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=True)
     w, wv = _wilayah_where(kw)
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
@@ -700,7 +742,7 @@ def idle_petak(tahun, bulan, periode, **kw):
     (P2→P1 bulan sama; P1→P2 bulan lalu). Prioritas CASE ikut diperjelas:
     cur>0 aktif → tanpa penyadap/>2bln sepi bongkor → selain itu idle.
     Scoped wilayah via _wilayah_where + nama manusia."""
-    d0, e1 = period_bounds(tahun, bulan, periode)
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     if periode == 2:
         dprev, eprev = period_bounds(tahun, bulan, 1)
     else:
@@ -755,7 +797,7 @@ def idle_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
                  sempit: 114 petak aktif jadi salah merah sebelum fix ini)
     BONGKOR merah: tanpa penyadap, atau punya penyadap tapi 0 aktivitas >2 bulan
     """
-    d0, e1 = period_bounds(tahun, bulan, periode)
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     if periode == 2:
         dprev, eprev = period_bounds(tahun, bulan, 1)
     else:
@@ -982,7 +1024,7 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     memfilter SEMUA hitungan aktivitas (cur/prev/two) supaya polygon, KPI, dan
     pin aktivitas_recent melihat himpunan baris yang sama.
     """
-    d0, e1 = period_bounds(tahun, bulan, periode)
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     dprev, eprev = _prev_period_bounds(tahun, bulan, periode)
     # 2 bulan window sebelum periode berjalan (andil bongkor)
     import datetime as _dt
@@ -1065,9 +1107,8 @@ def matriks_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     Kolom: kategori_efektivitas, pencapaian_pct, luas_andil, realisasi, warna.
     target_periode skalar via _target_pct (alasan sama seperti rkap_map).
     """
-    pct = _target_pct(tahun, bulan, periode)
-    d0, _e1 = period_bounds(tahun, 1, 1)
-    _, dlast = period_bounds(tahun, bulan, periode)
+    pct = _target_pct_sd(tahun, bulan, periode, kw, default_kumulatif=True)
+    d0, dlast = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=True)
     w, wv = _wilayah_where(kw)
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
@@ -1620,7 +1661,7 @@ def status_petak_per_wilayah(tahun, bulan, periode, level="kode_bkph", **kw):
     Nama manusia langsung dari getah_petak (810/810 terisi, tanpa join)."""
     _require_level(level)
     ncol = _WILAYAH_NAMES[level]
-    d0, e1 = period_bounds(tahun, bulan, periode)
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
     if periode == 2:
         dprev, eprev = period_bounds(tahun, bulan, 1)
     else:
@@ -1670,10 +1711,9 @@ def produksi_per_wilayah(tahun, bulan, periode, level="kode_bkph", **kw):
     ncol = _WILAYAH_NAMES[level]
     # Kumulatif Jan s/d (bulan, periode) — selaras rkap_map: actual kumulatif
     # vs target kumulatif. Periode-saja vs kumulatif = achievement bias.
-    d0y, _e1 = period_bounds(tahun, 1, 1)
-    _, dlast = period_bounds(tahun, bulan, periode)
+    d0y, dlast = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=True)
     # persen kumulatif skalar via helper — bukan SUM-dalam-SUM (err 1111).
-    total_pct = _target_pct(tahun, bulan, periode)
+    total_pct = _target_pct_sd(tahun, bulan, periode, kw, default_kumulatif=True)
     w, wv = _wilayah_where(kw)
     return q(f"""
         SELECT p.{level} AS kode_wilayah, MAX(p.{ncol}) AS nama_wilayah,
