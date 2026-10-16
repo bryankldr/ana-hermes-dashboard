@@ -1154,22 +1154,124 @@ def keaktifan_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
 
 @template("aktivitas_kerja_map")
 def aktivitas_kerja_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
-    """Evaluasi Aktivitas per petak - sebaran kerja sadap per jenis.
-    Warna BEDA dari keaktifan: hijau = ada kerja jenis terpilih di periode;
-    biru (emas) = ada kerja lain saja; merah = tanpa penyadap/sepi 2 bln.
-    Hormati jenis_aktivitas + sampai_dengan."""
-    r = T["aktivitas_petak_map"](tahun, bulan, periode, limit=limit, bounds=bounds, **kw)
-    for x in (r.get("rows") or []):
-        try:
-            if int(x.get("jumlah_aktivitas") or 0) > 0:
-                x["kategori"], x["warna"] = "kerja_jenis", "hijau"
-            elif int(x.get("jumlah_penyadap") or 0) == 0 or int(x.get("aktivitas_2bulan") or 0) == 0:
-                x["kategori"], x["warna"] = "sepi", "merah"
-            else:
-                x["kategori"], x["warna"] = "kerja_lain", "emas"
-        except Exception:
-            pass
-    return r
+    """Evaluasi Aktivitas per petak - efektivitas kerja via rasio pohon.
+    Per jenis: SUM(jml_phn_<jenis>) / jumlah_pohon. Semua jenis: rata-rata
+    6 rasio (hanya jenis berdata, cap 100%).
+    Merah = tanpa kerja; oranye <=50; kuning 51-79; hijau 80-99; biru =100."""
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
+    w, wv = _wilayah_where(kw)
+    pw, pv = _pembaharuan_where(kw, "s")
+    b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
+    lim = _page_size(kw, default=limit)
+    _jc = _jenis_aktivitas_where(kw, "s")
+    _jcol = None
+    try:
+        import re as _re
+        _m = _re.search(r"s\.(\w+) = 1", _jc[0])
+        _jcol = _m.group(1) if _m else None
+    except Exception:
+        _jcol = None
+    _phn = {"quare": "jml_phn_quare", "semprot_cas": "jml_phn_semprot_cas",
+            "kerok": "jml_phn_kerok", "naik_batok": "jml_phn_naik_batok",
+            "budaya_bersih": "jml_phn_bdy_bersih", "pulung": "jml_phn_pulung"}
+    _agg = ", ".join("COALESCE(SUM(s.%s),0) AS s_%s" % (c, c) for c in _phn.values())
+    if _jcol:
+        _pcol = "s_" + _phn.get(_jcol, "jml_phn_quare")
+        # Per jenis: rasio langsung, cap 100. NULL bila penyebut 0/tanpa data.
+        _skor = ("CASE WHEN p.jumlah_pohon IS NULL OR p.jumlah_pohon <= 0 THEN NULL "
+                 "WHEN COALESCE(phn.%s,0) <= 0 THEN 0 "
+                 "ELSE LEAST(COALESCE(phn.%s,0) / p.jumlah_pohon * 100, 100) END" % (_pcol, _pcol))
+    else:
+        # Semua jenis: rata-rata rasio per jenis yg berdata (cap 100/jenis).
+        _rs = ["CASE WHEN COALESCE(phn.s_%s,0) > 0 AND COALESCE(p.jumlah_pohon,0) > 0 "
+               "THEN LEAST(COALESCE(phn.s_%s,0) / p.jumlah_pohon * 100, 100) ELSE NULL END" % (c, c)
+               for c in _phn.values()]
+        _skor = ("((" + " + ".join("COALESCE((%s),0)" % r for r in _rs) + ") / NULLIF(" +
+                 " + ".join("CASE WHEN (%s) IS NULL THEN 0 ELSE 1 END" % r for r in _rs) + ", 0))")
+    return q(f"""
+        SELECT p.nomor_petak, p.kode_evapot, p.luas_baku, p.target_rkap,
+               p.kode_divre, p.kode_kph, p.kode_bkph, p.kode_rph, p.kode_tpg, p.tahun_rtt,
+               p.divre AS divre_nama, p.kph AS kph_nama, p.bkph AS bkph_nama, p.rph AS rph_nama, p.nama_tpg AS tpg_nama,
+               p.jumlah_pohon AS jumlah_pohon_petak,
+               {_skor} AS pohon_pct,
+               CASE
+                   WHEN ({_skor}) IS NULL THEN 'nodata'
+                   WHEN ({_skor}) <= 0 THEN 'sepi'
+                   WHEN ({_skor}) <= 50 THEN 'rendah'
+                   WHEN ({_skor}) <= 79 THEN 'sedang'
+                   WHEN ({_skor}) < 100 THEN 'tinggi'
+                   ELSE 'penuh'
+               END AS kategori,
+               CASE
+                   WHEN ({_skor}) IS NULL THEN 'abu'
+                   WHEN ({_skor}) <= 0 THEN 'merah'
+                   WHEN ({_skor}) <= 50 THEN 'oranye'
+                   WHEN ({_skor}) <= 79 THEN 'kuning'
+                   WHEN ({_skor}) < 100 THEN 'hijau'
+                   ELSE 'emas'
+               END AS warna,
+               pp.polygon
+        FROM getah_petak p
+        JOIN petak_polygon pp ON pp.kode_evapot = p.kode_evapot
+        LEFT JOIN (
+            SELECT kode_evapot, {_agg} FROM getah_aktivitas_sadap s
+            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw} GROUP BY kode_evapot
+        ) phn ON phn.kode_evapot = p.kode_evapot
+        WHERE p.tahun_rtt = %s AND pp.polygon IS NOT NULL{w}{b}
+        ORDER BY ({_skor}) DESC
+        LIMIT %s
+    """, tuple([d0, e1] + pv + [tahun] + wv + bv + [lim]))
+
+
+@template("aktivitas_efektivitas_per_kph")
+def aktivitas_efektivitas_per_kph(tahun, bulan, periode, **kw):
+    """Rata-rata skor efektivitas pohon per KPH untuk overview bisnis aktivitas.
+    Skor per petak = rasio per-jenis (cap 100) dirata-rata dari jenis berdata.
+    Output: avg_skor + bucket counts selaras 5 warna polygon."""
+    d0, e1 = _range_bounds(tahun, bulan, periode, kw, default_kumulatif=False)
+    w, wv = _wilayah_where(kw)
+    pw, pv = _pembaharuan_where(kw, "s")
+    _jc = _jenis_aktivitas_where(kw, "s")
+    _jcol = None
+    try:
+        import re as _re2
+        _m2 = _re2.search(r"s\.(\w+) = 1", _jc[0])
+        _jcol = _m2.group(1) if _m2 else None
+    except Exception:
+        _jcol = None
+    _phn = {"quare": "jml_phn_quare", "semprot_cas": "jml_phn_semprot_cas",
+            "kerok": "jml_phn_kerok", "naik_batok": "jml_phn_naik_batok",
+            "budaya_bersih": "jml_phn_bdy_bersih", "pulung": "jml_phn_pulung"}
+    _agg = ", ".join("COALESCE(SUM(s.%s),0) AS s_%s" % (c, c) for c in _phn.values())
+    if _jcol:
+        _pcol = "s_" + _phn.get(_jcol, "jml_phn_quare")
+        _sk = ("CASE WHEN COALESCE(phn.%s,0) <= 0 OR COALESCE(p.jumlah_pohon,0) <= 0 THEN 0 "
+               "ELSE LEAST(COALESCE(phn.%s,0) / p.jumlah_pohon * 100, 100) END" % (_pcol, _pcol))
+    else:
+        _rs = ["CASE WHEN COALESCE(phn.s_%s,0) > 0 AND COALESCE(p.jumlah_pohon,0) > 0 "
+               "THEN LEAST(COALESCE(phn.s_%s,0) / p.jumlah_pohon * 100, 100) ELSE NULL END" % (c, c)
+               for c in _phn.values()]
+        _sk = ("((COALESCE((%s),0)) / NULLIF(" % " + ".join("COALESCE((%s),0)" % r for r in _rs) + \
+               " + ".join("CASE WHEN (%s) IS NULL THEN 0 ELSE 1 END" % r for r in _rs) + ", 0))")
+    return q(f"""
+        SELECT p.kode_kph, MAX(p.kph) AS kph, MAX(p.kode_divre) AS kode_divre,
+               COUNT(*) AS total_petak,
+               ROUND(AVG({_sk}), 1) AS avg_skor,
+               SUM(CASE WHEN ({_sk}) IS NULL THEN 1 ELSE 0 END) AS nodata,
+               SUM(CASE WHEN ({_sk}) = 0 THEN 1 ELSE 0 END) AS sepi,
+               SUM(CASE WHEN ({_sk}) > 0 AND ({_sk}) <= 50 THEN 1 ELSE 0 END) AS rendah,
+               SUM(CASE WHEN ({_sk}) > 50 AND ({_sk}) <= 79 THEN 1 ELSE 0 END) AS sedang,
+               SUM(CASE WHEN ({_sk}) >= 80 AND ({_sk}) < 100 THEN 1 ELSE 0 END) AS tinggi,
+               SUM(CASE WHEN ({_sk}) >= 100 THEN 1 ELSE 0 END) AS penuh
+        FROM getah_petak p
+        LEFT JOIN (
+            SELECT kode_evapot, {_agg} FROM getah_aktivitas_sadap s
+            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw} GROUP BY kode_evapot
+        ) phn ON phn.kode_evapot = p.kode_evapot
+        WHERE p.tahun_rtt = %s{w}
+        GROUP BY p.kode_kph
+        ORDER BY p.kode_kph
+    """, tuple([d0, e1] + pv + [tahun] + wv))
 
 
 @template("matriks_map")

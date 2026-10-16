@@ -498,9 +498,9 @@ function updateLegend(biz, kat) {
       // Keaktifan: status struktural, TANPA pin.
       legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg" title="ada aktivitas periode berjalan"><i style="background:#22C55E"></i> Aktif (hijau)</span>' + _legendAttrib();
     } else if (biz === 'aktivitas') {
-      // Aktivitas: sebaran kerja per jenis + pin. Hijau = kerja jenis terpilih,
-      // biru = kerja lain saja, merah = sepi. BEDA dari keaktifan.
-      legend.innerHTML = '<span class="lg" title="ada kerja jenis terpilih di periode ini"><i style="background:#22C55E"></i> Kerja jenis (hijau)</span><span class="lg" title="ada aktivitas, tapi bukan jenis terpilih"><i style="background:#3B82F6"></i> Kerja lain (biru)</span><span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Sepi (merah)</span><span class="lg" title="pin aktivitas + garis dashed ke pusat petak via kode_evapot; GPS bisa melenceng"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1/2/3 ● foto — garis ke petak</span>' + _legendAttrib();
+      // Aktivitas: efektivitas pohon. Merah = tanpa kerja, oranye ≤50,
+      // kuning 51-79, hijau 80-99, biru =100, abu = tanpa data pohon.
+      legend.innerHTML = '<span class="lg" title="tanpa kerja jenis ini di periode"><i style="background:#EF4444"></i> Sepi (merah)</span><span class="lg" title="pohon dikerjakan ≤50%"><i style="background:#F97316"></i> Rendah (oranye)</span><span class="lg" title="pohon dikerjakan 51-79%"><i style="background:#EAB308"></i> Sedang (kuning)</span><span class="lg" title="pohon dikerjakan 80-99%"><i style="background:#22C55E"></i> Tinggi (hijau)</span><span class="lg" title="seluruh pohon dikerjakan"><i style="background:#3B82F6"></i> Penuh (biru)</span><span class="lg" title="tanpa data pohon"><i style="background:#9CA3AF"></i> Nodata (abu)</span><span class="lg" title="pin aktivitas + garis dashed ke pusat petak via kode_evapot; GPS bisa melenceng"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1/2/3 ● foto — garis ke petak</span>' + _legendAttrib();
     } else if (biz === 'matriks' || biz === 'matrik') {
       legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg"><i style="background:#F97316"></i> Kurang & cap<50% (oranye)</span><span class="lg"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span><span class="lg"><i style="background:#3B82F6"></i> &gt;100% (biru)</span>' + _legendAttrib();
     } else {
@@ -789,10 +789,10 @@ function updateLegend(biz, kat) {
       s2=pct(v2)+' \u00b7 tanpa penyadap/>2 bln'; s3=pct(v3)+' \u00b7 0 di periode ini'; s4=pct(v4)+' \u00b7 ada sadap';
       t2='Tanpa penyadap atau >2 bulan tanpa aktivitas — butuh alokasi ulang'; t3='Ada penyadap + aktivitas 2 bln, tapi 0 di periode ini — cek andil'; t4='Aktivitas sadap berjalan';
     } else if (biz==='aktivitas') {
-      l2='Sepi'; l3='Kerja lain'; l4='Kerja jenis';
-      v2=c.merah||0; v3=c.emas||0; v4=c.hijau||0;
-      s2=pct(v2)+' \u00b7 tanpa penyadap/>2 bln'; s3=pct(v3)+' \u00b7 bukan jenis ini'; s4=pct(v4)+' \u00b7 jenis terpilih';
-      t2='Tanpa penyadap atau >2 bulan tanpa aktivitas'; t3='Ada aktivitas, tapi bukan jenis yang dipilih — pin tetap tampil'; t4='Ada kerja jenis terpilih — pin cyan/oranye/merah (Pem1/2/3)';
+      l2='Rendah'; l3='Sedang'; l4='Tinggi';
+      v2=(c.oranye||0); v3=(c.kuning||0); v4=(c.hijau||0);
+      s2=pct(v2)+' \u00b7 ≤50% pohon'; s3=pct(v3)+' \u00b7 51-79%'; s4=pct(v4)+' \u00b7 80-99% + biru '+(c.emas||0)+' + sepi '+(c.merah||0)+' + abu '+(c.abu||0);
+      t2='Pohon dikerjakan ≤50%'; t3='Pohon dikerjakan 51-79%'; t4='Hijau 80-99%, biru penuh 100%, merah tanpa kerja, abu tanpa data';
     } else if (biz==='matriks' || biz==='matrik') {
       l2='Masalah'; l3='Kurang'; l4='Optimal';
       v2=c.merah||0; v3=(c.kuning||0)+(c.oranye||0); v4=(c.hijau||0)+(c.emas||0);
@@ -840,7 +840,7 @@ function updateLegend(biz, kat) {
       if (biz==='petak') nar = 'Evaluasi Petak ' + n + ' polygon ' + per + ' — Apakah coverage memadai? Bongkor ' + (c.merah||0) + ' (' + merahPct + '%), kurang ' + ((c.kuning||0)+(c.oranye||0)) + ', terpenuhi ' + ((c.hijau||0)+(c.emas||0)) + '. Luas_andil vs luas_baku.';
       else if (biz==='produksi') nar = 'Evaluasi Produksi ' + n + ' petak ' + per + ' — Target RO/NPS vs aktual. >100% ' + (c.emas||0) + ', 76-100% ' + (c.hijau||0) + ', <50% ' + ((c.merah||0)+(c.oranye||0)) + '.';
       else if (biz==='keaktifan') nar = 'Evaluasi Keaktifan ' + n + ' petak ' + per + ' — Status struktural: Bongkor ' + (c.merah||0) + ' (tanpa penyadap/>2 bln), Idle ' + (c.kuning||0) + ' (0 di periode ini), Aktif ' + (c.hijau||0) + '.';
-      else if (biz==='aktivitas') nar = 'Evaluasi Aktivitas ' + n + ' petak ' + per + ' — Sebaran kerja: Kerja jenis ' + (c.hijau||0) + ', Kerja lain ' + (c.emas||0) + ' (biru), Sepi ' + (c.merah||0) + '. Pin terikat via kode_evapot, garis dashed jika GPS melenceng.';
+      else if (biz==='aktivitas') nar = 'Evaluasi Aktivitas ' + n + ' petak ' + per + ' — Efektivitas pohon: Penuh ' + (c.emas||0) + ' (biru, 100%), Tinggi ' + (c.hijau||0) + ' (80-99%), Sedang ' + (c.kuning||0) + ', Rendah ' + (c.oranye||0) + ', Sepi ' + (c.merah||0) + ', Nodata ' + (c.abu||0) + '. Pin terikat via kode_evapot.';
       else if (biz==='matriks' || biz==='matrik') nar = 'Evaluasi Matriks ' + n + ' petak ' + per + ' — Keseimbangan luas/pohon/andil/produksi. Bongkor ' + (c.merah||0) + ', kurang ' + ((c.kuning||0)+(c.oranye||0)) + ', terpenuhi ' + ((c.hijau||0)+(c.emas||0)) + '.';
       else nar = (explanation||'').slice(0,160) || (n + ' polygon periode ' + per + '.');
       insightBox.innerHTML = '<div class="ins-title">Ringkasan ANNA \u00b7 ' + esc(per) + ' \u00b7 mode asisten</div>' + esc(nar);
@@ -1543,6 +1543,10 @@ function updateLegend(biz, kat) {
       const b = String(biz || 'petak');
       const tag = b === 'keaktifan' ? ['B', 'I', 'A'] : b === 'aktivitas' ? ['H', 'L', 'S'] : ['B', 'K', 'T'];
       const lines = rows.map(function(r) {
+        if (b === 'aktivitas') {
+          const a = Number(r.avg_skor);
+          return esc(String(r.kph || r.kode_kph)) + ' skor ' + (Number.isFinite(a) ? a.toFixed(1).replace('.', ',') : '-') + ' (' + (r.penuh || 0) + ' penuh, ' + (r.tinggi || 0) + ' tinggi, ' + (r.sedang || 0) + ' sedang, ' + (r.rendah || 0) + ' rendah, ' + (r.sepi || 0) + ' sepi, ' + (r.nodata || 0) + ' nodata)';
+        }
         if (b === 'produksi') {
           const a = Number(r.achievement_pct);
           const av = Number(r.actual_kg || 0), tv = Number(r.target_kg || 0);
@@ -1650,7 +1654,7 @@ function updateLegend(biz, kat) {
       const _jenis = _kJenis;
       const _sampai = _kSampai;
       const _ovTpl = _ovBiz === 'keaktifan' ? 'keaktifan_per_kph'
-        : _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
+        : _ovBiz === 'aktivitas' ? 'aktivitas_efektivitas_per_kph'
         : _ovBiz === 'produksi' ? 'produksi_per_wilayah'
         : _ovBiz === 'matriks' || _ovBiz === 'matrik' ? 'efektivitas_per_kph'
         : 'efektivitas_per_kph';
@@ -1683,7 +1687,16 @@ function updateLegend(biz, kat) {
       for (const r of rows) {
         // Produksi: achievement tertimbang per KPH (bukan porsi petak hijau).
         // Merah <50, kuning 50-85, hijau >85 — selaras rkap_map 5 pita.
+        // Aktivitas: rata-rata skor efektivitas pohon per KPH.
         try {
+          if (_ovBiz === 'aktivitas') {
+            const a = Number(r.avg_skor);
+            const k = String(r.kode_kph || '');
+            if (!k) continue;
+            if (!Number.isFinite(a)) { colors[k] = '#9CA3AF'; continue; }
+            colors[k] = a <= 0 ? '#EF4444' : a <= 50 ? '#F97316' : a <= 79 ? '#EAB308' : a < 100 ? '#22C55E' : '#3B82F6';
+            continue;
+          }
           if (_ovBiz === 'produksi') {
             const a = Number(r.achievement_pct);
             if (!Number.isFinite(a)) continue;
@@ -1822,9 +1835,9 @@ function updateLegend(biz, kat) {
   function _ovBindHit(layer, nums, biz) {
     // Binding post-hoc (pola terverifikasi): tooltip + klik drill per fitur.
     // Label tooltip mengikuti bisnis: keaktifan = B/I/A;
-    // aktivitas = kerja jenis (H) / kerja lain (L) / sepi (S).
+    // aktivitas = efektivitas pohon (pct + pohon kerja).
     const _bb = String(biz || 'petak');
-    const _tag = _bb === 'keaktifan' ? ['B', 'I', 'A'] : _bb === 'aktivitas' ? ['H', 'L', 'S'] : ['B', 'K', 'T'];
+    const _tag = _bb === 'keaktifan' ? ['B', 'I', 'A'] : _bb === 'aktivitas' ? ['P', '%', 'x'] : ['B', 'K', 'T'];
     try {
       layer.eachLayer(function(ll) {
         try {
@@ -1832,8 +1845,14 @@ function updateLegend(biz, kat) {
           const nm = p.kph || p.kode_kph || 'KPH';
           let tip = '<b>' + esc(String(nm)) + '</b>';
           const m = nums[String(p.kode_kph || '')] || null;
-          // Angka sesuai bisnis: produksi = actual/target + achievement%.
-          if (m && m.prod) {
+          // Angka sesuai bisnis: aktivitas = skor efektivitas + bucket;
+          // produksi = actual/target + achievement%.
+          if (m && m.akt) {
+            const _sc = Number(m.skor);
+            const _cs = !Number.isFinite(_sc) ? '#9CA3AF' : _sc <= 0 ? '#EF4444' : _sc <= 50 ? '#F97316' : _sc <= 79 ? '#EAB308' : _sc < 100 ? '#22C55E' : '#3B82F6';
+            tip += '<br><span style="color:' + _cs + ';font-weight:700">skor ' + (Number.isFinite(_sc) ? _sc.toFixed(1).replace('.', ',') : '-') + '</span>'
+              + '<span style="opacity:.65"> ' + m.penuh + ' penuh · ' + m.tinggi + ' tinggi · ' + m.sedang + ' sedang · ' + m.rendah + ' rendah · ' + m.sepi + ' sepi · ' + m.nodata + ' nodata</span>';
+          } else if (m && m.prod) {
             const _pc = Number(m.pct);
             const _cs = !Number.isFinite(_pc) ? '#9CA3AF' : _pc < 50 ? '#EF4444' : _pc <= 85 ? '#EAB308' : '#22C55E';
             tip += '<br><span style="color:' + _cs + ';font-weight:700">' + Number(m.a).toLocaleString('id-ID') + '/' + Number(m.t).toLocaleString('id-ID') + ' kg'
@@ -1876,7 +1895,13 @@ function updateLegend(biz, kat) {
         try {
           const _kk = String(r.kode_kph || r.kode_wilayah || '');
           if (!_kk) continue;
-          if (String(biz || '') === 'produksi') {
+          if (String(biz || '') === 'aktivitas') {
+            const _av = Number(r.avg_skor);
+            nums[_kk] = { akt: true, skor: _av,
+                          penuh: r.penuh || 0, tinggi: r.tinggi || 0, sedang: r.sedang || 0,
+                          rendah: r.rendah || 0, sepi: r.sepi || 0, nodata: r.nodata || 0,
+                          n: r.total_petak || 0 };
+          } else if (String(biz || '') === 'produksi') {
             nums[_kk] = { prod: true, a: Number(r.actual_kg || 0), t: Number(r.target_kg || 0),
                           pct: Number(r.achievement_pct), n: r.n_petak || r.total_petak || 0 };
           } else {

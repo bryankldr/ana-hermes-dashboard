@@ -366,6 +366,7 @@ export class LeafletAdapter {
     kuning: { color: '#EAB308', fillColor: '#EAB308', fillOpacity: 0.35, weight: 1.2, opacity: 0.9 },
     hijau:  { color: '#22C55E', fillColor: '#22C55E', fillOpacity: 0.32, weight: 1.2, opacity: 0.9 },
     emas:   { color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.40, weight: 1.4, opacity: 1 },
+    abu:    { color: '#9CA3AF', fillColor: '#9CA3AF', fillOpacity: 0.25, weight: 1, opacity: 0.7 },
   };
 
   _resolveStyle(feature, opts = {}) {
