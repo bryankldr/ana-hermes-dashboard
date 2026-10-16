@@ -699,6 +699,21 @@ export class LeafletAdapter {
 // Tanpa method ini set_aktivitas_points() melempar TypeError di baris pertama
 // dan tidak ada pin sama sekali yang muncul.
 _ensureAktivitasLines() {
+  // Pane khusus pin (zIndex 650: di atas overlayPane 400, di bawah popup 700).
+  // Tanpa ini pin tertutup polygon GeoJSON → terlihat hilang di zoom besar
+  // dan klik pin menyasar modal petak.
+  try {
+    if (this.map && !this.map.getPane('aktivitasPane')) {
+      const p = this.map.createPane('aktivitasPane');
+      p.style.zIndex = 650; p.style.pointerEvents = 'auto';
+    }
+  } catch (_) {}
+  try {
+    if (this.map && !this.map.getPane('aktivitasLinePane')) {
+      const p2 = this.map.createPane('aktivitasLinePane');
+      p2.style.zIndex = 640; p2.style.pointerEvents = 'auto';
+    }
+  } catch (_) {}
   if (!this.aktivitasLayer) {
     this.aktivitasLayer = this.L.layerGroup();
     try { this.aktivitasLayer.addTo(this.map); } catch (_) {}
@@ -708,6 +723,18 @@ _ensureAktivitasLines() {
     this.aktivitasLines = this.L.layerGroup();
     try { this.aktivitasLines.addTo(this.map); } catch (_) {}
   }
+  // Renderer SVG khusus pin+garis (pane sendiri, zIndex 640/650).
+  // Peta pakai preferCanvas: semua vector satu canvas overlay → pane
+  // diabaikan, pin tertutup polygon (hilang di zoom besar, klik nyasar
+  // ke modal petak). SVG per-layer = DOM sendiri di atas canvas.
+  try {
+    if (!this._aktivitasRenderer && this.L.svg) {
+      this._aktivitasRenderer = this.L.svg({ pane: 'aktivitasPane', padding: 0.5 });
+    }
+    if (!this._aktivitasLineRenderer && this.L.svg) {
+      this._aktivitasLineRenderer = this.L.svg({ pane: 'aktivitasLinePane', padding: 0.5 });
+    }
+  } catch (_) {}
   return this.aktivitasLines;
 }
 
@@ -748,11 +775,15 @@ _rebuildAktivitasLines() {
         // Garis penghubung pin→petak WAJIB mencolok (keluhan: tak terlihat).
         // Jauh (>28m) = oranye tebal putus-putus; dekat = cyan tebal solid.
         // interactive:true + tooltip jarak agar garis bisa di-hover infonya.
+        // pane sendiri (di bawah pin, di atas polygon) + tak bubble ke petak.
+        pane: 'aktivitasLinePane',
+        renderer: this._aktivitasLineRenderer || undefined,
         color: far ? '#F97316' : '#2DF2FF',
         weight: far ? 3.5 : 3,
         opacity: far ? 0.95 : 0.9,
         dashArray: far ? '7,5' : null,
         interactive: true,
+        bubblingMouseEvents: false,
         lineCap: 'round',
       }).bindTooltip(Math.round(_meters(lat, lng, target.lat, target.lng)) + ' m ke petak', { sticky: true, direction: 'top', offset: [0, -4] }));
       drawn++;
@@ -933,6 +964,8 @@ set_aktivitas_points(points, opts = {}) {
       radius: hasFoto ? 7 : 5,
       color: stroke, weight: 1.5, opacity: 0.95,
       fillColor: fill, fillOpacity: hasFoto ? 0.92 : 0.65,
+      pane: 'aktivitasPane', bubblingMouseEvents: false,
+      renderer: this._aktivitasRenderer || undefined,
     });
     const fotoSrc = hasFoto ? directusAssetUrl(String(fotoId).trim(), 560) : '';
     const fotoFull = hasFoto ? directusAssetUrl(String(fotoId).trim(), 1200) : '';
