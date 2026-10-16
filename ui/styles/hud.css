@@ -1151,19 +1151,20 @@ html, body {
 }
 .th-acts {
   display: flex;
-  gap: 6px;
-  margin-top: 7px;
+  gap: 4px;
+  margin-top: 5px;
 }
 .th-act {
   flex-shrink: 0;
-  background: rgba(0, 220, 255, 0.08);
+  background: rgba(0, 220, 255, 0.06);
   border: 1px solid var(--neon-dim);
-  border-radius: 8px;
-  padding: 3px 8px;
+  border-radius: 6px;
+  padding: 1px 6px;
   color: var(--neon);
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
   cursor: pointer;
   transition: all 0.2s;
 }
