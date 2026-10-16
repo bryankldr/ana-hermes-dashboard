@@ -1606,7 +1606,7 @@ function finalizeAnswer(raw) {
   const tail = t.replace(/[^.…!?]+[.…!?]+/g, '').trim();
   if (tail) parts.push(tail);
   const norm = s => s.trim().toLowerCase().replace(/[.…!?]+$/,'').replace(/\s+/g,' ');
-  const NARR = /render chart|tarik(an)? (angka|data)|tarik data|menarik (angka|data|produksi)|tarikan (angka|data)|perbaiki autentikasi|sesi (login|push)|cek sesi|telusur|saya cek|mengecek|memeriksa|menunggu|menyusun|menjawab.*tarik|belum masuk,?\s*cek|kosong,?\s*telusur|siapkan|^\s*(siap|tunggu|sebentar)[\s,.]/i;
+  const NARR = /render chart|tarik(an)? (angka|data)|tarik data|menarik (angka|data|produksi)|tarikan (angka|data)|perbaiki autentikasi|sesi (login|push)|cek sesi|telusur|saya cek|mengecek|memeriksa|menunggu|menyusun|menjawab.*tarik|belum masuk,?\s*cek|kosong,?\s*telusur|siapkan|laporan gagal|cek format|format ketemu|render ulang|^(\s*)(siap|tunggu|sebentar)[\s,.]/i;
   const seen = new Set();
   const out = [];
   for (const p of parts) {
