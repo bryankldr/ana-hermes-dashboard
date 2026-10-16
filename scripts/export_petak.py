@@ -58,6 +58,19 @@ def main():
     conn = db_conn(env)
     try:
         rows = fetch(conn, args.tahun, args.kode_kph or None)
+        # Metrik bisnis per periode (produksi/aktivitas/matriks diwarnai klien
+        # dari kunci ini — tile tak perlu rebuild tiap ganti periode).
+        try:
+            import tile_metrics as _tm
+            _cur = conn.cursor()
+            try:
+                _metrics, _tpct = _tm.petak_metrics(_cur, args.tahun, args.kode_kph or None)
+            finally:
+                _cur.close()
+            _props_by_ev = {ev: _tm.period_props(m, _tpct) for ev, m in _metrics.items()}
+        except Exception as e:  # noqa: BLE001
+            print(json.dumps({"ok": False, "error": f"metrik: {e}"[:200]}))
+            raise SystemExit(1)
     finally:
         conn.close()
 
@@ -87,6 +100,10 @@ def main():
                 "kategori": r["kategori"],
                 "warna": r["warna"],
             }}
+            try:
+                feat["properties"].update(_props_by_ev.get(str(r["kode_evapot"]), {}))
+            except Exception:
+                pass
             f.write(json.dumps(feat, ensure_ascii=False) + "\n")
             n += 1
     print(json.dumps({"ok": True, "tahun": args.tahun, "features": n,
