@@ -1447,6 +1447,8 @@ function updateLegend(biz, kat) {
   let _tileManifest = null;
   let _manWarned = false;
   let _ovKey = '', _ovTimer = null, _ovOn = false;
+  let _ovSeq = 0; // kunci murahan request overview — respons basi dibuang
+  const _ovColorCache = {}; // key overview -> {colors, rows} (cap 60)
   const _tokPm = () => { try { return document.querySelector('meta[name="ana-token"]')?.content || ''; } catch (_) { return ''; } };
   async function _tileManifestLoad() {
     if (_tileManifest) return _tileManifest;
@@ -1528,9 +1530,10 @@ function updateLegend(biz, kat) {
   }
   function _scheduleOverview() {
     try { clearTimeout(_ovTimer); } catch (_) {}
-    _ovTimer = setTimeout(function() { try { _refreshOverview(); } catch (_) {} }, 500);
+    _ovTimer = setTimeout(function() { try { _refreshOverview(); } catch (_) {} }, 200);
   }
   async function _refreshOverview() {
+    const mySeq = ++_ovSeq;
     try {
       if (!_ctl || typeof _ctl.set_pmtiles_sources !== 'function') return;
       const biz = bizSel?.value || 'petak';
@@ -1624,11 +1627,23 @@ function updateLegend(biz, kat) {
         if (_ovBiz === 'produksi') _ovParams.level = 'kode_kph';
       }
       let rows = [];
-      try {
-        const rr = await queryStats(_ovTpl, _ovParams, { timeoutMs: 10000 });
-        if (rr && rr.ok && Array.isArray(rr.rows)) rows = rr.rows;
-      } catch (_) {}
       const colors = {};
+      // Cache kunci warna: kombinasi pernah dihitung = pakai langsung,
+      // tanpa query ulang (ganti bolak-balik bisnis/filter responsif).
+      try {
+        const _hit = _ovColorCache[key + '|c'];
+        if (_hit && _hit.colors && Object.keys(_hit.colors).length) {
+          rows = _hit.rows || [];
+          for (const kk of Object.keys(_hit.colors)) colors[kk] = _hit.colors[kk];
+        }
+      } catch (_) {}
+      if (!Object.keys(colors).length) {
+        try {
+          const rr = await queryStats(_ovTpl, _ovParams, { timeoutMs: 8000 });
+          if (mySeq !== _ovSeq) return; // basi: bisnis/filter sudah ganti
+          if (rr && rr.ok && Array.isArray(rr.rows)) rows = rr.rows;
+        } catch (_) {}
+      }
       for (const r of rows) {
         // Produksi: achievement tertimbang per KPH (bukan porsi petak hijau).
         // Merah <50, kuning 50-85, hijau >85 — selaras rkap_map 5 pita.
@@ -1644,6 +1659,13 @@ function updateLegend(biz, kat) {
           const c = _ovColor(r); if (c) colors[String(r.kode_kph)] = c;
         } catch (_) {}
       }
+      // Cache kunci warna per kombinasi biz|tahun|bulan|periode|pemke|scope —
+      // ganti bolak-balik bisnis/filter = cat langsung, tanpa query ulang.
+      try {
+        const _ck = key + '|c';
+        if (_ovColorCache[_ck]) { for (const kk of Object.keys(_ovColorCache[_ck])) colors[kk] = _ovColorCache[_ck][kk]; }
+        else _ovColorCache[_ck] = colors;
+      } catch (_) {}
       if (!Object.keys(colors).length) {
         // Agregat kosong/gagal: jangan tampilkan outline putih tanpa warna.
         _ovOn = false;
