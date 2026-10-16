@@ -898,17 +898,14 @@ function initQuickButtons() {
   });
 }
 
-// ═══ CHAT INPUT (multiline, follows panel height) ═══
-// Fungsi ini dulu autosize dengan dua batas yang merusak resize: cap 160px
-// (batas jumlah baris) dan bar.style.height='auto' yang menimpa tinggi yang
-// ditulis LayoutManager. Akibatnya panel bisa dragged meninggi tapi textarea
-// tetap mentok. Sekarang tinggi textarea mengikuti panel sepenuhnya (CSS
-// height:100% + align-items:stretch), jadi fungsi ini hanya menjaga baris
-// terakhir tetap terlihat di caret.
+// ═══ CHAT INPUT (auto-grow 1 baris → maks 5, kembali 1 saat kirim) ═══
 function autosizeChat() {
   const el = els.chatInput;
   if (!el) return;
-  el.scrollTop = el.scrollHeight;
+  el.style.height = 'auto';
+  const max = parseFloat(getComputedStyle(el).lineHeight) * 5 + 14;
+  el.style.height = Math.min(el.scrollHeight, max) + 'px';
+  el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
 }
 
 function sendFromChat() {

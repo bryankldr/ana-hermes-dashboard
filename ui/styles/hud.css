@@ -656,15 +656,12 @@ html, body {
 }
 
 #chatBox textarea {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
-  height: 100%;
-  /* max-height sengaja dihapus: cap 160px itulah yang membuat panel tinggi
-     tapi baris tak bertambah — textarea mentok di 160 lalu sisa panel kosong.
-     min-height:0 supaya textarea benar-benar mengikuti tinggi panel (41px
-     default = 1 baris), bukan dipaksa minimal 38px sendiri. */
+  width: 100%;
+  height: auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: hidden;
   /* Gutter selalu direservasi: kalau scrollbar baru muncul saat panel
      meninggi, lebar textarea ikut berkurang 15px dan teks reflow — panel
      terlihat "bergeser" saat di-resize. Gutter stabil menghilangkan itu. */
