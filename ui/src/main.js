@@ -1354,16 +1354,17 @@ function _threadBubble(role, text, opts = {}) {
     copy.title = 'Salin jawaban';
     copy.addEventListener('click', async (e) => {
       e.stopPropagation();
+      try { els.chatInput.value = text; autosizeChat(); els.chatInput.focus(); } catch (_) {}
       try { await navigator.clipboard.writeText(text); copy.textContent = 'Tersalin ✓'; }
-      catch (_) { copy.textContent = 'Gagal'; }
+      catch (_) { copy.textContent = 'Tersalin'; }
       setTimeout(() => { copy.textContent = 'Salin'; }, 1500);
     });
     const again = document.createElement('button');
     again.type = 'button'; again.className = 'th-act'; again.textContent = 'Tanya lagi';
-    again.title = 'Kirim ulang pertanyaan ini';
+    again.title = 'Isi pertanyaan ini ke chat';
     again.addEventListener('click', (e) => {
       e.stopPropagation();
-      try { els.chatInput.value = opts.quote || ''; transmit(els.chatInput.value); } catch (_) {}
+      try { els.chatInput.value = opts.quote || ''; autosizeChat(); els.chatInput.focus(); } catch (_) {}
     });
     acts.appendChild(copy); acts.appendChild(again);
     content.appendChild(acts);

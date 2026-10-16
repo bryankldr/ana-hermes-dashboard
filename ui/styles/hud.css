@@ -1155,16 +1155,19 @@ html, body {
   margin-top: 7px;
 }
 .th-act {
+  flex-shrink: 0;
+  background: rgba(0, 220, 255, 0.08);
+  border: 1px solid var(--neon-dim);
+  border-radius: 8px;
+  padding: 3px 8px;
+  color: var(--neon);
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid var(--neon-dim);
-  border-radius: 5px;
-  padding: 2px 8px;
+  letter-spacing: 0.06em;
   cursor: pointer;
+  transition: all 0.2s;
 }
-.th-act:hover { color: var(--neon); border-color: var(--neon); }
+.th-act:hover { background: rgba(0, 220, 255, 0.2); box-shadow: 0 0 8px var(--neon-dim); }
 
 /* ═══ SPEAKING INDICATOR ═══ */
 .response-label {
