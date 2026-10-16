@@ -1409,8 +1409,10 @@ function updateLegend(biz, kat) {
     } catch (_) {}
     // Enforce polygon untuk SEMUA business (fix akar 2026-10-04): return dini
     // biz!=='petak' membuat polygon aktivitas menutupi PMTiles di Z<=11.
-    // PMTiles = base netral (tanpa analisa) untuk semua business di Z<=11.
-    const want = z <= 11 ? 'pmtiles' : 'geojson';
+    // PMTiles petak = base netral HANYA untuk bisnis petak di Z<=11.
+    // Bisnis lain (aktivitas/produksi/matriks) selalu GeoJSON berwarna
+    // di semua zoom — kalau tidak, tile/KPI/legenda terkunci warna petak.
+    const want = (biz !== 'petak') ? 'geojson' : (z <= 11 ? 'pmtiles' : 'geojson');
     if (want !== _tier) {
       if (want === 'pmtiles') {
         // File petak ter-scope + overview choropleth (ganti URL global legacy).
