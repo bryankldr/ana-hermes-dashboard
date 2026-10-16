@@ -458,6 +458,29 @@ def hermes_tools_snapshot(limit=36):
 
 _LIVE_STORED: dict = {}
 _LIVE_STORED_GUARD = threading.Lock()
+_LIVE_STORED_FILE = None
+try:
+    from pathlib import Path as _P
+    _LIVE_STORED_FILE = _P(__file__).resolve().parent / ".ana_live_stored"
+    try:
+        import json as _js
+        _d = _js.loads(_LIVE_STORED_FILE.read_text(encoding="utf-8"))
+        if isinstance(_d, dict):
+            _LIVE_STORED.update({str(k): str(v) for k, v in _d.items()})
+    except (OSError, ValueError):
+        pass
+except Exception:
+    _LIVE_STORED_FILE = None
+
+def _live_stored_save():
+    try:
+        if _LIVE_STORED_FILE is None:
+            return
+        import json as _js
+        with _LIVE_STORED_GUARD:
+            _LIVE_STORED_FILE.write_text(_js.dumps(_LIVE_STORED), encoding="utf-8")
+    except OSError:
+        pass
 
 def resolve_stored(sid):
     """Petakan live sid (8-hex) -> stored sid backend (timestamp).
@@ -479,6 +502,7 @@ def resolve_stored(sid):
                 if lid and st:
                     with _LIVE_STORED_GUARD:
                         _LIVE_STORED[lid] = st
+                    _live_stored_save()
         except Exception:
             pass
         with _LIVE_STORED_GUARD:
@@ -491,6 +515,7 @@ def note_live_stored(live, stored):
         if live and stored and valid_session(live) and valid_session(stored):
             with _LIVE_STORED_GUARD:
                 _LIVE_STORED[str(live)] = str(stored)
+            _live_stored_save()
     except Exception:
         pass
 
