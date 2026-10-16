@@ -456,6 +456,44 @@ def hermes_tools_snapshot(limit=36):
         return []
 
 
+_LIVE_STORED: dict = {}
+_LIVE_STORED_GUARD = threading.Lock()
+
+def resolve_stored(sid):
+    """Petakan live sid (8-hex) -> stored sid backend (timestamp).
+    Cache + lookup active_list (bawa stored_session_id). Gagal = sid asli."""
+    try:
+        sk = str(sid or "").strip()
+        if not sk:
+            return sk
+        with _LIVE_STORED_GUARD:
+            if sk in _LIVE_STORED:
+                return _LIVE_STORED[sk]
+        try:
+            al = _run_async(_get_gateway().active_sessions())
+            for it in ((al or {}).get("sessions") or []):
+                if not isinstance(it, dict):
+                    continue
+                lid = str(it.get("id") or it.get("session_id") or "")
+                st = str(it.get("stored_session_id") or it.get("stored_id") or "")
+                if lid and st:
+                    with _LIVE_STORED_GUARD:
+                        _LIVE_STORED[lid] = st
+        except Exception:
+            pass
+        with _LIVE_STORED_GUARD:
+            return _LIVE_STORED.get(sk, sk)
+    except Exception:
+        return sid
+
+def note_live_stored(live, stored):
+    try:
+        if live and stored and valid_session(live) and valid_session(stored):
+            with _LIVE_STORED_GUARD:
+                _LIVE_STORED[str(live)] = str(stored)
+    except Exception:
+        pass
+
 def session_history(sid, limit=20):
     """Riwayat user/assistant sesi gateway (dunia yang dipakai run).
 
@@ -468,6 +506,10 @@ def session_history(sid, limit=20):
         s = str(sid or "").strip()
         if not s:
             return {"messages": [], "error": "session_id kosong"}
+        try:
+            s = resolve_stored(s)
+        except Exception:
+            pass
         try:
             raw = _run_async(_get_gateway().get_session_history(s))
         except Exception as e:
@@ -681,6 +723,10 @@ def _run_hermes_locked(message, session_id=None, system=None, on_session=None):
     if not current_session_id or not valid_session(current_session_id):
         result = _run_async(_get_gateway().create_session(title="ANA Dashboard Session"))
         current_session_id = result.get("session_id")
+        try:
+            note_live_stored(result.get("session_id"), result.get("stored_session_id"))
+        except Exception:
+            pass
         if not current_session_id:
             yield dict(t="error", message="Failed to create session")
             return
@@ -716,9 +762,17 @@ def _run_hermes_locked(message, session_id=None, system=None, on_session=None):
                     _resumed = None
                 if _resumed and valid_session(_resumed):
                     current_session_id = _resumed
+                    try:
+                        note_live_stored(_resumed, (_r or {}).get("stored_session_id"))
+                    except Exception:
+                        pass
                     _report_sid(current_session_id)
                 else:
                     _nr = _run_async(_gw.create_session(title="ANA Dashboard Session"))
+                    try:
+                        note_live_stored((_nr or {}).get("session_id"), (_nr or {}).get("stored_session_id"))
+                    except Exception:
+                        pass
                     _nid = (_nr or {}).get("session_id")
                     if _nid and valid_session(_nid):
                         current_session_id = _nid

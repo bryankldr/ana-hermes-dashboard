@@ -3071,8 +3071,12 @@ class Handler(BaseHTTPRequestHandler):
             if _hit:
                 return self._json(_hit)
             # Dunia ganda: run via gateway (sid 8-hex), transcript CLI hanya
-            # kenal sid store format timestamp. CLI kosong/basi -> fallback
-            # gateway session.history; tanpa ini riwayat sesi aktif kosong.
+            # kenal sid store format timestamp. Resolve live->stored dulu,
+            # CLI kosong/basi -> fallback gateway session.history.
+            try:
+                sid = runtime.resolve_stored(sid)
+            except Exception:
+                pass
             _cli = services.session_transcript(
                 runtime._hermes_base(), runtime.WORKDIR, sid)
             try:
@@ -3105,9 +3109,34 @@ class Handler(BaseHTTPRequestHandler):
             _uk = _anna_user_key(self)
             _own = _session_owned_ids(_uk)
             _allow = None if (_uk == "" and not _own) else _own
-            return self._json(services.list_sessions(
+            _lst = services.list_sessions(
                 runtime._hermes_base(), runtime.WORKDIR, runtime.valid_session, _session_get(_uk)[0],
-                allowed=_allow))
+                allowed=_allow)
+            # Sinkron penuh: live gateway session (8-hex) menumpang di daftar
+            # bila stored-nya belum ada — tanpa ini sesi aktif tak terlihat.
+            try:
+                _cur = str(_session_get(_uk)[0] or "")
+                if _cur and isinstance(_lst, dict):
+                    _seen = set()
+                    for _g in ((_lst.get("groups") or {}).values()):
+                        for _it in (_g or []):
+                            if isinstance(_it, dict) and _it.get("id"):
+                                _seen.add(str(_it["id"]))
+                    if _cur not in _seen:
+                        _st = None
+                        try:
+                            _st = runtime.resolve_stored(_cur)
+                        except Exception:
+                            _st = None
+                        if not _st or _st == _cur or _st not in _seen:
+                            _grps = _lst.get("groups") or {}
+                            _today = _grps.get("today") or []
+                            _today.insert(0, {"id": _cur, "title": "Sesi aktif", "last_active": "now"})
+                            _grps["today"] = _today
+                            _lst["groups"] = _grps
+            except Exception:
+                pass
+            return self._json(_lst)
         if p == "/api/vault":
             if not self._token_ok():
                 return self._unauth()
