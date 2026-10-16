@@ -212,7 +212,7 @@ export class LayoutManager {
   // Urutan pair dipertahankan (response di bawah chatBar, seperti dashboard).
   _dockPairInMap() {
     if (this._pairDocked) return true;
-    if (!this.pairIds || this.pairIds.length !== 2) return false;
+    if (!this.pairIds || (this.pairIds.length !== 2 && this.pairIds.length !== 1)) return false;
     const map = document.getElementById('mapPanel');
     if (!map || !map.isConnected) return false;
     const off = this._mapOffset();
@@ -293,12 +293,13 @@ export class LayoutManager {
   // dihormati (tak snap saat gesture berjalan). Simpan per slot.
   positionPairInMap() {
     try {
-      if (!this.pairIds || this.pairIds.length !== 2) return false;
+      if (!this.pairIds || (this.pairIds.length !== 2 && this.pairIds.length !== 1)) return false;
       if (this._gestureActive) return false;
       const map = document.getElementById('mapPanel');
       if (!map || !map.isConnected) return false;
       if (this.disabled.has('mapPanel') || getComputedStyle(map).display === 'none') return false;
       if (!this._pairDocked && !this._dockPairInMap()) return false;
+      if (this.pairIds.length === 1) return this._positionSingleInMap();
       const [idTop, idBot] = this.pairIds;
       const top = this.items[idTop] || document.getElementById(idTop);
       const bot = this.items[idBot] || document.getElementById(idBot);
@@ -343,6 +344,49 @@ export class LayoutManager {
       top.style.top = this.snap(topTop) + 'px';
       this.reclamp(bot);
       this.reclamp(top);
+      this.save();
+      return true;
+    } catch (_) { return false; }
+  }
+
+  // Panel tunggal (chatBox): posisi kanan (landscape) / tengah-bawah
+  // (portrait), di atas bar-bawah. Ukuran tak diubah; drag dihormati.
+  _positionSingleInMap() {
+    try {
+      const map = document.getElementById('mapPanel');
+      const el = this.items[this.pairIds[0]] || document.getElementById(this.pairIds[0]);
+      if (!el || !el.isConnected) return false;
+      if (getComputedStyle(el).display === 'none') return false;
+      const mr = map.getBoundingClientRect();
+      if (mr.width < 1 || mr.height < 1) return false;
+      const M = 12;
+      const bw = el.offsetWidth || parseFloat(el.style.width) || 340;
+      const bh = el.offsetHeight || parseFloat(el.style.height) || 420;
+      let headH = 0;
+      try {
+        const hd = map.querySelector(':scope > .panel-title');
+        if (hd) { const hr = hd.getBoundingClientRect(); headH = Math.max(0, hr.bottom - mr.top); }
+      } catch (_) {}
+      let clear = M;
+      try {
+        const bar = map.querySelector('.map-bottom-bar');
+        if (bar) {
+          const br = bar.getBoundingClientRect();
+          if (br.width > 0 && br.height > 0) clear = Math.max(M, (mr.bottom - br.top) + 10);
+        }
+      } catch (_) {}
+      const minTop = headH + 4;
+      let left, top;
+      if (this._pairMode() === 'bottom') {
+        left = (mr.width - bw) / 2;
+        top = Math.max(minTop, mr.height - clear - bh);
+      } else {
+        left = mr.width - M - bw;
+        top = Math.max(minTop, mr.height - clear - bh);
+      }
+      el.style.left = this.snap(Math.max(M, left)) + 'px';
+      el.style.top = this.snap(top) + 'px';
+      this.reclamp(el);
       this.save();
       return true;
     } catch (_) { return false; }

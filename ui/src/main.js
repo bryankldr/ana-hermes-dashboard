@@ -1968,7 +1968,7 @@ const PANEL_ACCESS_MAP = {
   '10': 'voicePicker', '11': 'briefingPanel', '12': 'projectList',
   '13': 'missionKanban', '14': 'vaultPanel', '15': 'avdPanel',
   '16': 'termPanel', '17': 'eventLog', '18': 'codeViewer',
-  '19': 'topDials', '20': 'response', '21': 'chatBar',
+  '19': 'topDials', '20': 'chatBox',
   '22': 'core', '23': 'bottomTelemetry',
 };
 function applyPanelAccess(layout) {
@@ -2021,7 +2021,7 @@ function initPanelOptions(layout) {
     mapPanel: 'SPATIAL MAP',
     eventLog: 'EVENT STREAM', codeViewer: 'CODE VIEWER',
     topDials: 'SYSTEM DIALS',
-    response: 'RESPONSE', chatBar: 'CHAT', core: 'CORE',
+    chatBox: 'CHAT', core: 'CORE',
     bottomTelemetry: 'BOTTOM TELEMETRY',
   };
 
@@ -2123,12 +2123,12 @@ async function init() {
     'agentPanel','statusMatrix','workspacePanel',
     'intelPanel','pipelinePanel',
     'eventLog','codeViewer','toolsPanel','sysTelemetry',
-    'cmdPanel','response','chatBar','core','topControls',
+    'cmdPanel','chatBox','core','topControls',
     'topDials','bottomTelemetry'
   ].filter(id => document.getElementById(id)),
     // FASE 1 header-lock + map full-body: posisi 4 id ini dari CSS, bukan layout.json
     { static: ['topControls','topDials','bottomTelemetry','mapPanel'],
-      dockPair: ['response','chatBar'] });
+      dockPair: ['chatBox'] });
   window._layoutManager = layout;
   // FASE 3 drawer (konsep v3 §4): phone (<780px) header 3 strip sembunyi
   // default (peta full-body), floating ☰ buka/tutup. TABLET (781-1180px)
