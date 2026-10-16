@@ -623,6 +623,7 @@ function updateLegend(biz, kat) {
       _setSel(fTahun, f.tahun);
       _setSel(fPeriode, f.periode, function(v){ return v === '0' || v === '1' || v === '2'; });
       _setSel(fPemKe, f.pembaharuan_ke, function(v){ return v === '' || ['1','2','3','4'].includes(v); });
+      _setSel(fSampai, f.sampai_dengan, function(v){ return v === '' || ['ya','tidak'].includes(v); });
       const kc = String(f.kategori || '');
       if (kc && katSel && [...katSel.options].some(function(o){ return o.value === kc; })) katSel.value = kc;
       // Wilayah dipulihkan susulan setelah opsi DB terisi (lihat _populateDropdowns).
@@ -2589,6 +2590,7 @@ function updateLegend(biz, kat) {
           const elm = _map[k];
           if (!elm || f[k] === undefined || f[k] === null) continue;
           if (k === 'pembaharuan_ke' && f[k] !== '' && !['1','2','3','4'].includes(String(f[k]))) continue;
+          if (k === 'sampai_dengan' && f[k] !== '' && !['ya','tidak'].includes(String(f[k]).toLowerCase())) continue;
           const v = String(f[k]);
           if (k === 'kategori' && v && ![...elm.options].some(o => o.value === v)) {
             try { const o = document.createElement('option'); o.value = v; o.textContent = v; elm.appendChild(o); } catch (_) {}
@@ -2643,6 +2645,7 @@ function updateLegend(biz, kat) {
           const elm = _map[k];
           if (!elm || f[k] === undefined || f[k] === null) continue;
           if (k === 'pembaharuan_ke' && f[k] !== '' && !['1','2','3','4'].includes(String(f[k]))) continue;
+          if (k === 'sampai_dengan' && f[k] !== '' && !['ya','tidak'].includes(String(f[k]).toLowerCase())) continue;
           const v = String(f[k]);
           if (k === 'kategori' && v && ![...elm.options].some(o => o.value === v)) {
             try { const o = document.createElement('option'); o.value = v; o.textContent = v; elm.appendChild(o); } catch (_) {}
