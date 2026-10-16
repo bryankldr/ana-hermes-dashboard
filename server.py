@@ -1899,6 +1899,55 @@ def set_mode(v):
 # _stream_run tulis, /api/session tulis, /api/status baca — lindungi semua.
 SESSION: dict = {}
 _SESSION_LOCK = threading.Lock()
+
+# Cache transcript sisi server (stabil pasca-restart/gateway-putus).
+# Kunci: sid Hermes. Nilai: list [{role, text}] maks 20. Ditulis saat
+# complete (user msg + jawaban final), dibaca pertama oleh transcript
+# sebelum fallback gateway. Tak pernah raise.
+_TRANS = {}
+_TRANS_LOCK = threading.Lock()
+_TRANS_FILE = ROOT / ".ana_transcript"
+
+def _trans_push(sid, role, text):
+    try:
+        s = str(sid or "").strip()
+        t = str(text or "").strip()
+        if not s or not t or role not in ("user", "assistant"):
+            return
+        with _TRANS_LOCK:
+            lst = _TRANS.get(s) or []
+            lst.append({"role": role, "text": t[:2000]})
+            _TRANS[s] = lst[-20:]
+        try:
+            with _TRANS_LOCK:
+                _TRANS_FILE.write_text(json.dumps({k: v for k, v in _TRANS.items()}), encoding="utf-8")
+        except OSError:
+            pass
+    except Exception:
+        pass
+
+def _trans_get(sid):
+    try:
+        with _TRANS_LOCK:
+            lst = list(_TRANS.get(str(sid or "").strip()) or [])
+        if lst:
+            return {"messages": lst}
+    except Exception:
+        pass
+    return None
+
+def _trans_restore():
+    try:
+        d = json.loads(_TRANS_FILE.read_text(encoding="utf-8"))
+        if isinstance(d, dict):
+            with _TRANS_LOCK:
+                for k, v in d.items():
+                    if isinstance(v, list):
+                        _TRANS[str(k)] = [m for m in v if isinstance(m, dict)][:20]
+    except (OSError, ValueError):
+        pass
+
+_trans_restore()
 SESSION_TTL_SEC = int(os.environ.get("ANA_SESSION_TTL", "3600"))  # 1h default
 # Sesi ANNA per user: maks 3 sesi Hermes aktif (histori). Login kembali =
 # lanjutkan sesi terakhir; /new atau pilih sesi = ganti aktif. Logout TIDAK
@@ -3016,6 +3065,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"messages": [], "error": "login dulu untuk baca transcript"}, 401)
             if sid not in _session_owned_ids(_uk):
                 return self._json({"messages": [], "error": "bukan sesi milik Anda"}, 403)
+            # Cache server dulu (stabil pasca-restart/gateway-putus) —
+            # baru CLI lalu gateway. Tanpa ini riwayat hilang tiap restart.
+            _hit = _trans_get(sid)
+            if _hit:
+                return self._json(_hit)
             # Dunia ganda: run via gateway (sid 8-hex), transcript CLI hanya
             # kenal sid store format timestamp. CLI kosong/basi -> fallback
             # gateway session.history; tanpa ini riwayat sesi aktif kosong.
@@ -5026,6 +5080,21 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             # voice_metrics removed (rollback)
             _llm_first = False
+            _run_deltas = []
+            _run_user_pushed = []
+            def _push_user(_sid):
+                try:
+                    if _run_user_pushed or not _sid or not runtime.valid_session(_sid):
+                        return
+                    _trans_push(_sid, "user", message)
+                    _run_user_pushed.append(True)
+                except Exception:
+                    pass
+            # sid awal (resume) langsung dapat pesan user — stream putus pun tersimpan.
+            try:
+                _push_user(session_id)
+            except Exception:
+                pass
             # Penanda sid yang sudah ditulis scope-nya run ini. Scope+current_sid
             # ditulis SECEPATNYA (event valid pertama, biasanya `status`), BUKAN
             # menunggu event `session` — tool ANNA jalan di tengah stream dan
@@ -5073,6 +5142,7 @@ class Handler(BaseHTTPRequestHandler):
                         _session_hist_push(_uk, str(sid), None)
                     except Exception:
                         pass
+                    _push_user(sid)
                     try:
                         _anna_scope_write(sid, _run_scope, _uk)
                     except Exception:
@@ -5092,12 +5162,24 @@ class Handler(BaseHTTPRequestHandler):
                     _session_set(sid, key=_uk)
                     _session_bump_count(_uk)
                     try:
+                        _push_user(sid)
+                        txt = "".join(_run_deltas)
+                        _trans_push(sid, "assistant", txt)
+                    except Exception:
+                        pass
+                    try:
                         _anna_scope_write(sid, _run_scope, _uk)
                     except Exception:
                         pass
                     # voice_metrics removed (rollback) — token metrics stripped
                 if ev.get("t") == "error":
+                    _push_user(sid)
                     _clear_session(_uk)       # drop a bad/stale session so the next run is fresh
+                if ev.get("t") == "delta" and isinstance(ev.get("text"), str):
+                    try:
+                        _run_deltas.append(ev.get("text") or "")
+                    except Exception:
+                        pass
                 if ev.get("t") == "delta" and not _llm_first:
                     _llm_first = True
                     # voice_metrics removed (rollback)
