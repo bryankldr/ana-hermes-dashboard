@@ -1023,18 +1023,8 @@ html, body {
   padding: 0;
 }
 @keyframes thIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-.th-user { margin-left: auto; flex-direction: row-reverse; }
+.th-user { margin-left: auto; }
 .th-ana { margin-right: auto; }
-.th-avatar {
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700;
-  margin-top: 2px;
-}
-.th-user .th-avatar { background: rgba(0,220,255,.15); border: 1px solid var(--neon-dim); }
-.th-ana .th-avatar { background: rgba(5,27,58,.9); border: 1px solid var(--neon-dim); }
 .th-content { min-width: 0; max-width: 100%; }
 .th-user .th-content { display: flex; flex-direction: column; align-items: flex-end; }
 .th-bubble {

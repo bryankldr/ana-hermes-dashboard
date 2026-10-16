@@ -1317,10 +1317,6 @@ function _threadBubble(role, text, opts = {}) {
   const isUser = role === 'user';
   const wrap = document.createElement('div');
   wrap.className = 'th-' + (isUser ? 'user' : 'ana') + (opts.streaming ? ' th-stream' : '');
-  const av = document.createElement('div');
-  av.className = 'th-avatar';
-  av.textContent = isUser ? '◉' : '✦';
-  wrap.appendChild(av);
   const content = document.createElement('div');
   content.className = 'th-content';
   const bub = document.createElement('div');
