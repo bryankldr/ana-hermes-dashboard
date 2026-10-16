@@ -53,6 +53,9 @@ export function resolveTemplate(state) {
     wilayah.pembaharuan_ke = String(f.pembaharuan_ke);
   }
   // Sampai dengan Ya/Tidak — berlaku aktivitas/produksi/matriks.
+  if (['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(String(f.jenis_aktivitas || '').toLowerCase())) {
+    wilayah.jenis_aktivitas = String(f.jenis_aktivitas).toLowerCase();
+  }
   if (['ya','tidak'].includes(String(f.sampai_dengan || '').toLowerCase())) {
     wilayah.sampai_dengan = String(f.sampai_dengan).toLowerCase();
   }

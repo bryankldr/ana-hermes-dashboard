@@ -189,6 +189,33 @@ def _pembaharuan_where(kw, alias="s"):
     return f" AND {alias}.pembaharuan_ke = %s", [s]
 
 
+def _jenis_aktivitas_where(kw, alias="s"):
+    """Filter jenis aktivitas opsional (flag kolom getah_aktivitas_sadap).
+    Return (sql_frag, vals). 'semua'/''/None = tanpa filter."""
+    v = kw.get("jenis_aktivitas", kw.get("jenisAktivitas", kw.get("aktivitas", "")))
+    s = str(v or "").strip().lower()
+    if s in ("", "semua", "all", "0"):
+        return "", []
+    allow = {"quare": "quare", "semprot_cas": "semprot_cas", "semprot cas": "semprot_cas",
+             "kerok": "kerok", "naik_batok": "naik_batok", "naik batok": "naik_batok",
+             "budaya_bersih": "budaya_bersih", "budaya bersih": "budaya_bersih",
+             "pulung": "pulung"}
+    col = allow.get(s)
+    if not col:
+        raise ValueError(f"jenis_aktivitas harus salah satu {sorted(set(allow.values()))} atau 'semua', bukan {v!r}")
+    # Kolom baru (mis. pulung) mungkin belum ada di DB live — cek dinamis,
+    # tanpa kolom = tanpa baris cocok (bukan error).
+    try:
+        _cr = q("SELECT COUNT(*) AS n FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'getah_aktivitas_sadap' "
+                "AND COLUMN_NAME = %s", (col,))
+        if not (_cr.get("rows") or [{}])[0].get("n"):
+            return " AND 1 = 0", []
+    except Exception:
+        pass
+    return f" AND {alias}.{col} = 1", []
+
+
 # ── templates ──────────────────────────────────────────────────
 T = {}
 
@@ -454,6 +481,7 @@ def aktivitas_per_kph(tahun, bulan, periode, **kw):
     _d2 = _d0 - _dt.timedelta(days=61)
     d2s, d2e = _d2.isoformat(), (_d0 - _dt.timedelta(days=1)).isoformat()
     pw, pv = _pembaharuan_where(kw, "s")
+    jw, jv = _jenis_aktivitas_where(kw, "s")
     w, wv = _wilayah_where(kw)
     return q(f"""
         SELECT p.kode_kph, MAX(p.kph) AS kph, MAX(p.kode_divre) AS kode_divre,
@@ -471,7 +499,7 @@ def aktivitas_per_kph(tahun, bulan, periode, **kw):
         ) a ON a.kode_evapot = p.kode_evapot
         LEFT JOIN (
             SELECT kode_evapot, COUNT(*) AS cnt FROM getah_aktivitas_sadap s
-            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw} GROUP BY kode_evapot
+            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw} GROUP BY kode_evapot
         ) act ON act.kode_evapot = p.kode_evapot
         LEFT JOIN (
             SELECT kode_evapot, COUNT(*) AS cnt FROM getah_aktivitas_sadap s
@@ -898,10 +926,11 @@ def aktivitas_agregat(tahun, bulan, periode, grup_by="penyadap",
     d0, e1 = period_bounds(tahun, bulan, periode)
     w, wv = _wilayah_where(kw)
     pw, pv = _pembaharuan_where(kw, "s")
+    jw, jv = _jenis_aktivitas_where(kw, "s")
     base = f"""FROM getah_aktivitas_sadap s
         LEFT JOIN getah_penyadap py ON py.id = s.id_penyadap
         JOIN getah_petak p ON p.kode_evapot = s.kode_evapot AND p.tahun_rtt = %s
-        WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{w}"""
+        WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw}{w}"""
     bv = [tahun, d0, e1] + pv + wv
 
     if grup_by == "penyadap":
@@ -958,6 +987,7 @@ def aktivitas_top_petak(tahun, bulan, periode, limit=10, **kw):
     d0, e1 = period_bounds(tahun, bulan, periode)
     w, wv = _wilayah_where(kw)
     pw, pv = _pembaharuan_where(kw, "s")
+    jw, jv = _jenis_aktivitas_where(kw, "s")
     r = q(f"""
         SELECT p.nomor_petak, s.kode_evapot, COUNT(*) AS jumlah_aktivitas,
                SUM(s.pembaharuan_ke='1') AS pem1, SUM(s.pembaharuan_ke='2') AS pem2,
@@ -970,7 +1000,7 @@ def aktivitas_top_petak(tahun, bulan, periode, limit=10, **kw):
         FROM getah_aktivitas_sadap s
         JOIN getah_petak p ON p.kode_evapot = s.kode_evapot AND p.tahun_rtt = %s
         JOIN petak_polygon pp ON pp.kode_evapot = s.kode_evapot
-        WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{w}
+        WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw}{w}
         GROUP BY s.kode_evapot, p.nomor_petak, pp.polygon
         ORDER BY jumlah_aktivitas DESC, jumlah_penyadap DESC
         LIMIT %s
@@ -986,6 +1016,7 @@ def aktivitas_per_penyadap_petak(tahun, bulan, periode, id_penyadap=None,
     d0, e1 = period_bounds(tahun, bulan, periode)
     w, wv = _wilayah_where(kw)
     pw, pv = _pembaharuan_where(kw, "s")
+    jw, jv = _jenis_aktivitas_where(kw, "s")
     r = q(f"""
         SELECT py.nama_penyadap, py.nomor_penyadap AS nik, s.id_penyadap,
                p.nomor_petak, s.kode_evapot, s.pembaharuan_ke, s.tgl_pembaharuan,
@@ -1001,7 +1032,7 @@ def aktivitas_per_penyadap_petak(tahun, bulan, periode, id_penyadap=None,
         JOIN petak_polygon pp ON pp.kode_evapot = s.kode_evapot
         LEFT JOIN getah_penyadap py ON py.id = s.id_penyadap
         LEFT JOIN directus_files f ON f.id = s.aktivitas_photo
-        WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{w}
+        WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw}{w}
           {" AND s.id_penyadap = %s" if id_penyadap is not None else ""}
         ORDER BY s.tgl_pembaharuan DESC, s.id DESC
         LIMIT %s
@@ -1034,6 +1065,7 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     d2s, d2e = _d2.isoformat(), (_d0 - _dt.timedelta(days=1)).isoformat()
     w, wv = _wilayah_where(kw)
     pw, pv = _pembaharuan_where(kw, "s")
+    jw, jv = _jenis_aktivitas_where(kw, "s")
     b, bv = _bbox_sql(bounds if bounds is not None else kw.get("bounds"))
     lim = _page_size(kw, default=limit)
     return q(f"""
@@ -1070,7 +1102,7 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
         ) a ON a.kode_evapot = p.kode_evapot
         LEFT JOIN (
             SELECT kode_evapot, COUNT(*) AS cnt FROM getah_aktivitas_sadap s
-            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw} GROUP BY kode_evapot
+            WHERE s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw} GROUP BY kode_evapot
         ) act ON act.kode_evapot = p.kode_evapot
         LEFT JOIN (
             SELECT kode_evapot, COUNT(*) AS cnt FROM getah_aktivitas_sadap s
@@ -1082,12 +1114,12 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
         ) two ON two.kode_evapot = p.kode_evapot
         LEFT JOIN (
             SELECT a.kode_evapot, COUNT(*) AS cnt FROM getah_andil a
-            WHERE EXISTS (SELECT 1 FROM getah_aktivitas_sadap s WHERE s.kode_evapot=a.kode_evapot AND s.id_penyadap=a.id_penyadap AND s.tgl_pembaharuan BETWEEN %s AND %s{pw})
+            WHERE EXISTS (SELECT 1 FROM getah_aktivitas_sadap s WHERE s.kode_evapot=a.kode_evapot AND s.id_penyadap=a.id_penyadap AND s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw})
             GROUP BY a.kode_evapot
         ) aa ON aa.kode_evapot = p.kode_evapot
         LEFT JOIN (
             SELECT a.kode_evapot, COUNT(*) AS cnt FROM getah_andil a
-            WHERE NOT EXISTS (SELECT 1 FROM getah_aktivitas_sadap s WHERE s.kode_evapot=a.kode_evapot AND s.id_penyadap=a.id_penyadap AND s.tgl_pembaharuan BETWEEN %s AND %s{pw})
+            WHERE NOT EXISTS (SELECT 1 FROM getah_aktivitas_sadap s WHERE s.kode_evapot=a.kode_evapot AND s.id_penyadap=a.id_penyadap AND s.tgl_pembaharuan BETWEEN %s AND %s{pw}{jw})
             GROUP BY a.kode_evapot
         ) ab ON ab.kode_evapot = p.kode_evapot
         WHERE p.tahun_rtt = %s AND pp.polygon IS NOT NULL{w}{b}
@@ -1461,6 +1493,7 @@ def aktivitas_recent(limit=20, **kw):
     w, wv = _wilayah_where(kw)
     has_w = bool(w)
     pw, pv = _pembaharuan_where(kw, "s")
+    jw, jv = _jenis_aktivitas_where(kw, "s")
     date_where = ""
     date_vals = []
     d0 = d1 = None

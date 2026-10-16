@@ -122,7 +122,7 @@ export function setBusiness(business) {
 
 export function setFilters(patch) {
   if (!patch || typeof patch !== 'object') return getSpatialState();
-  const allowed = ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke','sampai_dengan','bounds','zoom','page_size','aggregated_level'];
+  const allowed = ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke','sampai_dengan','jenis_aktivitas','bounds','zoom','page_size','aggregated_level'];
   for (const k of allowed) if (patch[k] !== undefined) _store.filters[k] = patch[k];
   // clamp
   _store.filters.bulan = Math.max(1, Math.min(12, parseInt(_store.filters.bulan) || CUR_BULAN));
@@ -134,6 +134,8 @@ export function setFilters(patch) {
   _store.filters.pembaharuan_ke = ['1','2','3','4'].includes(pk) ? pk : '';
   const sd = String(_store.filters.sampai_dengan ?? '').toLowerCase();
   _store.filters.sampai_dengan = ['ya','tidak'].includes(sd) ? sd : '';
+  const ja = String(_store.filters.jenis_aktivitas ?? '').toLowerCase();
+  _store.filters.jenis_aktivitas = ['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(ja) ? ja : '';
   _store._rev++;
   _emit();
   return getSpatialState();

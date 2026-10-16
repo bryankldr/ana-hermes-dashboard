@@ -185,9 +185,10 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '        </div>'
       + '      </div>'
       + '      <div class="spatial-fgroup">'
-      + '        <div class="spatial-fgroup-title">Tahap Pembaharuan <span class="spatial-hint">filter pin + polygon; DB punya 1/2/3</span></div>'
+      + '        <div class="spatial-fgroup-title">AKTIVITAS <span class="spatial-hint">filter pin + polygon; DB punya 1/2/3</span></div>'
       + '        <div class="spatial-row">'
       + '          <label>Pembaharuan <select id="fPemKe" class="spatial-mini"><option value="">Semua</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>'
+      + '          <label>Aktivitas <select id="fJenisAkt" class="spatial-mini"><option value="">Semua</option><option value="quare">Quare</option><option value="semprot_cas">Semprot Cas</option><option value="kerok">Kerok</option><option value="naik_batok">Naik Batok</option><option value="budaya_bersih">Budaya Bersih</option><option value="pulung">Pulung</option></select></label>'
       + '        </div>'
       + '      </div>'
       + '      <div class="spatial-fgroup">'
@@ -416,6 +417,7 @@ export function initMapPanel({ log = () => {} } = {}) {
   const btnRefresh = $sel('#spatialRefresh');
   const fBulan = $sel('#fBulan'), fTahun = $sel('#fTahun'), fPeriode = $sel('#fPeriode');
   const fPemKe = $sel('#fPemKe');
+  const fJenisAkt = $sel('#fJenisAkt');
   const fSampai = $sel('#fSampai');
   const fDivre = $sel('#fDivre'), fKph = $sel('#fKph'), fBkph = $sel('#fBkph'), fRph = $sel('#fRph'), fTpg = $sel('#fTpg');
   const fApply = $sel('#fApply'), fReset = $sel('#fReset');
@@ -538,7 +540,7 @@ function updateLegend(biz, kat) {
     try {
       const f = (st && st.filters) || {};
       const keep = {};
-      for (const k of ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke','sampai_dengan']) {
+      for (const k of ['bulan','tahun','periode','divre','kph','bkph','rph','tpg','kategori','pembaharuan_ke','sampai_dengan','jenis_aktivitas']) {
         const v = f[k];
         keep[k] = (v == null) ? '' : String(v);
       }
@@ -623,6 +625,7 @@ function updateLegend(biz, kat) {
       _setSel(fTahun, f.tahun);
       _setSel(fPeriode, f.periode, function(v){ return v === '0' || v === '1' || v === '2'; });
       _setSel(fPemKe, f.pembaharuan_ke, function(v){ return v === '' || ['1','2','3','4'].includes(v); });
+      _setSel(fJenisAkt, f.jenis_aktivitas, function(v){ return v === '' || ['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(v); });
       _setSel(fSampai, f.sampai_dengan, function(v){ return v === '' || ['ya','tidak'].includes(v); });
       const kc = String(f.kategori || '');
       if (kc && katSel && [...katSel.options].some(function(o){ return o.value === kc; })) katSel.value = kc;
@@ -687,6 +690,7 @@ function updateLegend(biz, kat) {
       kategori: katSel?.value || 'semua',
       ...(_spatialWarna ? { warna: _spatialWarna } : {}),
       ...(fPemKe?.value ? { pembaharuan_ke: fPemKe.value } : {}),
+      ...(fJenisAkt?.value ? { jenis_aktivitas: fJenisAkt.value } : {}),
       ...(fSampai?.value ? { sampai_dengan: fSampai.value } : {}),
     };
     // Viewport extras (bounds/zoom/page_size/aggregated_level) — dari memori,
@@ -712,6 +716,7 @@ function updateLegend(biz, kat) {
     if (f.bulan || f.periode) items.push({k:'waktu', label:'Waktu', v: f.bulan + '/P' + f.periode + '/' + f.tahun});
     if (f.kategori && f.kategori !== 'semua') items.push({k:'kategori', label:'Kategori', v:f.kategori});
     if (f.pembaharuan_ke) items.push({k:'pemke', label:'Pem', v:String(f.pembaharuan_ke)});
+    if (f.jenis_aktivitas) items.push({k:'jenisakt', label:'Akt', v:String(f.jenis_aktivitas)});
     if (f.sampai_dengan) items.push({k:'sampai', label:'S/d', v:String(f.sampai_dengan)});
     if (!items.length) { chipsBox.innerHTML = ''; return; }
     chipsBox.innerHTML = items.map(function(it){
@@ -725,12 +730,14 @@ function updateLegend(biz, kat) {
           if (fBulan) fBulan.value=String(d.getMonth()+1); if (fTahun) fTahun.value='2026'; if (fPeriode) fPeriode.value=d.getDate()<=15?'1':'2';
           if (katSel) katSel.value='semua';
           if (fPemKe) fPemKe.value='';
+    if (typeof fJenisAkt !== 'undefined' && fJenisAkt) fJenisAkt.value='';
         } else if (k==='bkph' && fBkph) fBkph.value='';
         else if (k==='rph' && fRph) fRph.value='';
         else if (k==='tpg' && fTpg) fTpg.value='';
         else if (k==='waktu'){ if(fBulan) fBulan.value=String(d.getMonth()+1); if(fPeriode) fPeriode.value=d.getDate()<=15?'1':'2'; }
         else if (k==='kategori' && katSel) { katSel.value='semua'; _spatialWarna = ''; }
         else if (k==='pemke' && fPemKe) fPemKe.value='';
+        else if (k==='jenisakt' && typeof fJenisAkt !== 'undefined' && fJenisAkt) fJenisAkt.value='';
         else if (k==='sampai' && typeof fSampai !== 'undefined' && fSampai) fSampai.value='';
         updateHead(); renderChips(); scheduleReload();
       });
@@ -1239,13 +1246,14 @@ function updateLegend(biz, kat) {
     _spatialWarna = ''; _spatialTemplate = null;
     updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); renderChips(); scheduleReload(); });
   // Waktu + pembaharuan_ke pakai listener generik; wilayah sudah punya cascade-specific
-  [fBulan, fTahun, fPeriode, fPemKe, fSampai].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
+  [fBulan, fTahun, fPeriode, fPemKe, fSampai, fJenisAkt].forEach(function(c){ if(c) c.addEventListener('change', function(){ updateHead(); renderChips(); scheduleReload(); }); });
   fApply?.addEventListener('click', reloadBusiness);
   fReset?.addEventListener('click', function(){
     if (fBulan) fBulan.value=String(d.getMonth()+1);
     if (fTahun) fTahun.value='2026';
     if (fPeriode) fPeriode.value=d.getDate()<=15?'1':'2';
     if (fPemKe) fPemKe.value='';
+    if (typeof fJenisAkt !== 'undefined' && fJenisAkt) fJenisAkt.value='';
     if (typeof fSampai !== 'undefined' && fSampai) fSampai.value='';
     // Respect scope lock: only reset unlocked dropdowns
     if (fDivre && !fDivre.disabled) fDivre.value='';
@@ -1605,8 +1613,9 @@ function updateLegend(biz, kat) {
       const _kP = parseInt(fPeriode?.value);
       const _kPer = (_kP === 0 || _kP === 1 || _kP === 2) ? _kP : 1;
       const _kPemke = (String(fPemKe?.value || '').trim() || '');
+      const _kJenis = (String((typeof fJenisAkt !== 'undefined' && fJenisAkt ? fJenisAkt.value : '') || '').trim() || '');
       const _kSampai = (String((typeof fSampai !== 'undefined' && fSampai ? fSampai.value : '') || '').trim() || '');
-      const key = _ovBiz + '|' + z + '|' + tahun + '|' + _kBulan + '|' + _kPer + '|' + _kPemke + '|' + _kSampai + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
+      const key = _ovBiz + '|' + z + '|' + tahun + '|' + _kBulan + '|' + _kPer + '|' + _kPemke + '|' + _kJenis + '|' + _kSampai + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
       const wantOv = (!!_ovBiz && z <= 10 && kphList.length > 0 && (multi || _isTop));
       if (!wantOv) {
         try { window.__spatialOverview = { key: key, wantOv: false, kph: kphList.length, on: false }; } catch (_) {}
@@ -1626,6 +1635,8 @@ function updateLegend(biz, kat) {
       const _bulan = _kBulan;
       const _periode = _kPer;
       const _pemke = _kPemke;
+      const _jenis = _kJenis;
+      if (['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(_jenis)) _ovParams.jenis_aktivitas = _jenis;
       const _sampai = _kSampai;
       if (['ya','tidak'].includes(_sampai)) _ovParams.sampai_dengan = _sampai;
       const _ovTpl = _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
@@ -2585,12 +2596,13 @@ function updateLegend(biz, kat) {
         for (const k of Object.keys(_defWaktu)) {
           if (f[k] === '') f[k] = _defWaktu[k];
         }
-        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe, sampai_dengan: (typeof fSampai !== 'undefined' ? fSampai : null) };
+        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe, jenis_aktivitas: (typeof fJenisAkt !== 'undefined' ? fJenisAkt : null), sampai_dengan: (typeof fSampai !== 'undefined' ? fSampai : null) };
         for (const k of Object.keys(_map)) {
           const elm = _map[k];
           if (!elm || f[k] === undefined || f[k] === null) continue;
           if (k === 'pembaharuan_ke' && f[k] !== '' && !['1','2','3','4'].includes(String(f[k]))) continue;
           if (k === 'sampai_dengan' && f[k] !== '' && !['ya','tidak'].includes(String(f[k]).toLowerCase())) continue;
+          if (k === 'jenis_aktivitas' && f[k] !== '' && !['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(String(f[k]).toLowerCase())) continue;
           const v = String(f[k]);
           if (k === 'kategori' && v && ![...elm.options].some(o => o.value === v)) {
             try { const o = document.createElement('option'); o.value = v; o.textContent = v; elm.appendChild(o); } catch (_) {}
@@ -2640,12 +2652,13 @@ function updateLegend(biz, kat) {
         for (const k of Object.keys(_defWaktu)) {
           if (f[k] === '') f[k] = _defWaktu[k];
         }
-        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe, sampai_dengan: (typeof fSampai !== 'undefined' ? fSampai : null) };
+        const _map = { bulan: fBulan, tahun: fTahun, periode: fPeriode, divre: fDivre, kph: fKph, bkph: fBkph, rph: fRph, tpg: fTpg, kategori: katSel, pembaharuan_ke: fPemKe, jenis_aktivitas: (typeof fJenisAkt !== 'undefined' ? fJenisAkt : null), sampai_dengan: (typeof fSampai !== 'undefined' ? fSampai : null) };
         for (const k of Object.keys(_map)) {
           const elm = _map[k];
           if (!elm || f[k] === undefined || f[k] === null) continue;
           if (k === 'pembaharuan_ke' && f[k] !== '' && !['1','2','3','4'].includes(String(f[k]))) continue;
           if (k === 'sampai_dengan' && f[k] !== '' && !['ya','tidak'].includes(String(f[k]).toLowerCase())) continue;
+          if (k === 'jenis_aktivitas' && f[k] !== '' && !['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(String(f[k]).toLowerCase())) continue;
           const v = String(f[k]);
           if (k === 'kategori' && v && ![...elm.options].some(o => o.value === v)) {
             try { const o = document.createElement('option'); o.value = v; o.textContent = v; elm.appendChild(o); } catch (_) {}
