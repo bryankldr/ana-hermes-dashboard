@@ -452,6 +452,7 @@ function initIntel() {
         els.stSess.textContent = '—';
         intelLog('🆕 Sesi baru dimulai', 'session');
         log('session', 'SESI', 'sesi baru');
+        try { _threadLoadHistory(null); } catch (_) {}
         refreshSessionSelector();
       });
     });
@@ -484,6 +485,7 @@ function initIntel() {
           document.getElementById('sessionId').textContent = sid;
           intelLog(`🔗 Pindah ke sesi: ${sid}`, 'session');
           log('session', 'SESI', `pindah ke ${sid}`);
+          try { _threadLoadHistory(sid); } catch (_) {}
         }
       });
     });
@@ -993,6 +995,7 @@ function sessionPanelRender(sessions) {
       await api.setSession(s.id);
       const list = await loadSessions();
       sessionPanelRender(list);
+      try { _threadLoadHistory(s.id); } catch (_) {}
     });
     row.appendChild(item);
 
@@ -1028,6 +1031,7 @@ async function createNewSession() {
     if (j.ok) {
       const list = await loadSessions();
       sessionPanelRender(list);
+      try { _threadLoadHistory(null); } catch (_) {}
     } else {
       alert('Gagal buat sesi baru: ' + (j.error || 'tidak diketahui'));
     }
@@ -1293,6 +1297,179 @@ const TPL_GROUPS = [
   tplLoad();
 })();
 
+// ═══ CHAT THREAD PREMIUM ═══
+// RESPONSE = thread percakapan (bubble user/ANA + kutip + timestamp + aksi),
+// bukan satu teks jawaban terakhir + kursor. Tanpa ini user tak bisa scroll
+// riwayat sesi aktif, tak bisa kutip pertanyaan, tak ada aksi per pesan.
+const _thread = { sid: null, items: [], streaming: null };
+
+function _threadTime(ts) {
+  try {
+    return new Date(ts || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  } catch (_) { return ''; }
+}
+
+function _threadScroll() {
+  try { els.responseText.scrollTop = els.responseText.scrollHeight; } catch (_) {}
+}
+
+function _threadBubble(role, text, opts = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'th-' + (role === 'user' ? 'user' : 'ana') + (opts.streaming ? ' th-stream' : '');
+  const head = document.createElement('div');
+  head.className = 'th-head';
+  const who = document.createElement('span');
+  who.className = 'th-who';
+  who.textContent = role === 'user' ? 'Anda' : 'ANNA';
+  const time = document.createElement('span');
+  time.className = 'th-time';
+  time.textContent = _threadTime(opts.ts);
+  head.appendChild(who); head.appendChild(time);
+  wrap.appendChild(head);
+  if (role === 'user' || opts.quote) {
+    const q = document.createElement('div');
+    q.className = 'th-quote';
+    q.textContent = role === 'user' ? text : opts.quote;
+    if (role === 'user') q.title = 'Klik untuk pakai lagi';
+    if (role === 'user') q.addEventListener('click', () => {
+      try { els.chatInput.value = text; autosizeChat(); els.chatInput.focus(); } catch (_) {}
+    });
+    wrap.appendChild(q);
+  }
+  if (role !== 'user' || !opts.quoteOnly) {
+    const body = document.createElement('div');
+    body.className = 'th-body';
+    body.textContent = role === 'user' ? '' : text;
+    if (role === 'user') body.style.display = 'none';
+    else wrap.appendChild(body);
+  }
+  if (role !== 'user') {
+    const acts = document.createElement('div');
+    acts.className = 'th-acts';
+    const copy = document.createElement('button');
+    copy.type = 'button'; copy.className = 'th-act'; copy.textContent = 'Salin';
+    copy.title = 'Salin jawaban';
+    copy.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await navigator.clipboard.writeText(text); copy.textContent = 'Tersalin ✓'; }
+      catch (_) { copy.textContent = 'Gagal'; }
+      setTimeout(() => { copy.textContent = 'Salin'; }, 1500);
+    });
+    const again = document.createElement('button');
+    again.type = 'button'; again.className = 'th-act'; again.textContent = 'Tanya lagi';
+    again.title = 'Kirim ulang pertanyaan ini';
+    again.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try { els.chatInput.value = opts.quote || ''; transmit(els.chatInput.value); } catch (_) {}
+    });
+    acts.appendChild(copy); acts.appendChild(again);
+    wrap.appendChild(acts);
+  }
+  return wrap;
+}
+
+function _threadRender() {
+  const box = els.responseText;
+  if (!box) return;
+  box.innerHTML = '';
+  if (!_thread.items.length && !_thread.streaming) {
+    box.innerHTML = '<span class="rplaceholder">Siap menerima perintah.</span>';
+    return;
+  }
+  for (let i = 0; i < _thread.items.length; i++) {
+    const it = _thread.items[i];
+    // Quote hanya bila BUKAN pengulangan bubble user tepat di atasnya —
+    // tanpa ini tiap jawaban ANNA mengulang pertanyaan di bawahnya (kembar).
+    let q = it.quote;
+    if (it.role !== 'user' && q && i > 0) {
+      const prev = _thread.items[i - 1];
+      if (prev.role === 'user' && prev.text.trim() === q.trim()) q = '';
+    }
+    box.appendChild(_threadBubble(it.role, it.text, { quote: q, ts: it.ts }));
+  }
+  if (_thread.streaming) {
+    const s = _thread.streaming;
+    let sq = s.quote;
+    try {
+      const lastU = [..._thread.items].reverse().find(x => x.role === 'user');
+      if (lastU && sq && lastU.text.trim() === String(sq).trim()) sq = '';
+    } catch (_) {}
+    const node = _threadBubble('ana', s.text || '', { quote: sq, ts: s.ts, streaming: true });
+    if (!s.text) {
+      const cur = document.createElement('span');
+      cur.className = 'cur';
+      node.querySelector('.th-body')?.appendChild(cur);
+    }
+    box.appendChild(node);
+  }
+  _threadScroll();
+}
+
+function _threadPush(role, text, opts = {}) {
+  const it = { role, text, quote: opts.quote || '', ts: opts.ts || Date.now() };
+  _thread.items.push(it);
+  if (_thread.items.length > 40) _thread.items.splice(0, _thread.items.length - 40);
+  _threadRender();
+  return it;
+}
+
+function _threadStreamStart(quote) {
+  _thread.streaming = { text: '', quote: quote || '', ts: Date.now() };
+  _threadRender();
+}
+
+function _threadStreamAppend(t) {
+  if (!_thread.streaming) _threadStreamStart('');
+  _thread.streaming.text += t;
+  _threadRender();
+}
+
+function _threadStreamDone(finalText) {
+  const s = _thread.streaming;
+  _thread.streaming = null;
+  if (s) _threadPush('ana', finalText || s.text, { quote: s.quote, ts: s.ts });
+  else _threadRender();
+}
+
+async function _threadLoadHistory(sid) {
+  _thread.sid = sid || null;
+  _thread.items = [];
+  _thread.streaming = null;
+  if (!sid) { _threadRender(); return; }
+  try {
+    // credentials WAJIB: tanpa cookie, server baca user_key="" dan tolak
+    // transcript 401 (login dulu) — tanpa ini riwayat selalu kosong diam-diam.
+    const r = await fetch('/api/session/transcript?session_id=' + encodeURIComponent(sid), { headers: api.headers(), credentials: 'same-origin' });
+    const j = await r.json().catch(() => ({}));
+    if (j.error) { try { intelLog(`⚠ Riwayat tak termuat: ${j.error}`, 'error'); } catch (_) {} }
+    const msgs = Array.isArray(j.messages) ? j.messages : [];
+    let pendingQ = '';
+    for (const m of msgs.slice(-20)) {
+      if (m.role === 'user') { pendingQ = m.text; }
+      else if (m.role === 'assistant') { _thread.items.push({ role: 'ana', text: m.text, quote: pendingQ, ts: Date.now() }); pendingQ = ''; }
+    }
+    if (pendingQ) _thread.items.push({ role: 'user', text: pendingQ, ts: Date.now() });
+  } catch (_) {}
+  _threadRender();
+}
+
+// Narasi internal model (kawaii spinner + self-narration) → satu status
+// Indonesia yang rapi. Tanpa ini dapur bocor ke ruang tamu.
+let _lastThinking = '';
+function cleanThinking(raw) {
+  let t = String(raw || '').replace(/^\s*\([^)\n]{0,40}\)\s*/u, '').trim();
+  if (!t) return '';
+  const g = t.match(/^([A-Za-z]+?)(ing)?\.{2,}\s*$/);
+  if (g) {
+    const map = { reason: 'Menalar', deliberat: 'Menimbang', mull: 'Memikirkan', reflect: 'Merefleksi', comput: 'Menghitung', think: 'Berpikir', summariz: 'Meringkas', compos: 'Menyusun', analyz: 'Menganalisis', check: 'Memeriksa', fetch: 'Mengambil data', search: 'Mencari' };
+    const k = Object.keys(map).find(k => g[1].toLowerCase().startsWith(k));
+    return (k ? map[k] : 'Memproses') + '…';
+  }
+  if (/wait|tunggu|provider|antre|queue|retry|menghubungi/i.test(t)) return t.slice(0, 90);
+  return 'Menyusun jawaban…';
+}
+
+
 // ═══ TRANSMIT ═══
 async function transmit(message, options = {}) {
   if (!message.trim()) return;
@@ -1306,7 +1483,8 @@ async function transmit(message, options = {}) {
   const id = rid();
   setAgentState('UNDERSTANDING');
   progressReset(message.slice(0, 48));
-  els.responseText.innerHTML = '<span class="cur"></span>';
+  _threadPush('user', message);
+  _threadStreamStart(message);
   intelMsg('user', message);
   log('run', 'RUN', `started ${id}; uplink cleared`);
   const t0 = performance.now();
@@ -1380,14 +1558,15 @@ function handle(ev) {
       }
       break;
     case 'delta':
-      answer += ev.text; renderAnswer();
-      if (!firstDelta) { firstDelta = true; log('reason', 'REASONING', answer.slice(0, 220)); progressStep('streaming response'); setAgentState('RESPONDING'); }
+      answer += ev.text; _threadStreamAppend(ev.text);
+      if (!firstDelta) { firstDelta = true; log('reason', 'REASONING', answer.slice(0, 220)); progressStep('Menjawab…'); setAgentState('RESPONDING'); }
       break;
     case 'usage': log('status', 'COMPLETE', 'run completed', usageBlock(ev)); break;
     case 'complete':
       setAgentState('RESPONDING');
       log('complete', 'COMPLETE', ev.ms != null ? `run completed in ${ev.ms}ms` : 'run completed');
-      renderAnswer(true);
+      answer = finalizeAnswer(answer);
+      _threadStreamDone(answer);
       intelMsg('assistant', answer);
       progressDone(true);
       speakDone = speakThisRun ? speak(answer) : Promise.resolve();
@@ -1397,22 +1576,42 @@ function handle(ev) {
     case 'error':
       setAgentState('ERROR');
       log('error', 'ERROR', ev.message || 'unknown');
-      if (!answer) els.responseText.innerHTML = `<span style="color:var(--red)">⚠ ${esc(ev.message || 'Run failed.')}</span>`;
-      else renderAnswer(true);
+      if (!answer) { _threadStreamDone('⚠ ' + (ev.message || 'Run failed.')); }
+      else { answer = finalizeAnswer(answer); _threadStreamDone(answer); }
       progressDone(false);
       break;
     case 'note': log('note', 'NOTE', ev.message || ''); break;
     // thinking: kawaii spinner prose and provider wait notices. Never part of
     // `answer` — it goes to the progress trace and the core label only, so
     // speak() never reads ANA's own narration aloud.
-    case 'thinking':
-      if (ev.text) { progressStep(ev.text); intelLog(ev.text, 'thinking'); setAgentState('PLANNING'); }
+    case 'thinking': {
+      const clean = (typeof cleanThinking === 'function') ? cleanThinking(ev.text) : '';
+      if (!clean || clean === _lastThinking) break;
+      _lastThinking = clean;
+      progressStep(clean); intelLog(clean, 'thinking'); setAgentState('PLANNING');
       break;
+    }
   }
 }
-function renderAnswer(finaldone) {
-  els.responseText.innerHTML = esc(answer) + (finaldone ? '' : '<span class="cur"></span>');
-  els.responseText.scrollTop = els.responseText.scrollHeight;
+function finalizeAnswer(raw) {
+  let t = String(raw || '').replace(/(\d)\.(\d)/g, '$1\0$2');
+  const parts = t.match(/[^.…!?]+[.…!?]+/g) || [];
+  const tail = t.replace(/[^.…!?]+[.…!?]+/g, '').trim();
+  if (tail) parts.push(tail);
+  const norm = s => s.trim().toLowerCase().replace(/[.…!?]+$/,'').replace(/\s+/g,' ');
+  const NARR = /render chart|tarik(an)? (angka|data)|tarik data|menarik (angka|data|produksi)|tarikan (angka|data)|perbaiki autentikasi|sesi (login|push)|cek sesi|telusur|saya cek|mengecek|memeriksa|menunggu|menyusun|menjawab.*tarik|belum masuk,?\s*cek|kosong,?\s*telusur|siapkan|^\s*(siap|tunggu|sebentar)[\s,.]/i;
+  const seen = new Set();
+  const out = [];
+  for (const p of parts) {
+    const s = p.replace(/\0/g, '.').trim();
+    if (!s) continue;
+    const n = norm(s);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    out.push(s);
+  }
+  const content = out.filter(s => !NARR.test(s));
+  return (content.length ? content : out).join(' ');
 }
 
 function applyMode(m) {
@@ -1724,7 +1923,7 @@ async function initMuteClear() {
   });
   bar.querySelector('#clearBtn').addEventListener('click', () => {
     answer = '';
-    els.responseText.innerHTML = '<span class="rplaceholder">Display cleared. Standing by.</span>';
+    try { _thread.items = []; _thread.streaming = null; _threadRender(); } catch (_) {}
     log('note', 'CLEAR', 'response panel cleared');
   });
 }
@@ -2201,6 +2400,7 @@ async function init() {
     try {
       const s = await api.getStatus();
       await loadSessions();
+      try { _threadLoadHistory(currentSessionId); } catch (_) {}
       loadStatus();
       log('status', 'BOOT', `gateway online · ${s.runtime} core · profile=${s.profile || 'default'} · permission=${s.permission}`);
       try { const mj = await fetch('/api/mode', { headers: api.headers() }).then(r => r.json()); if (mj.mode) applyMode(mj.mode); } catch (_) {}
