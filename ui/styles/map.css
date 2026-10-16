@@ -41,6 +41,8 @@
 .spatial-fgroup-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: .10em; color: var(--neon); text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; font-weight:700; }
 .spatial-fgroup-title .spatial-hint { font-size: 11px; letter-spacing:0; text-transform:none; color: var(--text-dim); opacity:.9; font-weight:400; }
 .spatial-row { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 6px; align-items: end; width: 100%; box-sizing: border-box; }
+.spatial-row.cols4 { grid-template-columns: 88px 76px minmax(0,1fr) minmax(0,1.2fr); }
+.spatial-mini.w-year, .spatial-mini.w-month { padding-left: 6px; padding-right: 4px; }
 .spatial-row label { min-width: 0; }
 .spatial-mini { width: 100%; min-width: 0; box-sizing: border-box; }
 .spatial-row label { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-weight:600; letter-spacing:.02em; }
