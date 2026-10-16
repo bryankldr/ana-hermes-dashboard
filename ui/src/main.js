@@ -11,14 +11,15 @@ import { initMapPanel, startMapBridge } from './map.js';
 // ═══ DOM refs ═══
 const $ = id => document.getElementById(id);
 const els = {
-  hud: $('hud'), particles: $('particles'), topDials: $('topDials'),
-  core: $('core'), coreLabel: $('coreLabel'), matrixGrid: $('matrixGrid'), workspaceSvg: $('workspaceSvg'),
-  pipeline: $('pipeline'), teleCpu: $('teleCpu'), teleRam: $('teleRam'),
-  equalizer: $('equalizer'), equalizerWrap: $('equalizerWrap'), chatInput: $('chatInput'), sendBtn: $('sendBtn'),
-  micBtn: $('micBtn'), modeBtn: $('modeBtn'), responseText: $('responseText'),
-  eventLog: $('eventLog'), eventEntries: $('eventEntries'), codeViewer: $('codeViewer'), cvBody: $('cvBody'),
-  stModel: $('stModel'), stMode: $('stMode'), stCtx: $('stCtx'), stMem: $('stMem'),
-  stSess: $('stSess'),
+ hud: $('hud'), particles: $('particles'), topDials: $('topDials'),
+ core: $('core'), coreLabel: $('coreLabel'), matrixGrid: $('matrixGrid'), workspaceSvg: $('workspaceSvg'),
+ pipeline: $('pipeline'), teleCpu: $('teleCpu'), teleRam: $('teleRam'),
+ equalizer: $('equalizer'), equalizerWrap: $('equalizerWrap'), chatInput: $('chatInput'), sendBtn: $('sendBtn'),
+ micBtn: $('micBtn'), modeBtn: $('modeBtn'), responseText: $('responseText'),
+ eventLog: $('eventLog'), eventEntries: $('eventEntries'), codeViewer: $('codeViewer'), cvBody: $('cvBody'),
+ stModel: $('stModel'), stMode: $('stMode'), stCtx: $('stCtx'), stMem: $('stMem'),
+ stSess: $('stSess'),
+ sessionBtn: $('sessionBtn'), sessionIdEl: $('sessionId'),
 };
 
 // Token for layout API (avoids relying on __ANA_TOKEN__ injected into JS)
@@ -926,6 +927,138 @@ els.chatInput.addEventListener('keydown', e => {
 });
 autosizeChat();
 
+// ═══ SESSION MANAGEMENT (chat panel) — konsisten dengan TPL ═══
+function sessionIdDisplay(sid) {
+  if (!sid) { els.sessionIdEl.textContent = '—'; return; }
+  els.sessionIdEl.textContent = String(sid).slice(0, 20);
+}
+
+async function loadSessions() {
+  try {
+    const j = await api.get('/api/session');
+    if (j.ok) {
+      currentSessionId = j.session || null;
+      sessionIdDisplay(j.session);
+      return j.sessions || [];
+    }
+  } catch (_) {}
+  currentSessionId = null;
+  sessionIdDisplay(null);
+  return [];
+}
+
+function sessionPanelRender(sessions) {
+  const panel = document.getElementById('sessionPanel');
+  if (!panel) return;
+  panel.innerHTML = '';
+
+  // Bar — sama seperti tpl-bar (tombol + di dalam daftar)
+  const bar = document.createElement('div');
+  bar.className = 'tpl-bar';
+  const mkBtn = (label, title, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tpl-bar-btn';
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener('click', ev => { ev.stopPropagation(); fn(); });
+    return b;
+  };
+
+  const addBtn = mkBtn('+', 'Sesi baru', async () => {
+    await createNewSession();
+  });
+  addBtn.classList.add('mini');
+  bar.appendChild(addBtn);
+  panel.appendChild(bar);
+
+  // Header label (mirror TPL group header style)
+  const label = document.createElement('div');
+  label.style.cssText = 'padding:4px 6px;border-bottom:1px solid var(--neon-dim);color:var(--neon-dim);font-size:10px;margin-bottom:4px;font-family:var(--font-mono);';
+  label.textContent = 'SESI';
+  panel.appendChild(label);
+
+  for (const s of sessions) {
+    const isActive = s.id === currentSessionId;
+    const row = document.createElement('div');
+    row.className = 'tpl-row';
+    if (isActive) row.style.cssText = 'background:rgba(0,220,255,0.08);';
+
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'tpl-item';
+    item.textContent = (s.title || '--') + '  ·  ' + String(s.id).slice(0, 12) + (isActive ? '  ✓' : '');
+    item.title = 'Pilih sesi: ' + s.id;
+    item.addEventListener('click', async () => {
+      await api.setSession(s.id);
+      const list = await loadSessions();
+      sessionPanelRender(list);
+    });
+    row.appendChild(item);
+
+    // Delete button INSIDE each row — sama seperti tpl-del di TPL
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'tpl-del mini';
+    delBtn.textContent = '🗑';
+    delBtn.title = 'Hapus sesi ' + s.id;
+    delBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Hapus sesi ' + s.id + '?')) return;
+      try {
+        const j = await api.post('/api/session', { action: 'delete', session_id: s.id });
+        if (j.ok) {
+          const list = await loadSessions();
+          sessionPanelRender(list);
+        } else {
+          alert('Gagal hapus sesi: ' + (j.error || 'tidak diketahui'));
+        }
+      } catch (ee) {
+        alert('Gagal hapus sesi: ' + ee.message);
+      }
+    });
+    row.appendChild(delBtn);
+    panel.appendChild(row);
+  }
+}
+
+async function createNewSession() {
+  try {
+    const j = await api.post('/api/session', { action: 'new' });
+    if (j.ok) {
+      const list = await loadSessions();
+      sessionPanelRender(list);
+    } else {
+      alert('Gagal buat sesi baru: ' + (j.error || 'tidak diketahui'));
+    }
+  } catch (e) {
+    alert('Gagal buat sesi baru: ' + e.message);
+  }
+}
+
+els.sessionBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  const panel = document.getElementById('sessionPanel');
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) {
+    // Eksklusif dengan panel template (konsisten dua arah).
+    try { document.getElementById('tplPanel').hidden = true; } catch (_) {}
+    const sessions = await loadSessions();
+    sessionPanelRender(sessions);
+  }
+});
+
+// Tutup panel saat klik di luar
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('sessionPanel');
+  const btn = els.sessionBtn;
+  if (!panel || panel.hidden) return;
+  if (!panel.contains(e.target) && e.target !== btn) {
+    panel.hidden = true;
+  }
+});
+
 // ═══ TEMPLATE PERTANYAAN per-user (hanya mode asisten via .only-asisten) ═══
 // Sumber kebenaran: GET /api/tpl (default bawaan = TPL_GROUPS di bawah,
 // user baru otomatis dapat salinan; edit milik sendiri via panel Kelola).
@@ -1156,9 +1289,17 @@ const TPL_GROUPS = [
 (function initTpl(){
   const btn = document.getElementById('tplBtn'), panel = document.getElementById('tplPanel');
   if (!btn || !panel) return;
-  btn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
-  els.sendBtn.addEventListener('click', () => { panel.hidden = true; });
+  btn.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    // Eksklusif dengan panel sesi (konsisten dua arah).
+    if (!panel.hidden) { try { document.getElementById('sessionPanel').hidden = true; } catch (_) {} }
+  });
+  els.sendBtn.addEventListener('click', () => { panel.hidden = true; try { document.getElementById('sessionPanel').hidden = true; } catch (_) {} });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    try { const sp = document.getElementById('sessionPanel'); if (sp && !sp.hidden) sp.hidden = true; } catch (_) {}
+  });
   tplLoad();
 })();
 
@@ -1188,7 +1329,7 @@ async function transmit(message, options = {}) {
     activeController = new AbortController();
     const res = await fetch('/api/run', {
       method: 'POST', headers: api.headers({ 'content-type': 'application/json' }),
-      body: JSON.stringify({ message, fresh }), signal: activeController.signal
+      body: JSON.stringify({ message, fresh, session_id: currentSessionId || '' }), signal: activeController.signal
     });
     if (!res.ok) throw new Error(`backend returned HTTP ${res.status}`);
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
@@ -2069,6 +2210,7 @@ async function init() {
   (async () => {
     try {
       const s = await api.getStatus();
+      await loadSessions();
       loadStatus();
       log('status', 'BOOT', `gateway online · ${s.runtime} core · profile=${s.profile || 'default'} · permission=${s.permission}`);
       try { const mj = await fetch('/api/mode', { headers: api.headers() }).then(r => r.json()); if (mj.mode) applyMode(mj.mode); } catch (_) {}
