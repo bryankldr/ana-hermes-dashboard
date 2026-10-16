@@ -467,6 +467,15 @@ def efektivitas_per_kph(tahun, **kw):
     """, tuple([tahun] + wv))
 
 
+@template("keaktifan_per_kph")
+def keaktifan_per_kph(tahun, bulan, periode, **kw):
+    """Porsi aktif/idle/bongkor per KPH - status struktural, abaikan jenis_aktivitas."""
+    kw = dict(kw or {})
+    for _k in ("jenis_aktivitas", "jenisAktivitas", "aktivitas"):
+        kw.pop(_k, None)
+    return T["aktivitas_per_kph"](tahun, bulan, periode, **kw)
+
+
 @template("aktivitas_per_kph")
 def aktivitas_per_kph(tahun, bulan, periode, **kw):
     """Porsi aktif/idle/bongkor per KPH untuk choropleth overview bisnis aktivitas.
@@ -1130,6 +1139,25 @@ def aktivitas_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     """, tuple([d0, e1] + pv + [dprev, eprev] + pv + [d2s, d2e] + pv
                + [d0, e1] + pv + [d2s, d2e] + pv
                + [tahun] + wv + bv + [lim]))
+
+
+@template("keaktifan_petak_map")
+def keaktifan_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
+    """Evaluasi Keaktifan per petak - status struktural aktif/idle/bongkor.
+    SENGAJA abaikan filter jenis_aktivitas: status petak, bukan sebaran jenis
+    kerja. Untuk sebaran per-jenis pakai aktivitas_kerja_map."""
+    kw = dict(kw or {})
+    for _k in ("jenis_aktivitas", "jenisAktivitas", "aktivitas"):
+        kw.pop(_k, None)
+    return T["aktivitas_petak_map"](tahun, bulan, periode, limit=limit, bounds=bounds, **kw)
+
+
+@template("aktivitas_kerja_map")
+def aktivitas_kerja_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
+    """Evaluasi Aktivitas per petak - sebaran kerja sadap per jenis.
+    Hijau = ada kerja jenis terpilih di periode; kuning = ada kerja lain saja;
+    merah = tanpa penyadap/sepi 2 bln. Hormati jenis_aktivitas + sampai_dengan."""
+    return T["aktivitas_petak_map"](tahun, bulan, periode, limit=limit, bounds=bounds, **kw)
 
 
 @template("matriks_map")

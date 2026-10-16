@@ -492,9 +492,9 @@ function updateLegend(biz, kat) {
       legend.innerHTML = '<span class="lg" title="tidak ada penyadap"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="luas_andil < luas_baku"><i style="background:#EAB308"></i> Kurang (kuning)</span><span class="lg" title="luas_andil >= luas_baku"><i style="background:#22C55E"></i> Terpenuhi (hijau)</span>' + _legendAttrib();
     } else if (biz === 'produksi') {
       legend.innerHTML = '<span class="lg"><i style="background:#EF4444"></i> 0-25%</span><span class="lg"><i style="background:#F97316"></i> 26-50%</span><span class="lg"><i style="background:#EAB308"></i> 51-75%</span><span class="lg"><i style="background:#22C55E"></i> 76-100%</span><span class="lg"><i style="background:#3B82F6"></i> &gt;100%</span>' + _legendAttrib();
-    } else if (biz === 'aktivitas' && k === 'idle') {
+    } else if ((biz === 'aktivitas' || biz === 'keaktifan') && k === 'idle') {
       legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Aktif (hijau)</span><span class="lg" title="pin + garis dashed ke pusat petak"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1 cyan/2 oranye/3 merah</span>' + _legendAttrib();
-    } else if (biz === 'aktivitas') {
+    } else if (biz === 'aktivitas' || biz === 'keaktifan') {
       // diperjelas: merah bongkor (tanpa penyadap / >2bln tanpa aktivitas), kuning idle (ada penyadap + aktivitas 2bln, tapi 0 di periode ini), hijau aktif (cur>0)
       legend.innerHTML = '<span class="lg" title="tanpa penyadap atau >2 bln tanpa aktivitas"><i style="background:#EF4444"></i> Bongkor (merah)</span><span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg" title="ada aktivitas periode berjalan"><i style="background:#22C55E"></i> Aktif (hijau)</span><span class="lg" title="pin aktivitas + garis dashed ke pusat petak via kode_evapot; GPS bisa melenceng"><i style="background:#2DF2FF;border:2px solid #fff;border-radius:50%"></i> Pin Pem1/2/3 ● foto — garis ke petak</span>' + _legendAttrib();
     } else if (biz === 'matriks' || biz === 'matrik') {
@@ -754,7 +754,8 @@ function updateLegend(biz, kat) {
       const per = curPerLabel();
       let ctx = 'dipantau';
       if (biz==='produksi') ctx = 'target RO/NPS';
-      else if (biz==='aktivitas') ctx = 'petak sadap';
+      else if (biz==='aktivitas') ctx = 'kerja sadap';
+      else if (biz==='keaktifan') ctx = 'petak sadap';
       else if (biz==='matriks') ctx = 'matriks';
       else ctx = 'coverage petak';
       kpiTotalSub.textContent = per + ' \u00b7 ' + tot + ' ' + ctx;
@@ -778,7 +779,7 @@ function updateLegend(biz, kat) {
       v2=(c.merah||0)+(c.oranye||0); v3=(c.kuning||0)+(c.hijau||0); v4=c.emas||0;
       s2=pct(v2)+' \u00b7 <50% target'; s3=pct(v3)+' \u00b7 50-100%'; s4=pct(v4)+' \u00b7 >100% target';
       t2='Realisasi <50% — intervensi segera'; t3='Progress menuju target RKAP'; t4='Melebihi target — evaluasi sustain';
-    } else if (biz==='aktivitas') {
+    } else if (biz==='aktivitas' || biz==='keaktifan') {
       l2='Bongkor'; l3='Idle'; l4='Aktif';
       v2=c.merah||0; v3=c.kuning||0; v4=c.hijau||0;
       s2=pct(v2)+' \u00b7 tanpa penyadap/>2 bln'; s3=pct(v3)+' \u00b7 0 di periode ini'; s4=pct(v4)+' \u00b7 ada sadap';
@@ -829,6 +830,7 @@ function updateLegend(biz, kat) {
       let nar = '';
       if (biz==='petak') nar = 'Evaluasi Petak ' + n + ' polygon ' + per + ' — Apakah coverage memadai? Bongkor ' + (c.merah||0) + ' (' + merahPct + '%), kurang ' + ((c.kuning||0)+(c.oranye||0)) + ', terpenuhi ' + ((c.hijau||0)+(c.emas||0)) + '. Luas_andil vs luas_baku.';
       else if (biz==='produksi') nar = 'Evaluasi Produksi ' + n + ' petak ' + per + ' — Target RO/NPS vs aktual. >100% ' + (c.emas||0) + ', 76-100% ' + (c.hijau||0) + ', <50% ' + ((c.merah||0)+(c.oranye||0)) + '.';
+      else if (biz==='keaktifan') nar = 'Evaluasi Keaktifan ' + n + ' petak ' + per + ' — Status struktural: Bongkor ' + (c.merah||0) + ' (tanpa penyadap/>2 bln), Idle ' + (c.kuning||0) + ' (0 di periode ini), Aktif ' + (c.hijau||0) + '.';
       else if (biz==='aktivitas') nar = 'Evaluasi Aktivitas ' + n + ' petak ' + per + ' — Apakah sadap berlangsung? Bongkor ' + (c.merah||0) + ' (tanpa penyadap/>2 bln), Idle ' + (c.kuning||0) + ' (0 di periode ini), Aktif ' + (c.hijau||0) + '. Pin terikat via kode_evapot, garis dashed jika GPS melenceng.';
       else if (biz==='matriks' || biz==='matrik') nar = 'Evaluasi Matriks ' + n + ' petak ' + per + ' — Keseimbangan luas/pohon/andil/produksi. Bongkor ' + (c.merah||0) + ', kurang ' + ((c.kuning||0)+(c.oranye||0)) + ', terpenuhi ' + ((c.hijau||0)+(c.emas||0)) + '.';
       else nar = (explanation||'').slice(0,160) || (n + ' polygon periode ' + per + '.');
@@ -1142,7 +1144,7 @@ function updateLegend(biz, kat) {
         }
         // ── pin-point aktivitas (GPS foto) — only when biz=aktivitas ──
         try {
-          if (st.business === 'aktivitas' && _ctl && typeof _ctl.set_aktivitas_points === 'function') {
+          if ((st.business === 'aktivitas' || st.business === 'keaktifan') && _ctl && typeof _ctl.set_aktivitas_points === 'function') {
             const _tok = document.querySelector('meta[name="ana-token"]')?.content || '';
             // Cap pin longgar-tetap 4000 (batas aman Leaflet ~4k circleMarker):
             // cap berbasis jumlah polygon TERBUKTI memotong data (polygon
@@ -1187,7 +1189,7 @@ function updateLegend(biz, kat) {
             } else if (r2 && !r2.ok) {
               log('map', 'MAP', 'aktivitas pin gagal: ' + (r2.error || 'unknown').slice(0,60));
             }
-          } else if (st.business !== 'aktivitas' && _ctl && typeof _ctl.clear_aktivitas_points === 'function') {
+          } else if (st.business !== 'aktivitas' && st.business !== 'keaktifan' && _ctl && typeof _ctl.clear_aktivitas_points === 'function') {
             try { _ctl.clear_aktivitas_points(true); _ctl.set_aktivitas_visibility(false); } catch (_) {}
           }
         } catch (e2) {
@@ -1417,7 +1419,7 @@ function updateLegend(biz, kat) {
     try {
       if (_ctl && typeof _ctl.set_aktivitas_visibility === 'function') {
         if (z < 12) _ctl.set_aktivitas_visibility(false);
-        else if (biz === 'aktivitas' && _ctl.aktivitasPoints && _ctl.aktivitasPoints.size) {
+        else if ((biz === 'aktivitas' || biz === 'keaktifan') && _ctl.aktivitasPoints && _ctl.aktivitasPoints.size) {
           _ctl.set_aktivitas_visibility(true);
         }
       }
@@ -1529,7 +1531,7 @@ function updateLegend(biz, kat) {
     try {
       if (!insightBox || !Array.isArray(rows) || !rows.length) return;
       const b = String(biz || 'petak');
-      const tag = b === 'aktivitas' ? ['B', 'I', 'A'] : ['B', 'K', 'T'];
+      const tag = (b === 'aktivitas' || b === 'keaktifan') ? ['B', 'I', 'A'] : ['B', 'K', 'T'];
       const lines = rows.map(function(r) {
         if (b === 'produksi') {
           const a = Number(r.achievement_pct);
@@ -1608,7 +1610,7 @@ function updateLegend(biz, kat) {
       let _jabTop = '';
       try { _jabTop = (_userScope().jabatan || '').toUpperCase(); } catch (_) {}
       const _isTop = (_jabTop === 'DIREKSI' || _jabTop === 'ADMINISTRATOR' || _jabTop === 'DIVRE');
-      const _ovBiz = (biz === 'petak' || biz === 'aktivitas' || biz === 'produksi' || biz === 'matriks' || biz === 'matrik') ? biz : '';
+      const _ovBiz = (biz === 'petak' || biz === 'keaktifan' || biz === 'aktivitas' || biz === 'produksi' || biz === 'matriks' || biz === 'matrik') ? biz : '';
       const _kBulan = Math.max(1, Math.min(12, parseInt(fBulan?.value) || new Date().getMonth() + 1));
       const _kP = parseInt(fPeriode?.value);
       const _kPer = (_kP === 0 || _kP === 1 || _kP === 2) ? _kP : 1;
@@ -1639,14 +1641,15 @@ function updateLegend(biz, kat) {
       if (['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(_jenis)) _ovParams.jenis_aktivitas = _jenis;
       const _sampai = _kSampai;
       if (['ya','tidak'].includes(_sampai)) _ovParams.sampai_dengan = _sampai;
-      const _ovTpl = _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
+      const _ovTpl = _ovBiz === 'keaktifan' ? 'keaktifan_per_kph'
+        : _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
         : _ovBiz === 'produksi' ? 'produksi_per_wilayah'
         : _ovBiz === 'matriks' || _ovBiz === 'matrik' ? 'efektivitas_per_kph'
         : 'efektivitas_per_kph';
       const _ovParams = { tahun };
-      if (_ovBiz === 'aktivitas' || _ovBiz === 'produksi') {
+      if (_ovBiz === 'keaktifan' || _ovBiz === 'aktivitas' || _ovBiz === 'produksi') {
         _ovParams.bulan = _bulan; _ovParams.periode = _periode;
-        if (_ovBiz === 'aktivitas' && ['1', '2', '3', '4'].includes(_pemke)) _ovParams.pembaharuan_ke = _pemke;
+        if ((_ovBiz === 'aktivitas' || _ovBiz === 'keaktifan') && ['1', '2', '3', '4'].includes(_pemke)) _ovParams.pembaharuan_ke = _pemke;
         if (_ovBiz === 'produksi') _ovParams.level = 'kode_kph';
       }
       let rows = [];
@@ -1811,7 +1814,7 @@ function updateLegend(biz, kat) {
     // Label tooltip mengikuti bisnis: aktivitas = B/I/A;
     // produksi = actual/target + achievement%.
     const _bb = String(biz || 'petak');
-    const _tag = _bb === 'aktivitas' ? ['B', 'I', 'A'] : ['B', 'K', 'T'];
+    const _tag = (_bb === 'aktivitas' || _bb === 'keaktifan') ? ['B', 'I', 'A'] : ['B', 'K', 'T'];
     try {
       layer.eachLayer(function(ll) {
         try {

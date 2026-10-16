@@ -8,7 +8,8 @@ import { bus } from './core/bus.js';
 
 export const BUSINESS_OPTIONS = [
   { value: 'petak',     label: 'Evaluasi Petak',     desc: 'coverage penyadap · luas andil vs luas baku' },
-  { value: 'aktivitas', label: 'Evaluasi Aktivitas', desc: 'AKTIV / IDLE / BONGKOR · P1/P2' },
+  { value: 'keaktifan', label: 'Evaluasi Keaktifan', desc: 'status AKTIF / IDLE / BONGKOR struktural · P1/P2' },
+  { value: 'aktivitas', label: 'Evaluasi Aktivitas', desc: 'sebaran kerja sadap per jenis · pin poin' },
   { value: 'produksi',  label: 'Evaluasi Produksi',  desc: 'target RO/NPS vs aktual · RO/NPS' },
   { value: 'matriks',   label: 'Evaluasi Matriks',   desc: 'luas · pohon · penyadap · aktivitas · produksi' },
 ];
@@ -32,6 +33,12 @@ export const KATEGORI_OPTIONS = {
     { value: 'terpenuhi', label: 'Terpenuhi' },
   ],
   aktivitas: [
+    { value: 'semua',   label: 'Semua' },
+    { value: 'bongkor', label: 'Bongkor' },
+    { value: 'idle',    label: 'Idle' },
+    { value: 'aktif',   label: 'Aktif' },
+  ],
+  keaktifan: [
     { value: 'semua',   label: 'Semua' },
     { value: 'bongkor', label: 'Bongkor' },
     { value: 'idle',    label: 'Idle' },

@@ -46,14 +46,18 @@ export function resolveTemplate(state) {
   if (f.bkph) wilayah.kode_bkph = f.bkph;
   if (f.rph) wilayah.kode_rph = f.rph;
   if (f.tpg) wilayah.kode_tpg = f.tpg;
-  // tahap pembaharuan (1..4) — hanya relevan untuk biz=aktivitas (konsumennya
-  // aktivitas_petak_map + aktivitas_recent). Jangan dimix ke template lain.
-  if ((state.business || 'petak') === 'aktivitas'
+  // tahap pembaharuan (1..4) — relevan untuk biz=aktivitas/keaktifan
+  // (konsumennya aktivitas_petak_map/keaktifan_petak_map + aktivitas_recent).
+  // Jangan dimix ke template lain.
+  if ((state.business === 'aktivitas' || state.business === 'keaktifan' || (state.business || 'petak') === 'aktivitas')
       && ['1','2','3','4'].includes(String(f.pembaharuan_ke || ''))) {
     wilayah.pembaharuan_ke = String(f.pembaharuan_ke);
   }
-  // Sampai dengan Ya/Tidak — berlaku aktivitas/produksi/matriks.
-  if (['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(String(f.jenis_aktivitas || '').toLowerCase())) {
+  // Jenis aktivitas — HANYA biz=aktivitas (sebaran kerja). Keaktifan
+  // status struktural, sengaja tak kenal filter jenis.
+  // Sampai dengan Ya/Tidak — berlaku aktivitas/keaktifan/produksi/matriks.
+  if (state.business === 'aktivitas'
+      && ['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(String(f.jenis_aktivitas || '').toLowerCase())) {
     wilayah.jenis_aktivitas = String(f.jenis_aktivitas).toLowerCase();
   }
   if (['ya','tidak'].includes(String(f.sampai_dengan || '').toLowerCase())) {
@@ -105,12 +109,22 @@ export function resolveTemplate(state) {
     const _pw = { sangat_buruk: 'merah', buruk: 'oranye', kurang: 'kuning', baik: 'hijau', sangat_baik: 'emas' }[kat] || '';
     return { template: 'rkap_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...((_pw || warna) ? { warna: _pw || warna } : {}) } };
   }
-  if (biz === 'aktivitas') {
-    // aktivitas_petak_map: merah=bongkor (tanpa penyadap / >2bln tanpa aktivitas), kuning=idle (cur0 prev>0), hijau=aktif
+  if (biz === 'keaktifan') {
+    // keaktifan_petak_map: status struktural aktif/idle/bongkor.
+    // SENGAJA tanpa filter jenis — wilayah sudah dibersihkan dari
+    // jenis_aktivitas di atas (backend juga pop defensif).
     if (kat === 'idle') return { template: 'idle_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
-    if (kat === 'bongkor') return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'merah' } };
-    if (kat === 'aktif') return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'hijau' } };
-    return { template: 'aktivitas_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
+    if (kat === 'bongkor') return { template: 'keaktifan_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'merah' } };
+    if (kat === 'aktif') return { template: 'keaktifan_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'hijau' } };
+    return { template: 'keaktifan_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
+  }
+  if (biz === 'aktivitas') {
+    // aktivitas_kerja_map: sebaran kerja sadap per jenis + pin poin.
+    // Hormati jenis_aktivitas + sampai_dengan + pembaharuan_ke.
+    if (kat === 'idle') return { template: 'idle_petak_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
+    if (kat === 'bongkor') return { template: 'aktivitas_kerja_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'merah' } };
+    if (kat === 'aktif') return { template: 'aktivitas_kerja_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, warna: 'hijau' } };
+    return { template: 'aktivitas_kerja_map', params: { tahun, bulan, periode, limit, ...wilayah, ...viewport, ...(warna ? { warna } : {}) } };
   }
   if (biz === 'matriks' || biz === 'matrik') {
     // matriks_map: luas_andil vs pencapaian RKAP, warna merah/oranye/kuning/hijau/emas + bongkor
@@ -331,6 +345,12 @@ export async function fetchAktivitasPoints(state, { limit, timeoutMs = 10000 } =
   // (definisi: tanpa aktivitas periode berjalan). Selain itu = semua pin.
   const _kk = String(f.kategori || '').toLowerCase();
   if (['aktif','idle','bongkor'].includes(_kk)) wilayah.kategori = _kk;
+  if (['quare','semprot_cas','kerok','naik_batok','budaya_bersih','pulung'].includes(String(f.jenis_aktivitas || '').toLowerCase())) {
+    wilayah.jenis_aktivitas = String(f.jenis_aktivitas).toLowerCase();
+  }
+  if (['ya','tidak'].includes(String(f.sampai_dengan || '').toLowerCase())) {
+    wilayah.sampai_dengan = String(f.sampai_dengan).toLowerCase();
+  }
   // adaptif: jika caller tidak tentukan limit, pakai 1000 (cukup untuk 517 petak aktif tanpa truncate 300)
   // map.js boleh override dengan limit = min(1200, max(600, polyFeatures*2))
   const effLimit = Number.isFinite(limit) ? Math.max(50, Math.min(2000, parseInt(limit))) : 1000;

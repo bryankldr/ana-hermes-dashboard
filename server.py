@@ -1232,6 +1232,8 @@ _TEMPLATE_SPATIAL = {
     "petak_multi_penyadap_map": ("petak", "multi_penyadap"),
     "idle_petak_map": ("petak", "idle"),
     "aktivitas_petak_map": ("aktivitas", "semua"),
+    "aktivitas_kerja_map": ("aktivitas", "semua"),
+    "keaktifan_petak_map": ("keaktifan", "semua"),
     "aktivitas_top_petak": ("aktivitas", "semua"),
     "rkap_map": ("produksi", "semua"),
     "matriks_map": ("matriks", "semua"),
