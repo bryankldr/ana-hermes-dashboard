@@ -159,7 +159,7 @@ def take_finished():
         return done
 
 
-_CMD = re.compile(r"^\s*/(new|profile|goal|personality|mode|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|map|petak)\b\s*(.*)$", re.I | re.S)
+_CMD = re.compile(r"^\s*/(new|profile|goal|personality|mode|kanban|mission|missions|background|tools|toolsets|connectors|connect|status|commands|help|browser|clear|map|petak|maxbi)\b\s*(.*)$", re.I | re.S)
 
 
 _MAP_HELP = """Pakai /map <subcommand> [args JSON]:
@@ -216,6 +216,7 @@ def _commands_reply():
 /browser <task> — minta Hermes pakai tools browser/Chrome
 /map [state|queue|result <id>|<op> args] — baca & kendalikan SPATIAL MAP
 /petak [id|info|fokus|tetangga|grup|sekitar|apa_ini|stats] — intel bisnis spasial (exact, bukan tebak)
+/maxbi [dashboards|cari <q>|card <id>] — query deterministik Metabase MAXBI (+push chart)
 /clear — bersihkan panel respons
 /help atau /commands — tampil daftar ini
 
@@ -506,5 +507,75 @@ def handle(message, runner=None, owner=""):
             return dict(message=None, reply=(
                 f"Ref '{arg.strip()}' cocok {r.get('count')} petak. Contoh: {ids}. Persempit ref."), note="petak ambiguous")
         return dict(message=None, reply=r.get("hint") or _MAP_HELP, note="petak ambiguous")
+
+    if cmd == "maxbi":
+        # Query deterministik ke MAXBI via metabase.py (tanpa LLM).
+        # card <id> juga push ke tile chart existing (meta.source MAXBI).
+        try:
+            import metabase as _mb
+        except Exception:
+            _mb = None
+        if _mb is None or not _mb.configured():
+            return dict(message=None, reply="MAXBI belum dikonfigurasi (MB_BASE_URL/MB_API_KEY kosong di .env).", note="maxbi unconfigured")
+        parts = (arg or "").split(None, 1)
+        sub = (parts[0] if parts else "").strip().lower()
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        if not sub or sub in ("help", "?"):
+            return dict(message=None, reply=(
+                "Pakai /maxbi <subcommand>:\n"
+                "/maxbi dashboards — daftar dashboard MAXBI\n"
+                "/maxbi cari <kata> — cari card/dashboard\n"
+                "/maxbi card <id> — jalankan card + tampilkan di tile"), note="maxbi help")
+        if sub in ("dashboards", "dashboard", "list"):
+            r = _mb.list_dashboards()
+            if not r.get("ok"):
+                return dict(message=None, reply=f"MAXBI gagal: {r.get('error', '')[:200]}", note="maxbi dashboards error")
+            items = r.get("dashboards") or []
+            if not items:
+                return dict(message=None, reply="Tidak ada dashboard MAXBI.", note="maxbi dashboards empty")
+            lines = "\n".join(f"- {d['id']}: {d.get('name')}" for d in items[:15])
+            extra = f" (+{len(items) - 15} lagi)" if len(items) > 15 else ""
+            return dict(message=None, reply=f"Dashboard MAXBI ({len(items)}{extra}):\n{lines}", note="maxbi dashboards")
+        if sub in ("cari", "search", "find"):
+            if not rest:
+                return dict(message=None, reply="Pakai /maxbi cari <kata>.", note="maxbi search help")
+            r = _mb.search(rest)
+            if not r.get("ok"):
+                return dict(message=None, reply=f"MAXBI gagal: {r.get('error', '')[:200]}", note="maxbi search error")
+            items = r.get("items") or []
+            if not items:
+                return dict(message=None, reply=f"Tidak ketemu '{rest}' di MAXBI.", note="maxbi search empty")
+            lines = "\n".join(f"- {i['model']} {i['id']}: {i.get('name')}" for i in items[:10])
+            return dict(message=None, reply=f"Hasil cari '{rest}':\n{lines}", note="maxbi search")
+        if sub == "card":
+            if not rest or not rest.split()[0].isdigit():
+                return dict(message=None, reply="Pakai /maxbi card <id angka>.", note="maxbi card help")
+            cid = int(rest.split()[0])
+            meta = _mb.get_card(cid)
+            title = ((meta.get("card") or {}).get("name") or f"Card {cid}")[:80]
+            r = _mb.run_card(cid)
+            if not r.get("ok"):
+                return dict(message=None, reply=f"Card {cid} gagal: {r.get('error', '')[:200]}", note="maxbi card error")
+            spec = _mb.to_chart(r, title)
+            pushed = ""
+            if _owner:
+                try:
+                    _srv3 = sys.modules.get("server") or sys.modules.get("__main__")
+                    _scs = getattr(_srv3, "spatial_chart_store", None) if _srv3 else None
+                    if _scs is None:
+                        import spatial_chart_store as _scs  # noqa: F811
+                    okp, errp = _scs.set_chart(dict(spec, visible=True,
+                                                   meta={"source": "MAXBI", "title": title}),
+                                               owner=_owner)
+                    pushed = " + tampil di tile" if okp else f" (push gagal: {errp})"
+                except Exception as e:  # noqa: BLE001
+                    pushed = f" (push gagal: {e})"[:80]
+            summary = ""
+            if spec.get("kpis"):
+                k = spec["kpis"][0]
+                summary = f"{k.get('label')}: {k.get('value')}"
+            elif r.get("rows"):
+                summary = f"{r.get('row_count')} baris"
+            return dict(message=None, reply=f"MAXBI card {cid} {title}: {summary}{pushed}.", note=f"maxbi card {cid}")
 
     return None

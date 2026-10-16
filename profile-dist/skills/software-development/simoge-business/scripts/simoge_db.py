@@ -762,10 +762,10 @@ def idle_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
 # per Pembaharuan. Chunking 40 baris per stmt (MariaDB max_prepared_stmt_count=16382).
 # gp='penyadap' → id_penyadap · 'aktivitas' → kolom flag · 'pembaharuan' → pembaharuan_ke
 AKTIVITAS_FLAGS = ("quare", "semprot_cas", "kerok", "budaya_bersih",
-                   "naik_batok")
+                   "naik_batok", "pulung")
 AKTIVITAS_LABEL = {"quare": "Quare", "semprot_cas": "Semprot CAS",
                    "kerok": "Kerok", "budaya_bersih": "Budaya Bersih",
-                   "naik_batok": "Naik Batok"}
+                   "naik_batok": "Naik Batok", "pulung": "Pulung"}
 
 
 @template("aktivitas_agregat")
@@ -872,7 +872,10 @@ def aktivitas_per_penyadap_petak(tahun, bulan, periode, id_penyadap=None,
         SELECT py.nama_penyadap, py.nomor_penyadap AS nik, s.id_penyadap,
                p.nomor_petak, s.kode_evapot, s.pembaharuan_ke, s.tgl_pembaharuan,
                s.latitude, s.longitude, s.quare, s.semprot_cas, s.kerok,
-               s.budaya_bersih, s.naik_batok,
+               s.budaya_bersih, s.naik_batok, s.pulung,
+               s.tgl_aktivitas, s.jml_phn_quare, s.jml_phn_semprot_cas,
+               s.jml_phn_bdy_bersih, s.jml_phn_kerok, s.jml_phn_naik_batok,
+               s.jml_phn_pulung,
                s.aktivitas_photo, f.filename_disk AS foto_file,
                pp.polygon
         FROM getah_aktivitas_sadap s
@@ -1206,6 +1209,7 @@ def aktivitas_penyadap_petak(kode_evapot: str, tahun: int, bulan: int, periode: 
             SUM(COALESCE(s.kerok,0)) AS kerok,
             SUM(COALESCE(s.budaya_bersih,0)) AS budaya_bersih,
             SUM(COALESCE(s.naik_batok,0)) AS naik_batok,
+            SUM(COALESCE(s.pulung,0)) AS pulung,
             (SELECT s2.pembaharuan_ke FROM getah_aktivitas_sadap s2
               WHERE s2.kode_evapot = s.kode_evapot AND s2.id_penyadap = s.id_penyadap
                 AND s2.tgl_pembaharuan BETWEEN %s AND %s
@@ -1246,10 +1250,12 @@ def penyadap_aktivitas(kode_evapot: str, **kw):
     """Aktivitas penyadapan for a specific petak — lengkap lat/lng/alt/pembaharuan_ke/foto."""
     return q("""
         SELECT
-            s.id, s.tgl_pembaharuan, s.pembaharuan_ke, s.quare,
+            s.id, s.tgl_pembaharuan, s.tgl_aktivitas, s.pembaharuan_ke, s.quare,
             s.latitude, s.longitude, s.altitude,
             s.aktivitas_photo, f.filename_disk AS foto_file, f.storage AS foto_storage,
             s.cuaca, s.akses_lokasi,
+            s.jml_phn_quare, s.jml_phn_semprot_cas, s.jml_phn_bdy_bersih,
+            s.jml_phn_kerok, s.jml_phn_naik_batok, s.jml_phn_pulung,
             p.nama_penyadap, a.luas_andil
         FROM getah_aktivitas_sadap s
         LEFT JOIN getah_penyadap p ON p.id = s.id_penyadap
@@ -1380,10 +1386,12 @@ def aktivitas_recent(limit=20, **kw):
     # Kolom popup + join sama untuk 3 cabang. Cuma JOIN getah_petak (untuk
     # nomor_petak) yang bergantung pada filter wilayah — Left Join supaya petak
     # tanpa RTT tidak killing baris aktivitas.
-    cols = """s.id, s.kode_evapot, s.pembaharuan_ke, s.tgl_pembaharuan,
+    cols = """s.id, s.kode_evapot, s.pembaharuan_ke, s.tgl_pembaharuan, s.tgl_aktivitas,
             DATE_FORMAT(s.date_created, '%%H:%%i') AS jam_input,
             s.latitude, s.longitude, s.altitude,
-            s.quare, s.semprot_cas, s.kerok, s.budaya_bersih, s.naik_batok,
+            s.quare, s.semprot_cas, s.kerok, s.budaya_bersih, s.naik_batok, s.pulung,
+            s.jml_phn_quare, s.jml_phn_semprot_cas, s.jml_phn_bdy_bersih,
+            s.jml_phn_kerok, s.jml_phn_naik_batok, s.jml_phn_pulung,
             s.aktivitas_photo, f.filename_disk AS foto_file, f.storage AS foto_storage,
             s.cuaca, s.akses_lokasi,
             py.nama_penyadap,

@@ -119,7 +119,8 @@ EOF
 fi
 
 # Gateway WS lives in `hermes serve` (dynamic port, per-process token) — NOT port 37521.
-# Discover both so ANA brain connects instead of falling back to MOCK.
+# start.sh WAJIB dapat serve: pakai yang hidup, atau start sendiri lalu
+# discovery ulang. Tanpa URL+token valid -> abort, jangan jalan MOCK diam-diam.
 # ponytail: single serve instance assumed — extend with profile match when multi-serve needed.
 # Deteksi BERLAPIS (bukan nama proses saja): biner `hermes` maupun
 # `python3 -m hermes_cli.main ... serve` (comm=python3!) dikenali lewat
@@ -141,18 +142,63 @@ _hermes_listen_ports() {
     fi
   done
 }
-if [ -z "${ANA_GATEWAY_URL:-}" ] || [ -z "${ANA_GATEWAY_TOKEN:-}" ]; then
+# Ambil token sesi serve (rotasi tiap restart serve — jangan cache antar-boot).
+_hermes_token_for() {
+  curl -s -m 3 "http://127.0.0.1:$1/" 2>/dev/null | grep -oE '__HERMES_SESSION_TOKEN__="[^"]+"' | head -1 | cut -d'"' -f2 || true
+}
+# Pastikan ada serve yang jawab /api/health. Hidup -> pakai. Mati/tak ada ->
+# start `hermes serve --port 0` sendiri (detached), lalu discovery ulang.
+# Return: SPORT terisi bila sukses.
+_ensure_hermes_serve() {
   SPORT=$(_hermes_listen_ports | head -1 || true)
   if [ -n "${SPORT:-}" ]; then
-    STOK=$(curl -s -m 3 "http://127.0.0.1:$SPORT/" 2>/dev/null | grep -oE '__HERMES_SESSION_TOKEN__="[^"]+"' | head -1 | cut -d'"' -f2 || true)
+    if curl -s -m 3 "http://127.0.0.1:$SPORT/api/health" 2>/dev/null | grep -q 'displayVersion'; then
+      return 0
+    fi
+    SPORT=""
+  fi
+  [ "${ANA_NO_SERVE_AUTOSTART:-0}" = "1" ] && return 1
+  echo "ANA: hermes serve tidak ditemukan — menjalankan 'hermes serve --port 0' ..." >&2
+  # shellcheck disable=SC2094
+  nohup hermes serve --port 0 --host 127.0.0.1 --skip-build >/dev/null 2>&1 &
+  local n=0
+  while [ $n -lt 30 ]; do
+    sleep 1; n=$((n+1))
+    SPORT=$(_hermes_listen_ports | head -1 || true)
+    if [ -n "${SPORT:-}" ]; then
+      if curl -s -m 3 "http://127.0.0.1:$SPORT/api/health" 2>/dev/null | grep -q 'displayVersion'; then
+        echo "ANA: hermes serve hidup di port $SPORT" >&2
+        return 0
+      fi
+      SPORT=""
+    fi
+  done
+  return 1
+}
+if [ -z "${ANA_GATEWAY_URL:-}" ] || [ -z "${ANA_GATEWAY_TOKEN:-}" ]; then
+  if _ensure_hermes_serve; then
+    STOK=$(_hermes_token_for "$SPORT")
     if [ -n "${STOK:-}" ]; then
       export ANA_GATEWAY_URL="ws://127.0.0.1:$SPORT/api/ws"
       export ANA_GATEWAY_TOKEN="$STOK"
+    else
+      unset ANA_GATEWAY_URL ANA_GATEWAY_TOKEN
     fi
+  else
+    unset ANA_GATEWAY_URL ANA_GATEWAY_TOKEN
   fi
 fi
-[ -n "${ANA_GATEWAY_TOKEN:-}" ] ||
-  echo "ANA: gateway token not found — start 'hermes serve' first (brain will be MOCK)" >&2
+if [ -z "${ANA_GATEWAY_URL:-}" ] || [ -z "${ANA_GATEWAY_TOKEN:-}" ]; then
+  cat >&2 <<'EOF'
+ANA: FATAL — hermes serve tidak tersedia dan autostart gagal.
+  Cek:  hermes serve --status
+  Atasi: hermes serve --port 0 --host 127.0.0.1 --skip-build
+  Lalu: ./start.sh
+  (Lewati dengan ANA_NO_SERVE_AUTOSTART=1 bila ingin MOCK sadar, bukan diam-diam.)
+EOF
+  [ "${ANA_NO_SERVE_AUTOSTART:-0}" = "1" ] || exit 1
+  echo "ANA: lanjut MOCK (ANA_NO_SERVE_AUTOSTART=1) — brain tidak tersambung" >&2
+fi
 
 echo "ANA: using $PY" >&2
 # ── diagnostics (selalu tampil, anti-gagal: set -e jangan gugur di sini)

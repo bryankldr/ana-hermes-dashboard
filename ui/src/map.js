@@ -217,9 +217,8 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/biru</div></div>'
       + '    </div>'
       + '    <div id="spatialInsight" class="spatial-insight flying"></div>'
-      + '    <button id="legendToggle" class="spatial-toggle-btn legend-toggle" title="Legenda" aria-label="Legenda">ⓘ</button>'
       + '    <div class="map-legendbox flying">'
-      + '      <div class="map-legend flying legend-collapsed" id="mapLegend"></div>'
+      + '      <div class="map-legend flying" id="mapLegend"></div>'
       + '      <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
       + '    </div>'
       + '  </div>'
@@ -1207,22 +1206,8 @@ function updateLegend(biz, kat) {
     kpiBox?.classList.toggle('collapsed');
     btnKpi.classList.toggle('active', !kpiBox?.classList.contains('collapsed'));
   });
-  // K1: klik insight expand/collapse. K3: tombol ⓘ toggle legend.
+  // K1: klik insight expand/collapse.
   insightBox?.addEventListener('click', () => { insightBox.classList.toggle('expanded'); });
-  $sel('#legendToggle')?.addEventListener('click', function() {
-    const lg = $sel('#mapLegend');
-    const box = lg?.closest('.map-legendbox') || lg;
-    // Migrasi state awal (inner collapsed = meta saja tampil): klik pertama
-    // tampilkan SEMUA (meta + item), klik berikut sembunyikan SEMUA.
-    if (lg && lg !== box && lg.classList.contains('legend-collapsed')) {
-      lg.classList.remove('legend-collapsed');
-      box?.classList.remove('legend-collapsed');
-      this.classList.add('active');
-    } else {
-      box?.classList.toggle('legend-collapsed');
-      this.classList.toggle('active', !box?.classList.contains('legend-collapsed'));
-    }
-  });
   // K4: mobile (≤780px, via device.js) KPI mulai collapse — hemat peta 360px. Desktop tetap tampil.
   try {
     if (_isMobileDevice()) kpiBox?.classList.add('collapsed');
@@ -1554,10 +1539,23 @@ function updateLegend(biz, kat) {
       }
       const petakSrc = [];
       if (manOk) {
+        const _byBase = {};
+        for (const f of ((man && man.files) || [])) {
+          try {
+            const _nm = String(f.name || '');
+            // varian bertahun menang atas legacy tanpa tahun
+            const _m = _nm.match(/^(kph_\d+?)(?:_(\d{4}))?\.pmtiles$/);
+            if (!_m) continue;
+            const _base = _m[1] + '.pmtiles';
+            const _yr = _m[2] ? parseInt(_m[2]) : 0;
+            if (!_byBase[_base] || _yr > _byBase[_base].yr) _byBase[_base] = { yr: _yr, name: _nm };
+          } catch (_) {}
+        }
         for (const k of kphList) {
-          const nm = 'kph_' + k + '.pmtiles';
-          if (!have.has(nm)) continue; // belum dibangun → lewati (tanpa 404)
-          petakSrc.push({ url: '/api/tiles/scope/kph/' + k + '.pmtiles', kind: 'petak' });
+          const hit = _byBase['kph_' + k + '.pmtiles'];
+          if (!hit) continue; // belum dibangun → lewati (tanpa 404)
+          const suffix = hit.yr ? '_' + hit.yr : '';
+          petakSrc.push({ url: '/api/tiles/scope/kph/' + k + suffix + '.pmtiles', kind: 'petak' });
         }
       }
       if (!petakSrc.length) {
@@ -1569,10 +1567,15 @@ function updateLegend(biz, kat) {
       // Reconcile menambah layer ke peta; di tier geojson (z>10) grup petak
       // harus tetap sembunyi (detail dari GeoJSON, bukan tile).
       try { if (map.getZoom() > 11) _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {}
-      // 2. Choropleth overview: petak + z≤10 + scope >1 KPH.
+      // 2. Choropleth overview: petak + z≤10. Multi-KPH selalu;
+      // scope 1-KPH di DB tetap overview berwarna bila jabatan level atas
+      // (DIREKSI/ADMINISTRATOR/DIVRE) — bukan outline netral.
       const multi = kphList.length !== 1;
+      let _jabTop = '';
+      try { _jabTop = (_userScope().jabatan || '').toUpperCase(); } catch (_) {}
+      const _isTop = (_jabTop === 'DIREKSI' || _jabTop === 'ADMINISTRATOR' || _jabTop === 'DIVRE');
       const key = biz + '|' + z + '|' + tahun + '|' + kphList.join(',') + '|' + _scopeDivreList().join(',');
-      const wantOv = (biz === 'petak' && z <= 10 && multi && kphList.length > 0);
+      const wantOv = (biz === 'petak' && z <= 10 && kphList.length > 0 && (multi || _isTop));
       if (!wantOv) {
         try { window.__spatialOverview = { key: key, wantOv: false, kph: kphList.length, on: false }; } catch (_) {}
         if (_ovOn) {
@@ -1609,10 +1612,22 @@ function updateLegend(biz, kat) {
       // Hanya file yang ada di manifest (fail-safe anti-404 seperti di atas).
       const oSrc = [];
       if (manOk) {
+        const _byBase2 = {};
+        for (const f of ((man && man.files) || [])) {
+          try {
+            const _nm = String(f.name || '');
+            const _m = _nm.match(/^(overview_\d+?)(?:_(\d{4}))?\.pmtiles$/);
+            if (!_m) continue;
+            const _base = _m[1] + '.pmtiles';
+            const _yr = _m[2] ? parseInt(_m[2]) : 0;
+            if (!_byBase2[_base] || _yr > _byBase2[_base].yr) _byBase2[_base] = { yr: _yr, name: _nm };
+          } catch (_) {}
+        }
         for (const d of _scopeDivreList()) {
-          const nm = 'overview_' + d + '.pmtiles';
-          if (!have.has(nm)) continue;
-          oSrc.push({ url: '/api/tiles/scope/overview_' + d + '.pmtiles', kind: 'petak',
+          const hit = _byBase2['overview_' + d + '.pmtiles'];
+          if (!hit) continue;
+          const suffix = hit.yr ? '_' + hit.yr : '';
+          oSrc.push({ url: '/api/tiles/scope/overview_' + d + suffix + '.pmtiles', kind: 'petak',
                       rules: _ovTileRules(), maxDataZoom: 10 });
         }
       }
@@ -1753,13 +1768,24 @@ function updateLegend(biz, kat) {
     try {
       const tok = _tokPm();
       const man = await _tileManifestLoad();
-      const have = new Set(((man && man.files) || []).map(function(f){ return f.name; }));
       const bSrc = [];
       if (man && Array.isArray(man.files)) {
+        const _byBase3 = {};
+        for (const f of (man.files || [])) {
+          try {
+            const _nm = String(f.name || '');
+            const _m = _nm.match(/^(bounds_\d+?)(?:_(\d{4}))?\.pmtiles$/);
+            if (!_m) continue;
+            const _base = _m[1] + '.pmtiles';
+            const _yr = _m[2] ? parseInt(_m[2]) : 0;
+            if (!_byBase3[_base] || _yr > _byBase3[_base].yr) _byBase3[_base] = { yr: _yr, name: _nm };
+          } catch (_) {}
+        }
         for (const d of _scopeDivreList()) {
-          const nm = 'bounds_' + d + '.pmtiles';
-          if (!have.has(nm)) continue;
-          bSrc.push({ url: '/api/tiles/scope/bounds_' + d + '.pmtiles', kind: 'kph', maxDataZoom: 10,
+          const hit = _byBase3['bounds_' + d + '.pmtiles'];
+          if (!hit) continue;
+          const suffix = hit.yr ? '_' + hit.yr : '';
+          bSrc.push({ url: '/api/tiles/scope/bounds_' + d + suffix + '.pmtiles', kind: 'kph', maxDataZoom: 10,
                       rules: _ctl.kph_bounds_rules({}, { neutral: true }) });
         }
       }

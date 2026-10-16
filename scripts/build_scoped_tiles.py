@@ -93,8 +93,8 @@ def _build_tahun(tahun, out):
     bexp = _sh(["scripts/export_kph_bounds.py", "--tahun", str(tahun)])
     out.setdefault("bounds_export", []).append(bexp.get("detail") or bexp)
     if bexp.get("ok"):
-        for f in sorted((ROOT / "tiles").glob("bounds_*.ndjson")):
-            divre = f.stem.split("_", 1)[1]
+        for f in sorted((ROOT / "tiles").glob(f"bounds_*_{tahun}.ndjson")):
+            divre = f.stem.split("_", 1)[1].rsplit("_", 1)[0]
             bld = _sh(["scripts/build_pmtiles.py", "--in", f"tiles/{f.name}",
                        "--out", f"tiles/bounds_{divre}_{tahun}.pmtiles",
                        "--layer", "kph", "--min-zoom", "4", "--max-zoom", "10"])
@@ -107,9 +107,9 @@ def _build_tahun(tahun, out):
     out.setdefault("overview_export", []).append(oexp.get("detail") or oexp)
     if oexp.get("ok"):
         import glob as _glob
-        for _nd in sorted(_glob.glob(str(ROOT / "tiles" / "overview_*.ndjson"))):
-            _base = pathlib.Path(_nd).stem  # overview_<divre>
-            _div = _base.split("_", 1)[1]
+        for _nd in sorted(_glob.glob(str(ROOT / "tiles" / f"overview_*_{tahun}.ndjson"))):
+            _base = pathlib.Path(_nd).stem  # overview_<divre>_<tahun>
+            _div = _base.split("_", 1)[1].rsplit("_", 1)[0]
             bld = _sh(["scripts/build_pmtiles.py", "--in", f"tiles/{_base}.ndjson",
                        "--out", f"tiles/overview_{_div}_{tahun}.pmtiles",
                        "--layer", "petak", "--min-zoom", "4", "--max-zoom", "10"])
@@ -137,8 +137,22 @@ def main():
     # manifest (sumber kebenaran inventory untuk klien + status).
     # Nama bertahun: kph_<kode>_<thn>, bounds_<divre>_<thn>, overview_<divre>_<thn>.
     # Varian lama tanpa tahun (kph_<kode> dsb) tetap dibaca untuk kompat mundur.
+    # Berkas scoped basi tanpa tahun dibersihkan (diganti varian bertahun);
+    # petak.* legacy milik rantai lama — jangan sentuh.
     try:
         import re as _re
+        for _stale in sorted((ROOT / "tiles").glob("*.pmtiles")):
+            if _re.fullmatch(r"(kph_\d+|bounds_\d+|overview_\d+)\.pmtiles", _stale.name):
+                try:
+                    _stale.unlink()
+                except OSError:
+                    pass
+        for _stale in sorted((ROOT / "tiles").glob("*.ndjson")):
+            if _re.fullmatch(r"(kph_\d+|bounds_\d+|overview_\d+)\.ndjson", _stale.name):
+                try:
+                    _stale.unlink()
+                except OSError:
+                    pass
         files = []
         for f in sorted((ROOT / "tiles").glob("*.pmtiles")):
             scope = None

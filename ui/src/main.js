@@ -1042,8 +1042,6 @@ els.sessionBtn.addEventListener('click', async (e) => {
   if (!panel) return;
   panel.hidden = !panel.hidden;
   if (!panel.hidden) {
-    // Eksklusif dengan panel template (konsisten dua arah).
-    try { document.getElementById('tplPanel').hidden = true; } catch (_) {}
     const sessions = await loadSessions();
     sessionPanelRender(sessions);
   }
@@ -1289,17 +1287,9 @@ const TPL_GROUPS = [
 (function initTpl(){
   const btn = document.getElementById('tplBtn'), panel = document.getElementById('tplPanel');
   if (!btn || !panel) return;
-  btn.addEventListener('click', () => {
-    panel.hidden = !panel.hidden;
-    // Eksklusif dengan panel sesi (konsisten dua arah).
-    if (!panel.hidden) { try { document.getElementById('sessionPanel').hidden = true; } catch (_) {} }
-  });
-  els.sendBtn.addEventListener('click', () => { panel.hidden = true; try { document.getElementById('sessionPanel').hidden = true; } catch (_) {} });
+  btn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  els.sendBtn.addEventListener('click', () => { panel.hidden = true; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) panel.hidden = true; });
-  document.addEventListener('keydown', e => {
-    if (e.key !== 'Escape') return;
-    try { const sp = document.getElementById('sessionPanel'); if (sp && !sp.hidden) sp.hidden = true; } catch (_) {}
-  });
   tplLoad();
 })();
 

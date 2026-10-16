@@ -1,0 +1,11 @@
+penambahan kolom skema table
+
+tabel getah_aktivitas_sadap
+tgl_aktivitas
+pulung
+jml_phn_quare
+jml_phn_semprot_cas
+jml_phn_bdy_bersih
+jml_phn_kerok
+jml_phn_naik_batok
+jml_phn_pulung

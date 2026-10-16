@@ -119,7 +119,7 @@ def rawreq(path, body_bytes, method="POST", token=True, origin=True):
 print("[1] GET endpoints")
 GET_SHAPES = {
     "/api/status":     ["runtime", "permission", "profile", "workdir", "model", "tools", "session"],
-    "/api/voices":     ["current", "model", "available", "has_eleven", "voices"],
+    "/api/voices":     ["current", "agent_name", "available", "voices"],
     "/api/mode":       ["mode"],
     "/api/missions":   ["tasks", "missions", "goal"],
     "/api/vault":      None,
@@ -324,6 +324,42 @@ for cols, rows in (("abc", 24), (None, 24), (80, [1]), ("", ""), ({}, {})):
 print("[8] liveness")
 st, _, _ = jreq("/api/status")
 check("server alive", st == 200, f"got {st}")
+
+# ── 9. metabase proxy: gated, shaped, never 500, never leaks the key ──
+print("[9] metabase proxy")
+st, _, _ = jreq("/api/metabase/status", token=False)
+check("metabase status gated", st == 401, f"got {st}")
+st, _, data = jreq("/api/metabase/status")
+check("metabase status", st == 200 and isinstance(data, dict) and "configured" in data,
+      f"status={st} data={data}")
+if isinstance(data, dict) and data.get("configured"):
+    blob = json.dumps(data)
+    check("metabase status hides key", "MB_API_KEY" not in blob
+          and not re.search(r"mb_[A-Za-z0-9+/=]{20,}", blob), f"LEAKED in {data}")
+    st, _, data = jreq("/api/metabase/dashboards")
+    check("metabase dashboards", st == 200 and isinstance(data, dict) and "dashboards" in data,
+          f"status={st} data={str(data)[:120]}")
+    st, _, data = jreq("/api/metabase/card/abc")
+    check("metabase card bad id", st == 400, f"got {st}")
+    st, _, data = jreq("/api/metabase/query", "POST", {"card_id": 237})
+    check("metabase query card", st == 200 and (data or {}).get("ok") is True,
+          f"status={st} data={str(data)[:150]}")
+    if isinstance(data, dict) and data.get("ok"):
+        check("metabase query chart", isinstance(data.get("chart"), dict)
+              and ("kpis" in data["chart"] or "charts" in data["chart"]),
+              f"no chart spec in {list(data)[:10]}")
+    # push tanpa sesi user wajib 401 (ikut aturan chart berdata)
+    st, _, _ = jreq("/api/metabase/query", "POST", {"card_id": 237, "push": True})
+    check("metabase push without owner rejected", st == 401, f"got {st}")
+else:
+    print("  SKIP live checks (MB_API_KEY belum di-set)")
+for method, path, payload in [
+        ("POST", "/api/metabase/query", {}),
+        ("POST", "/api/metabase/query", {"card_id": "x"}),
+        ("POST", "/api/metabase/query", {"sql": "DROP TABLE x"}),
+        ("POST", "/api/metabase/query", {"database_id": 9, "sql": ""})]:
+    st, _, _ = jreq(path, method, payload)
+    check(f"{path} {str(payload)[:40]} no 500", st != 500, f"got 500")
 
 # ── report ──
 print()

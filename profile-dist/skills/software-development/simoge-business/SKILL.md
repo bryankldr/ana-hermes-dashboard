@@ -148,6 +148,8 @@ show_on_map("aktivitas_per_penyadap_petak", tahun=2026, bulan=5, periode=0, id_p
 ```
 `aktivitas_petak_map` + `pembaharuan_ke` = polygon+pin; `aktivitas_top_petak` = push mentah `delivery:"push"` tanpa pin.
 
+**Kolom aktivitas baru** — `tgl_aktivitas` (date aktivitas, beda dari `tgl_pembaharuan` = update date), `pulung` (flag aktivitas), dan `jml_phn_*` (jumlah pohon per jenis). `pulung` otomatis ikut `grup_by:"aktivitas"` via `AKTIVITAS_FLAGS` di `scripts/simoge_db.py`. Selalu filter periode pakai `tgl_pembaharuan`, bukan `tgl_aktivitas`.
+
 ## Templates / Production KPI / Business Rules / Map / Transport
 - Templates (36 verified) — `describe()` / `list_templates()` ; detail `references/templates.md`
 - Production KPI `answer_production(tahun,bulan,periode,mode,**wilayah)` 1 call — `references/production_kpi.md`

@@ -164,12 +164,67 @@ def _discover_gateway_url() -> str | None:
         pass
     return None
 
+def _stop_orphan_gateway_loop():
+    """Hentikan loop/thread gateway yatim sebelum upaya koneksi baru.
+
+    Tanpa ini, upaya koneksi kedua menimpa _GATEWAY_LOOP global selagi
+    thread pertama masih memakainya -> RuntimeError 'event loop already
+    running' + 'coroutine init_session was never awaited'.
+    """
+    global _GATEWAY_LOOP, _GATEWAY_THREAD, _GATEWAY_CLIENT
+    loop, th = _GATEWAY_LOOP, _GATEWAY_THREAD
+    _GATEWAY_LOOP = None
+    _GATEWAY_THREAD = None
+    _GATEWAY_CLIENT = None
+    if loop is not None:
+        try:
+            async def _shutdown():
+                tasks = [t for t in asyncio.all_tasks(loop)
+                         if t is not asyncio.current_task(loop)]
+                for t in tasks:
+                    t.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                try:
+                    await loop.shutdown_asyncgens()
+                except Exception:
+                    pass
+            if loop.is_running():
+                asyncio.run_coroutine_threadsafe(_shutdown(), loop).result(timeout=5)
+        except Exception:
+            pass
+        try:
+            if loop.is_running():
+                loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+    if th is not None and th.is_alive() and th is not threading.current_thread():
+        th.join(timeout=5)
+
+
 def _get_gateway() -> HermesGatewayClient:
     """Get or create the singleton gateway client."""
     global _GATEWAY_CLIENT, _GATEWAY_THREAD, _GATEWAY_LOOP, _GATEWAY_CONNECTED, _GATEWAY_CONNECT_ERROR
     
     with _GATEWAY_LOCK:
         if _GATEWAY_CLIENT is not None and _GATEWAY_CLIENT.connected:
+            return _GATEWAY_CLIENT
+
+        # Single-flight: upaya koneksi sebelumnya masih jalan di thread
+        # gateway-loop -> ikut tunggu hasilnya, jangan spawn thread+loop
+        # kedua (itu sumber 'event loop already running').
+        _th = _GATEWAY_THREAD
+        _live = _th is not None and _th.is_alive()
+        _settled = _GATEWAY_CONNECTED.is_set() and bool(
+            _GATEWAY_CONNECT_ERROR or _SESSION_CREATED_EVENT.is_set())
+        if _live and not _settled:
+            if not _GATEWAY_CONNECTED.wait(timeout=15):
+                raise RuntimeError("Gateway connection timeout")
+            if not _SESSION_CREATED_EVENT.wait(timeout=10):
+                raise RuntimeError("Session creation timeout")
+            if _GATEWAY_CONNECT_ERROR:
+                raise RuntimeError(
+                    f"Gateway connection failed: {_GATEWAY_CONNECT_ERROR}")
             return _GATEWAY_CLIENT
         
         # Create new gateway — discovered, never silent 37521 fallback
@@ -196,6 +251,12 @@ def _get_gateway() -> HermesGatewayClient:
         except Exception:
             ticket_provider = None
 
+        # Upaya baru yang bersih: buang loop/thread yatim + reset event.
+        _stop_orphan_gateway_loop()
+        _GATEWAY_CONNECTED.clear()
+        _SESSION_CREATED_EVENT.clear()
+        _GATEWAY_CONNECT_ERROR = None
+
         client = HermesGatewayClient(
             gateway_url=gateway_url,
             profile=profile,
@@ -205,12 +266,15 @@ def _get_gateway() -> HermesGatewayClient:
         _GATEWAY_CLIENT = client
         
         # Start background thread with event loop
+        # Loop WAJIB lokal: memakai global _GATEWAY_LOOP di sini membuat
+        # dua thread run_loop berebut satu objek loop yang sama.
         def run_loop():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             global _GATEWAY_LOOP
-            _GATEWAY_LOOP = asyncio.new_event_loop()
-            asyncio.set_event_loop(_GATEWAY_LOOP)
+            _GATEWAY_LOOP = loop
             try:
-                connected = _GATEWAY_LOOP.run_until_complete(client.connect())
+                connected = loop.run_until_complete(client.connect())
                 if not connected:
                     _GATEWAY_CONNECT_ERROR = "Failed to connect to gateway"
                 else:
@@ -233,12 +297,12 @@ def _get_gateway() -> HermesGatewayClient:
                             _GATEWAY_CONNECT_ERROR = str(e)
                             _SESSION_CREATED_EVENT.set()
                     
-                    _GATEWAY_LOOP.run_until_complete(init_session())
+                    loop.run_until_complete(init_session())
             except Exception as e:
                 _GATEWAY_CONNECT_ERROR = str(e)
                 _SESSION_CREATED_EVENT.set()
                 _GATEWAY_CONNECTED.set()
-            _GATEWAY_LOOP.run_forever()
+            loop.run_forever()
         
         _GATEWAY_THREAD = threading.Thread(target=run_loop, daemon=True, name="gateway-loop")
         _GATEWAY_THREAD.start()
@@ -392,6 +456,52 @@ def hermes_tools_snapshot(limit=36):
         return []
 
 
+def session_history(sid, limit=20):
+    """Riwayat user/assistant sesi gateway (dunia yang dipakai run).
+
+    Transcript CLI (`hermes sessions export`) tak kenal sid gateway 8-hex —
+    tanpa fallback ini riwayat sesi aktif selalu kosong. Bentuk gateway
+    {messages:[{role,content,...}]} dinormalkan ke {messages:[{role,text}]}.
+    Gagal = dict error, panel tampilkan banner eksplisit.
+    """
+    try:
+        s = str(sid or "").strip()
+        if not s:
+            return {"messages": [], "error": "session_id kosong"}
+        try:
+            raw = _run_async(_get_gateway().get_session_history(s))
+        except Exception as e:
+            return {"messages": [], "error": str(e)[:200]}
+        msgs = []
+        try:
+            items = (raw or {}).get("messages") or []
+            if isinstance(items, dict):
+                items = items.get("messages") or []
+            for m in items:
+                if not isinstance(m, dict):
+                    continue
+                role = str(m.get("role") or "").strip()
+                if role not in ("user", "assistant"):
+                    continue
+                if m.get("tool_calls"):
+                    continue
+                text = str(m.get("content") or m.get("text") or "").strip()
+                if not text:
+                    continue
+                if len(text) > 2000:
+                    text = text[:2000] + "…"
+                msgs.append({"role": role, "text": text})
+        except Exception:
+            pass
+        try:
+            n = max(1, min(int(limit or 20), 50))
+        except (TypeError, ValueError):
+            n = 20
+        return {"messages": msgs[-n:], "total": len(msgs)}
+    except Exception as e:  # noqa: BLE001
+        return {"messages": [], "error": str(e)[:200]}
+
+
 def _map_gateway_event(event: dict, started: float, first: bool) -> list:
     """Map gateway event to runtime.py event format."""
     events = []
@@ -409,7 +519,7 @@ def _map_gateway_event(event: dict, started: float, first: bool) -> list:
     text = event.get("text", "") or event.get("delta", "") or payload_text
     
     if et == "session.info":
-        sid = event.get("session_id")
+        sid = event.get("session_id") or payload.get("session_id")
         if valid_session(sid):
             events.append(dict(t="session", session_id=sid))
 
@@ -487,7 +597,7 @@ def _map_gateway_event(event: dict, started: float, first: bool) -> list:
         ))
     
     elif et == "message.complete":
-        sid = event.get("session_id")
+        sid = event.get("session_id") or payload.get("session_id")
         if valid_session(sid):
             events.append(dict(t="session", session_id=sid))
         payload = event.get("payload", {})

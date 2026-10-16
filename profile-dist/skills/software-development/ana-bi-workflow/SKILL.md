@@ -48,23 +48,6 @@ answer_production(tahun=2026, bulan=2, periode=1, mode="asisten", **wilayah)
 
 **Forbidden:** Direct SQL, `simoge_db.q`, docker/mysql, hand-written SELECT.
 
-## 1b. Batas Wilayah User (WAJIB — anti bypass)
-
-Setiap `/api/run` menyuntik blok `BATAS WILAYAH USER` ke system prompt bila sesi
-login punya kode wilayah (DIVRE/KPH/BKPH/RPH/TPG). Tanpa blok itu = user bebas
-(DIREKSI / tanpa kode) — jawab normal.
-
-- Minta data di luar wilayah blok → TOLAK sopan ("di luar wilayah Bapak/Ibu"),
-  tawarkan data wilayahnya. JANGAN jawab angkanya, JANGAN render chart/peta/
-  laporan untuk wilayah itu.
-- Tool `call_simoge_tool` / `call_simoge_packet` / `show_on_map` MENOLAK query
-  di luar scope (`ok: False` + pesan penolakan) — TERUSKAN penolakan itu ke user,
-  jangan mengakali dengan query tanpa filter (server juga clamp + 403).
-- Selalu sertakan filter kode_* wilayah user di tiap tool bisnis — query tanpa
-  filter = seluruh populasi = bocor ke user scoped.
-- Chart/report (`show_dashboard`, `show_spatial_chart`, `show_report`) hanya dari
-  data dalam scope — angka evidencenya harus hasil query berfilter scope.
-
 ## 2. Business Engine — Named Templates Only
 
 **Skill:** `simoge-business` → `call_simoge_tool(template, params)`
@@ -83,14 +66,11 @@ login punya kode wilayah (DIVRE/KPH/BKPH/RPH/TPG). Tanpa blok itu = user bebas
 
 ## 3. Execution Pattern
 
-**Only via `terminal` with resolved PYTHONPATH — never `execute_code`, never hardcode `/home/...`:**
+**Only via `terminal` with absolute PYTHONPATH — never `execute_code`:**
 ```bash
-# terminal tool, workdir = ANA_WORKDIR (ana-hermes-dashboard).
-# Resolve SIM/eval path portabel: instalasi hermes dulu, fallback repo.
-SIM="$HOME/.hermes/profiles/anna/skills/software-development/simoge-business/scripts"
-[ -d "$SIM" ] || SIM="$ANA_WORKDIR/profile-dist/skills/software-development/simoge-business/scripts"
-BI="$SIM/../../ana-bi-workflow/scripts"
-PYTHONPATH="$SIM:$PYTHONPATH" python3 "$BI/ana_kpi.py" tahun=2026 bulan=2 periode=1 mode=asisten
+# terminal tool, workdir = ANA_WORKDIR (ana-hermes-dashboard)
+PYTHONPATH=/home/bryankldr/PROYEK_2026/ana-hermes-dashboard/profile-dist/skills/software-development/simoge-business/scripts:$PYTHONPATH \
+  python3 /home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts/ana_kpi.py tahun=2026 bulan=2 periode=1 mode=asisten
 # For batch probe (find latest complete period) loop P1/P2 backwards; parse JSON with python3 -c "import json,sys; d=json.load(sys.stdin); print(d['kpi']['production']['actual_kg'])"
 # Pipes into another interpreter are blocked in some panels — redirect to /tmp/*.json then read_file if needed.
 ```
@@ -99,7 +79,13 @@ PYTHONPATH="$SIM:$PYTHONPATH" python3 "$BI/ana_kpi.py" tahun=2026 bulan=2 period
 - `simoge_db` resolves only when PYTHONPATH includes `simoge-business/scripts`; without it `ModuleNotFoundError: No module named 'simoge_db'` — always set absolute PYTHONPATH as shown and set `workdir` to ANA_WORKDIR.
 - Generic "berikan analitik" without explicit period → probe backwards from requested month (P1→P2 prev month) until `production.actual_kg is not None` before concluding "belum tersedia"; latest calendar period (e.g. P1 Oktober 2026) is often empty while P2 Agustus 2026 is last complete — reporting only the empty period misleads the operator.
 - `ana_chart_tool.py` lives only under `simoge-business/scripts` (`profile-dist/skills/software-development/simoge-business/scripts/ana_chart_tool.py`); `ana-bi-workflow/scripts/ana_chart_tool.py` does not exist — verify `pathlib.Path.exists()` before invoking and set PYTHONPATH to `simoge-business/scripts`.
+- Shell-loop probe `ana_kpi.py`/`ana_simoge_tool` MUST split year/month/period into three vars (`tahun=$Y bulan=$B periode=$P`) — passing a combined string (`tahun="2026 9 0"`) silently yields empty stdout and downstream `JSONDecodeError`, which looks like missing data but is an arg-shape bug.
+- `laporan_perencanaan_target_setor_vs_ro_nps` returning 0 rows does NOT prove no rencana exists — cross-check scalar `rencana_aktivitas` for the same period first (it can show 100+ ton while the laporan join stays empty); report template-empty as "laporan belum tersedia, bukan nol" and suspect the `r.kode_evapot=pt.kode_evapot AND pt.tahun_rtt` join (verify via `DESCRIBE` + `SHOW TABLES` actual `getah_*` names before claiming no mandor data).
 - Data Sep-Okt 2026 often not yet ingested (`data_freshness` tgl 2026-09-23, stale 16 hari) — surface `provenance` badge and state "belum tersedia, bukan nol" instead of reporting zero or fabricating trend.
+- `call_simoge_packet("produksi_per_wilayah")` truncates `kpi.breakdown` to top-10 while `actual_ton`/`row_count` cover all groups — always cross-check `len(breakdown)` vs `row_count`/sum before charting; for full ranking (>10 TPG) use `call_simoge_tool` raw `rows` (with Decimal→float) and build labels/datasets from there, packet totals stay valid for KPIs.
+- Raw `call_simoge_tool` rows return `Decimal` (`actual_kg`, `target_kg`) which breaks `json.dumps` — normalize with `float(x) if isinstance(x, Decimal)` before serializing or charting.
+- `produksi_per_wilayah` is cumulative January→period, NOT month-only — never use it for a single-month per-wilayah breakdown (it inflates the month ~4x). For month-only per-BKPH/RPH/TPG, loop `produksi_aktiv` per `kode_*` with `periode=0` instead.
+- `periode=0` = full month (P1+P2 combined) in `answer_production`/`produksi_aktiv` — use it for monthly totals and MoM trends; never sum or compare mixed P1/P2 slices across months.
 - Voice name is ANNA (Gadis=ANNA, Ardi=MAX via `voice.agent_name()`) — never utter another name when asked; TTS must use human wilayah names (BKPH LICIN/GLENMORE, KPH Banyuwangi Barat) never raw `kode_*` or numeric codes (31211, 3121101).
 
 ## 4. Visualization / Chart
@@ -109,7 +95,7 @@ PYTHONPATH="$SIM:$PYTHONPATH" python3 "$BI/ana_kpi.py" tahun=2026 bulan=2 period
 
 **Auto-escalation rule (voice mode — HUD-dependent):** Legacy HUD: User says "chart", "grafik", "visual", "dashboard", "peta" → MUST `set_mode("coding")`, render via `call_simoge_packet`+`show_dashboard`, then `set_mode("asisten")`. Current HUD (2026-10-09, `[MODE: asisten]` injection): chart/peta/pandas adalah TOOL BIASA — eksekusi langsung di `asisten` via `terminal`/`execute_code` tanpa `set_mode`; TTS-only saat visual diminta eksplisit = GAGAL. Deteksi HUD dari prefix prompt dan ikuti aturannya.
 
-**Business indicator palette (wajib):** Merah `#EF4444`=bad/bongkor/gagal target <60%, Kuning `#FACC15`=warn/idle/kurang, Hijau `#22C55E`=good/aktif/terpenuhi/capai target, Biru `#3B82F6`=info/multi-penyadap/tren. `spatialChart.js` PALETTE `[merah,kuning,hijau,biru,…]` dan `STATUS_TONE` {Bongkor:merah, Idle:kuning, Aktif:hijau, Multi penyadap:biru}; `ana_chart_tool.py` bullet tone `#22C55E`/`#EF4444`/`#FACC15`. Kirim `colors` eksplisit bila kategori punya makna bisnis tetap — jangan biarkan fallback acak.
+**Business indicator palette (wajib):** Merah `#EF4444`=bad/bongkor/gagal target <60%, Kuning `#FACC15`=warn/idle/kurang, Hijau `#22C55E`=good/aktif/terpenuhi/capai target, Biru `#3B82F6`=info/multi-penyadap/tren. `spatialChart.js` PALETTE `[merah,kuning,hijau,biru,…]` dan `STATUS_TONE` {Bongkor:merah, Idle:kuning, Aktif:hijau, Multi penyadap:biru}; `ana_chart_tool.py` bullet tone `#22C55E`/`#EF4444`/`#FACC15`. Dataset tanpa `color`/`colors` jatuh ke `palette(0)` = MERAH — selalu kirim `color`+`colors` eksplisit di setiap dataset (ranking/region netral = biru `#3B82F6`, tren = hijau `#22C55E`); merah tanpa makna bisnis menyesatkan operator seolah gagal target.
 
 **Pandas + Chart combo (zero-token planning):** Wiki map intent→template (gratis) → `call_simoge_packet`/`analyze_template(operations=[groupby_agg,pivot,pct_change,contribution])` → feed `labels`/`datasets` ke `show_spatial_chart`/`show_dashboard` (grid: `charts[]+kpis[]+narration+evidence`) dalam SATU `execute_code`/`terminal`. `spatial_chart_store.py` `visible/layout=kpis/charts/narration/evidence` dipoll frontend 2 detik.
 

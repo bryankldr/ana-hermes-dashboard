@@ -410,16 +410,9 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 .map-bottom-bar .map-legendbox .map-legend.flying .lg { font-size: 15px; gap: 6px; color: #fff; }
 .map-bottom-bar .map-legendbox .map-legend.flying .lg i { width: 16px; height: 16px; }
 .map-bottom-bar .map-legendbox .map-legend.flying .lg-attrib { font-size: 11px; }
-.map-bottom-bar .map-legendbox .map-legend.flying.legend-collapsed { display: none; }
-/* Collapse dari tombol ⓘ menyembunyikan SELURUH box (meta + item). */
-.map-bottom-bar .map-legendbox.flying.legend-collapsed { display: none; }
 /* ── K1: insight klik-expand (default 1 baris, klik buka 120px scroll) ── */
 .map-bottom-bar .spatial-insight.flying { cursor: pointer; }
 .map-bottom-bar .spatial-insight.flying.expanded { white-space: normal; max-height: 120px; overflow: auto; text-overflow: clip; }
-/* ── K3: legend ciut jadi tombol ⓘ (pola spatialToolsToggle) ── */
-.map-bottom-bar .legend-toggle { flex: 0 0 auto; align-self: center; }
-.map-bottom-bar .map-legend.flying.legend-collapsed { display: none; }
-.map-bottom-bar .legend-toggle.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
 
 /* Panel sempit tak muat BI bar satu baris. Before: 4 KPI + insight + meta +
    legend wrap jadi 141px dan menutupi 46% peta (664 dari 800 polygon tak

@@ -448,6 +448,8 @@ def _tiles_scope_ok(handler, kind, kode):
         if kind == "overview":
             # Tile overview berwarna = DIVRE ke atas saja. ADM (walau punya
             # divre di scope) DITOLAK tegas — ia hanya dapat bounds netral.
+            if jab in ("DIREKSI", "ADMINISTRATOR"):
+                return True, ""
             if jab in ("DIVRE",):
                 if scope.get("kode_divre") and kode == str(scope.get("kode_divre")).strip():
                     return True, ""
@@ -772,6 +774,82 @@ def _anna_scope_prune(max_age_sec=86400):
                 continue
     except Exception:
         pass
+
+
+def _anna_identity_block(handler):
+    """Blok identitas user login untuk system prompt ANNA (/api/run).
+    Tanpa sesi = string kosong (token-only tetap netral).
+    Isi: nama + email + jabatan + wilayah kerja (nama, bukan kode saja).
+    Privasi: hanya nama/jabatan/wilayah kerja — tanpa password/token/hash.
+    Tak pernah raise."""
+    try:
+        sess = _session_from_cookie(handler)
+    except Exception:
+        return ""
+    if not sess:
+        return ""
+    try:
+        fn = str(sess.get("first_name") or "").strip()
+        ln = str(sess.get("last_name") or "").strip()
+        nama = (fn + " " + ln).strip()
+        email = str(sess.get("email") or "").strip()
+        _j = sess.get("jabatan")
+        jab_nama = jab_kode = ""
+        try:
+            if isinstance(_j, dict):
+                jab_nama = str(_j.get("nama_jabatan") or "").strip()
+                jab_kode = str(_j.get("kode_jabatan") or "").strip().upper()
+            elif _j is not None:
+                jab_kode = str(_j).strip().upper()
+        except Exception:
+            pass
+        def _nm(v, *keys):
+            try:
+                if isinstance(v, dict):
+                    for k in keys:
+                        s = str(v.get(k) or "").strip()
+                        if s:
+                            return s
+                elif v is not None:
+                    s = str(v).strip()
+                    if s:
+                        return s
+            except Exception:
+                pass
+            return ""
+        wil = []
+        dv = _nm(sess.get("kode_divre"), "divre", "kode_divre")
+        kp = _nm(sess.get("kode_kph"), "kph", "kode_kph")
+        bk = _nm(sess.get("kode_bkph"), "bkph", "kode_bkph")
+        rp = _nm(sess.get("kode_rph"), "rph", "kode_rph")
+        if dv:
+            wil.append("DIVRE " + dv)
+        if kp:
+            wil.append("KPH " + kp)
+        if bk:
+            wil.append("BKPH " + bk)
+        if rp:
+            wil.append("RPH " + rp)
+        who = nama or email
+        jab_txt = jab_nama or jab_kode
+        if not who and not jab_txt and not wil:
+            return ""
+        lines = ["## IDENTITAS USER (lawan bicara)"]
+        id_line = ""
+        if who:
+            id_line += who
+        if jab_txt:
+            id_line += (", " if id_line else "") + jab_txt
+        if id_line:
+            lines.append("- " + id_line)
+        if email and nama:
+            lines.append("- Email: " + email)
+        if wil:
+            lines.append("- Wilayah kerja: " + ", ".join(wil))
+        lines.append("Sapa dengan nama/jabatan secara wajar (mis. 'Pak/Bu <nama>' bila tahu); jangan sebut email kecuali perlu. Jangan pernah sebut password/token/sesi.")
+        return "\n".join(lines)
+    except Exception:
+        return ""
 
 
 def _anna_scope_block(scope):
@@ -2047,7 +2125,7 @@ def _session_hist_push(key, sid, title=None, origin="run"):
     silang DITOLAK di endpoint (403), jadi claim di sini hanya untuk
     ID yatim. Origin lama dipertahankan: push ulang entri yang sudah ada
     (mis. re-select) tak mengubah run jadi claim atau sebaliknya.
-    Tak pernah raise."""
+    Tak pernah raise. Return sid yang tergusur kapasitas (None bila tak ada)."""
     try:
         with _SESSION_LOCK:
             ent = SESSION.get(key) or {}
@@ -2060,6 +2138,8 @@ def _session_hist_push(key, sid, title=None, origin="run"):
                         break
             except Exception:
                 pass
+            before_ids = [str(_s.get("id")) for _s in (meta.get("sessions") or [])
+                          if isinstance(_s, dict) and _s.get("id")]
             hist = [s for s in (meta.get("sessions") or [])
                     if isinstance(s, dict) and s.get("id") and str(s["id"]) != str(sid)]
             now = time.time()
@@ -2067,11 +2147,15 @@ def _session_hist_push(key, sid, title=None, origin="run"):
                             "created": now, "message_count": 0,
                             "origin": old_origin or str(origin or "run")})
             meta["sessions"] = hist[:_ANNA_MAX_SESSIONS]
+            after_ids = {str(_s.get("id")) for _s in (meta["sessions"] or [])
+                         if isinstance(_s, dict) and _s.get("id")}
+            evicted = next((i for i in before_ids if i != str(sid) and i not in after_ids), None)
             ent["meta"] = meta
             SESSION[key] = ent
         _session_save()
+        return evicted
     except Exception:
-        pass
+        return None
 
 
 def _session_owners_snapshot():
@@ -2234,7 +2318,7 @@ def persona():
         base = base.replace(anchor, anchor + '\n' + name_rule, 1)
     else:
         base = name_rule + '\n' + base
-    overlay = "[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. Semua tool bisnis (call_simoge_packet/call_pandas_tool/show_dashboard/show_on_map/chart/peta/tabel KPI) adalah TOOL BIASA — langsung execute_code TETAP di asisten, tanpa set_mode(coding). Chart/peta/pandas TIDAK butuh coding. TTS-only tanpa visual saat diminta = GAGAL." if mode=="asisten" else "[MODE: coding] Mode agen koding: hanya untuk artifact kode/file. Pertanyaan bisnis tetap di asisten."
+    overlay = "[MODE: asisten] Untuk TTS: ringkas, no markdown/code/tabel. Struktur jawaban: kalimat pembuka MAKSIMAL 1x (jangan diulang), lalu isi (angka + insight), lalu 1 kalimat tawaran lanjut yang relevan (mis. bedah per bulan/petak). Jangan buka dengan filler tanpa isi. DILARANG menarasikan proses di jawaban (jangan tulis 'Siap render.../Menarik data.../Perbaiki autentikasi...') — langsung isi. Semua tool bisnis (call_simoge_packet/call_pandas_tool/show_dashboard/show_on_map/chart/peta/tabel KPI) adalah TOOL BIASA — langsung execute_code TETAP di asisten, tanpa set_mode(coding). Chart/peta/pandas TIDAK butuh coding. TTS-only tanpa visual saat diminta = GAGAL." if mode=="asisten" else "[MODE: coding] Mode agen koding: hanya untuk artifact kode/file. Pertanyaan bisnis tetap di asisten."
     return "\n\n".join(x for x in (base, overlay, wiki, extra) if x)
 
 
@@ -2370,7 +2454,7 @@ class Handler(BaseHTTPRequestHandler):
         # Content-Range, atau 200 penuh bila tanpa Range.
         # NEW: Jika query param z,x,y diberikan -> ekstrak single MVT tile (bukan byte range).
         # fname allowlist ketat (anti traversal): kph_<kode>/bounds_<divre>/petak.
-        if not re.fullmatch(r"(kph_\d+|bounds_\d+|overview_\d+|petak)\.pmtiles", fname or ""):
+        if not re.fullmatch(r"(kph_\d+(?:_\d{4})?|bounds_\d+(?:_\d{4})?|overview_\d+(?:_\d{4})?|petak)\.pmtiles", fname or ""):
             return self._json({"error": "nama file tile tidak dikenal"}, 404)
         f = ROOT / "tiles" / fname
         if not f.is_file():
@@ -2930,8 +3014,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"messages": [], "error": "login dulu untuk baca transcript"}, 401)
             if sid not in _session_owned_ids(_uk):
                 return self._json({"messages": [], "error": "bukan sesi milik Anda"}, 403)
-            return self._json(services.session_transcript(
-                runtime._hermes_base(), runtime.WORKDIR, sid))
+            # Dunia ganda: run via gateway (sid 8-hex), transcript CLI hanya
+            # kenal sid store format timestamp. CLI kosong/basi -> fallback
+            # gateway session.history; tanpa ini riwayat sesi aktif kosong.
+            _cli = services.session_transcript(
+                runtime._hermes_base(), runtime.WORKDIR, sid)
+            try:
+                _cli_msgs = _cli.get("messages") if isinstance(_cli, dict) else None
+            except Exception:
+                _cli_msgs = None
+            if _cli_msgs:
+                return self._json(_cli)
+            try:
+                _gw = runtime.session_history(sid, limit=20)
+            except Exception as e:
+                _gw = {"messages": [], "error": str(e)[:200]}
+            try:
+                _gw_msgs = _gw.get("messages") if isinstance(_gw, dict) else None
+            except Exception:
+                _gw_msgs = None
+            if _gw_msgs:
+                return self._json(_gw)
+            _err = ""
+            try:
+                _err = str((_cli or {}).get("error") or (_gw or {}).get("error") or "")[:200]
+            except Exception:
+                _err = ""
+            return self._json({"messages": [], "error": _err or "riwayat kosong"})
         if p == "/api/sessions":
             if not self._token_ok():
                 return self._unauth()
@@ -3128,15 +3237,45 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     return self._unauth()
             _rest = (p or "")[len("/api/tiles/scope/"):]
-            _m1 = re.fullmatch(r"kph/(\d+)\.pmtiles", _rest or "")
-            _m2 = re.fullmatch(r"bounds_(\d+)\.pmtiles", _rest or "")
-            _m3 = re.fullmatch(r"overview_(\d+)\.pmtiles", _rest or "")
+            _m1 = re.fullmatch(r"kph/(\d+)(?:_(\d{4}))?\.pmtiles", _rest or "")
+            _m2 = re.fullmatch(r"bounds_(\d+)(?:_(\d{4}))?\.pmtiles", _rest or "")
+            _m3 = re.fullmatch(r"overview_(\d+)(?:_(\d{4}))?\.pmtiles", _rest or "")
             if _m3:
-                _kind, _kode, _fname = "overview", _m3.group(1), "overview_%s.pmtiles" % _m3.group(1)
+                _kind, _kode, _yr = "overview", _m3.group(1), _m3.group(2)
+                _fname = "overview_%s%s.pmtiles" % (_kode, ("_" + _yr) if _yr else "")
+                if not _yr:
+                    for _cand in sorted((ROOT / "tiles").glob("overview_%s_*.pmtiles" % _kode)):
+                        _fname = _cand.name
+                        break
+                    else:
+                        _fname = "overview_%s.pmtiles" % _kode
             elif _m1:
-                _kind, _kode, _fname = "kph", _m1.group(1), "kph_%s.pmtiles" % _m1.group(1)
+                _kind, _kode = "kph", _m1.group(1)
+                _yr = _m1.group(2)
+                _qyr = ""
+                try:
+                    _qyr = (parse_qs(urlparse(self.path).query).get("tahun", [""])[0] or "").strip()
+                except Exception:
+                    _qyr = ""
+                if not _yr:
+                    _yr = _qyr if re.fullmatch(r"\d{4}", _qyr or "") else ""
+                _fname = "kph_%s%s.pmtiles" % (_kode, ("_" + _yr) if _yr else "")
+                if not (ROOT / "tiles" / _fname).is_file():
+                    for _cand in sorted((ROOT / "tiles").glob("kph_%s_*.pmtiles" % _kode)):
+                        _fname = _cand.name
+                        break
+                    else:
+                        _fname = "kph_%s.pmtiles" % _kode
             elif _m2:
-                _kind, _kode, _fname = "divre", _m2.group(1), "bounds_%s.pmtiles" % _m2.group(1)
+                _kind, _kode = "divre", _m2.group(1)
+                _yr = _m2.group(2)
+                _fname = "bounds_%s%s.pmtiles" % (_kode, ("_" + _yr) if _yr else "")
+                if not _yr:
+                    for _cand in sorted((ROOT / "tiles").glob("bounds_%s_*.pmtiles" % _kode)):
+                        _fname = _cand.name
+                        break
+                    else:
+                        _fname = "bounds_%s.pmtiles" % _kode
             else:
                 return self._json({"error": "jalur tile scope tidak dikenal"}, 404)
             _ok, _msg = _tiles_scope_ok(self, _kind, _kode)
@@ -3166,6 +3305,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": _msg or "di luar scope tile"}, 403)
             try:
                 _bf = ROOT / "tiles" / ("bounds_%s.ndjson" % _dv)
+                if not _bf.is_file():
+                    for _cand in sorted((ROOT / "tiles").glob("bounds_%s_*.ndjson" % _dv)):
+                        _bf = _cand
+                        break
                 if not _bf.is_file():
                     return self._json({"ok": True, "features": [], "note": "bounds belum dibangun"})
                 feats = []
@@ -4047,14 +4190,14 @@ class Handler(BaseHTTPRequestHandler):
                         _have = True
                     if not _have:
                         _session_hist_push(_uk, str(sid), body.get("title"), origin="claim")
-                _session_set(str(sid), {"title": body.get("title", "--"), "created": time.time(), "message_count": 0}, key=_uk)
+                _session_set(str(sid), None, key=_uk)
                 cur_id, cur_meta = _session_get(_uk)
                 return self._json({"ok": True, "session": cur_id, "meta": cur_meta,
                                    "sessions": _session_list(_uk)})
             if action in ("", "list"):
                 cur_id, cur_meta = _session_get(_uk)
                 return self._json({"ok": True, "session": cur_id, "meta": cur_meta,
-                                   "sessions": _session_list(_uk)})
+                                   "sessions": _session_list(_uk), "max": _ANNA_MAX_SESSIONS})
             _clear_session(_uk)
             return self._json({"ok": True, "session": None, "sessions": []})
 
@@ -4073,14 +4216,16 @@ class Handler(BaseHTTPRequestHandler):
                 _aid, _ameta = _session_get(_uk)
             except Exception:
                 _aid, _ameta = None, None
+            _evicted = None
             try:
                 if _aid and runtime.valid_session(_aid):
-                    _session_hist_push(_uk, str(_aid),
+                    _evicted = _session_hist_push(_uk, str(_aid),
                                        (dict(_ameta or {}).get("title") if isinstance(_ameta, dict) else None))
             except Exception:
                 pass
             _clear_session(_uk)
-            return self._json({"ok": True, "session": None, "sessions": _session_list(_uk)})
+            return self._json({"ok": True, "session": None, "sessions": _session_list(_uk),
+                               "evicted": _evicted, "max": _ANNA_MAX_SESSIONS})
 
         if p == "/api/speak":
             text = (body.get("text") or "").strip()
@@ -4681,6 +4826,7 @@ class Handler(BaseHTTPRequestHandler):
         # response headers were gone, so the client only saw a dropped socket.
         message = (payload.get("message") or "").strip()
         extra = (payload.get("system") or "").strip()
+        fresh = bool(payload.get("fresh"))
         # Scope wilayah login → blok instruksi untuk ANNA (per-request, ikut
         # sesi saat itu). Tanpa sesi = tanpa blok (ANNA system bebas).
         # ANNA yang taat menolak permintaan di luar wilayah user; yang nakal
@@ -4694,7 +4840,20 @@ class Handler(BaseHTTPRequestHandler):
             _scope_block = _anna_scope_block(_run_scope)
         except Exception:
             _scope_block = ""
-        system = "\n\n".join(x for x in (persona(), _scope_block, extra) if x) or None
+        _ident_block = ""
+        try:
+            _ident_block = _anna_identity_block(self)
+        except Exception:
+            _ident_block = ""
+        # System prompt (persona + wiki + scope + mode) hanya dikirim sekali
+        # pada fresh=true (session baru). Turn berikutnya biarkan Hermes resume
+        # session dengan konteks yang sudah ada — jangan inject ulang wiki/
+        # persona setiap kali, boros token dan membuat setiap pesan user sertai
+        # blok instruksi penuh.
+        if fresh:
+            system = "\n\n".join(x for x in (persona(), _ident_block, _scope_block, extra) if x) or None
+        else:
+            system = None
         # P0-B: ukur budget konteks per /api/run (static vs dynamic, chars).
         # ponytail: history/schema gateway-side belum terukur di sini; upgrade
         # lanjut = gateway usage + retriever counts saat P1.
@@ -4703,7 +4862,7 @@ class Handler(BaseHTTPRequestHandler):
             _b_wiki = wiki_block()
             _b_ctx = commands.context_block()
             _b_mode = get_mode()
-            _b_overlay = ("[MODE: asisten] Jawab 1-2 kalimat, no markdown/code/tabel, untuk TTS. Semua tool bisnis (packet/pandas/chart/peta) adalah TOOL BIASA — langsung execute_code TETAP di asisten, tanpa set_mode(coding). Chart/peta TIDAK butuh coding. TTS-only tanpa visual = GAGAL."
+            _b_overlay = ("[MODE: asisten] Untuk TTS: ringkas, no markdown/code/tabel. Struktur jawaban: kalimat pembuka MAKSIMAL 1x (jangan diulang), lalu isi (angka + insight), lalu 1 kalimat tawaran lanjut yang relevan (mis. bedah per bulan/petak). Jangan buka dengan filler tanpa isi. DILARANG menarasikan proses di jawaban (jangan tulis 'Siap render.../Menarik data.../Perbaiki autentikasi...') — langsung isi. Semua tool bisnis (packet/pandas/chart/peta) adalah TOOL BIASA — langsung execute_code TETAP di asisten, tanpa set_mode(coding). Chart/peta TIDAK butuh coding. TTS-only tanpa visual = GAGAL."
                           if _b_mode == "asisten" else
                           "[MODE: coding] Mode agen koding: boleh markdown, code block, tabel, path exact. Jelaskan lengkap & verifikasi pakai output real.")
             _budget_init = dict(t="budget", persona=len(_b_base), overlay=len(_b_overlay),
@@ -4711,13 +4870,19 @@ class Handler(BaseHTTPRequestHandler):
                                 message=len(message), system=len(system or ""))
         except Exception:  # noqa: BLE001
             _budget_init = None
-        fresh = bool(payload.get("fresh"))
         if not message:
             return self._json({"error": "empty message"}, 400)
         # Sesi ANNA per-user (pola resmi Hermes: key per user_id).
         _uk = _anna_user_key(self)
+        # fresh = sesi baru: sid payload (sesi lama) JANGAN dipakai — kalau
+        # tidak, run jatuh ke resume sesi lama padahal prompt lengkap baru
+        # sudah dikirim. Isolasi penuh: clear + sid None → gateway create baru.
         if fresh:
             _clear_session(_uk)
+            try:
+                _GW_LIVE.pop(str(_uk), None)
+            except Exception:
+                pass
         _run_initial_mode = get_mode()  # snapshot for auto-restore: asisten→coding→asisten
 
         # -- natural language mode switch ("ganti ke mode asisten/coding", "ubah mode", etc.)
@@ -4753,6 +4918,14 @@ class Handler(BaseHTTPRequestHandler):
         if _session_expired(_uk):
             _clear_session(_uk)
 
+        # System prompt: kirim hanya saat fresh=true atau belum ada session aktif
+        # (first message ever / setelah clear). Turn berikutnya biarkan Hermes
+        # resume session — jangan inject ulang persona/wiki setiap kali.
+        if system is None:
+            _sid_chk, _ = _session_get(_uk)
+            if _sid_chk is None:
+                system = "\n\n".join(x for x in (persona(), _ident_block, _scope_block, extra) if x) or None
+
         def emit(ev):
             self.wfile.write((json.dumps(ev) + "\n").encode())
             self.wfile.flush()
@@ -4769,7 +4942,10 @@ class Handler(BaseHTTPRequestHandler):
         # -- the command matrix: /new /profile /goal /personality /kanban /mission /background /tools /status /browser
         cmd = commands.handle(
             message,
-            runner=lambda m: runtime.run(m, None, persona()),
+            # runner = misi background: JANGAN kirim persona lengkap — misi
+            # jalan di sesi barunya sendiri, prompt lengkap boros dan bikin
+            # pesan user tersertai blok instruksi penuh.
+            runner=lambda m: runtime.run(m, None, None),
             owner=_uk)
         if cmd:
             if cmd.get("note"):
@@ -4782,12 +4958,27 @@ class Handler(BaseHTTPRequestHandler):
                 emit(dict(t="complete", ms=0))
                 return
             message = cmd["message"]
-            system = "\n\n".join(x for x in (persona(), extra) if x) or None
+            # System prompt hanya saat fresh=true atau belum ada session aktif.
+            # Turn berikutnya biarkan Hermes resume — jangan inject ulang.
+            if cmd.get("fresh"):
+                system = "\n\n".join(x for x in (persona(), _ident_block, _scope_block, extra) if x) or None
+            else:
+                _sid_cmd, _ = _session_get(_uk)
+                if _sid_cmd is None:
+                    system = "\n\n".join(x for x in (persona(), _ident_block, _scope_block, extra) if x) or None
+                else:
+                    system = None
 
         try:
             sid0, _ = _session_get(_uk)
-            session_id_raw = payload.get("session_id")
-            session_id = (session_id_raw or sid0 or "default")
+            # fresh = sesi baru: sid payload/sid0 (sesi lama) JANGAN dipakai —
+            # kalau tidak run jatuh ke resume sesi lama padahal prompt lengkap
+            # baru sudah dikirim (lawan dari _clear_session di atas).
+            if fresh:
+                session_id = "default"
+            else:
+                session_id_raw = payload.get("session_id")
+                session_id = (session_id_raw or sid0 or "default")
             if isinstance(session_id, str):
                 session_id = session_id.strip()
             else:

@@ -174,7 +174,7 @@
 
   <!-- ═══ INTERACTION LAYER ═══ -->
   <div class="response-card" id="response">
-    <div class="response-label">RESPONSE</div>
+    <div class="response-label">ANNA</div>
     <div class="response-text" id="responseText">Siap menerima perintah.</div>
   </div>
   <div class="chat-bar" id="chatBar" data-min-h="76" data-min-w="200">
@@ -183,6 +183,8 @@
       <div class="chat-tools">
         <div class="chat-tools-left">
           <button id="tplBtn" class="chat-ico only-asisten" title="Template pertanyaan bisnis" aria-label="Template pertanyaan">▦</button>
+          <button id="sessionBtn" class="chat-ico" title="Daftar sesi" aria-label="Daftar sesi">📋</button>
+          <span id="sessionId" class="chat-session-id" title="ID sesi aktif">—</span>
         </div>
         <div class="chat-tools-right">
           <button id="modeBtn" class="chat-mode" title="Ganti mode asisten/coding">ASISTEN</button>
@@ -192,6 +194,7 @@
       </div>
     </div>
     <div id="tplPanel" class="tpl-panel only-asisten" hidden></div>
+    <div id="sessionPanel" class="tpl-panel" hidden></div>
   </div>
 
   <!-- ═══ EVENT LOG ═══ -->

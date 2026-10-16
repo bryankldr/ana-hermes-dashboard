@@ -119,7 +119,7 @@ def main():
         by_divre.setdefault(str(meta.get("kode_divre") or "0"), []).append(feat)
 
     for kode_divre, feats in sorted(by_divre.items()):
-        out = out_dir / f"bounds_{kode_divre}.ndjson"
+        out = out_dir / f"bounds_{kode_divre}_{args.tahun}.ndjson"
         with out.open("w", encoding="utf-8") as f:
             for ft in feats:
                 f.write(json.dumps(ft, ensure_ascii=False) + "\n")

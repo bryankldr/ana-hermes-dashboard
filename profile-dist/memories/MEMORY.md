@@ -18,3 +18,5 @@ Pembaharuan_ke values: 1, 2, 3 (4 exists but no data yet). Each pembaharuan_ke h
 Source: ANNA-KNOWLEDGE/raw/articles/skema-database-kph-bwb-sandbox2.md (vault)
 §
 Business rule RO/NPS: getah_target_ro_nps bulan 1=Januari s.d 12=Desember; kolom ro_periode_1, ro_periode_2, nps_periode_1, nps_periode_2 = persen target per periode × target_rkap per petak di getah_petak. Contoh 28 C3 P1 Jan 2026 RO 3,5% × 697,6 Kg = 24,4 Kg; P2 Mei NPS 4% × 697,6 = 27,9 Kg. Rencana aktivitas dibuat mandor/KTS mengacu pemenuhan target RO/NPS tersebut.
+§
+Profile-dist sync convention — after editing simoge-business skill in active profile (/home/bryankldr/.hermes/profiles/anna/skills/software-development/simoge-business/), copy changed source files to profile-dist (/home/bryankldr/PROYEK_2026/ana-hermes-dashboard/profile-dist/skills/software-development/simoge-business/) to keep them identical; exclude __pycache__.

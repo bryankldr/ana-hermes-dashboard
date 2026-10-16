@@ -3,22 +3,17 @@
 ## One-Liner Usage (execute_code)
 
 ```python
-# Production KPI — short (TTS). Tanpa hardcode path (aturan SKILL):
-import os, sys
-from pathlib import Path
-_cands = [Path.home() / '.hermes/profiles/anna/skills/software-development/simoge-business/scripts']
-if os.environ.get('ANA_WORKDIR'):
-    _cands.append(Path(os.environ['ANA_WORKDIR']) / 'profile-dist/skills/software-development/simoge-business/scripts')
-for _p in _cands:
-    if (_p / 'ana_kpi.py').exists():
-        sys.path.insert(0, str(_p))
-        break
+# Production KPI — short (TTS)
+import sys, json
+sys.path.insert(0, '/home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts')
 from run_kpi import main
 # ... or just call answer_production directly
 ```
 
 ```python
-# Direct function call (recommended for agent) — pola path sama seperti di atas
+# Direct function call (recommended for agent)
+import sys
+sys.path.insert(0, '/home/bryankldr/PROYEK_2026/ana-hermes-dashboard/profile-dist/skills/software-development/simoge-business/scripts')
 from ana_kpi import answer_production
 
 out = answer_production(tahun=2026, bulan=2, periode=1, mode='asisten')
@@ -29,12 +24,11 @@ print(out['narrative'])        # Full 6-section
 ## CLI Wrapper (from skill dir)
 
 ```bash
-cd ~/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts
+cd /home/bryankldr/.hermes/profiles/anna/skills/software-development/ana-bi-workflow/scripts
 python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --mode asisten
 python run_kpi.py --tahun 2026 --bulan 3 --periode 2 --mode coding --output json
 python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --wilayah_nama "Licin" --mode asisten
 python run_kpi.py --tahun 2026 --bulan 2 --periode 1 --kode_bkph 3121101 --mode asisten
-# Bila skill belum diinstal via hermes (mode repo): cd "$ANA_WORKDIR/profile-dist/skills/software-development/ana-bi-workflow/scripts" dulu.
 ```
 
 ## Parameters
