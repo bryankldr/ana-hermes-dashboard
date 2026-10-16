@@ -1155,9 +1155,21 @@ def keaktifan_petak_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
 @template("aktivitas_kerja_map")
 def aktivitas_kerja_map(tahun, bulan, periode, limit=1000, bounds=None, **kw):
     """Evaluasi Aktivitas per petak - sebaran kerja sadap per jenis.
-    Hijau = ada kerja jenis terpilih di periode; kuning = ada kerja lain saja;
-    merah = tanpa penyadap/sepi 2 bln. Hormati jenis_aktivitas + sampai_dengan."""
-    return T["aktivitas_petak_map"](tahun, bulan, periode, limit=limit, bounds=bounds, **kw)
+    Warna BEDA dari keaktifan: hijau = ada kerja jenis terpilih di periode;
+    biru (emas) = ada kerja lain saja; merah = tanpa penyadap/sepi 2 bln.
+    Hormati jenis_aktivitas + sampai_dengan."""
+    r = T["aktivitas_petak_map"](tahun, bulan, periode, limit=limit, bounds=bounds, **kw)
+    for x in (r.get("rows") or []):
+        try:
+            if int(x.get("jumlah_aktivitas") or 0) > 0:
+                x["kategori"], x["warna"] = "kerja_jenis", "hijau"
+            elif int(x.get("jumlah_penyadap") or 0) == 0 or int(x.get("aktivitas_2bulan") or 0) == 0:
+                x["kategori"], x["warna"] = "sepi", "merah"
+            else:
+                x["kategori"], x["warna"] = "kerja_lain", "emas"
+        except Exception:
+            pass
+    return r
 
 
 @template("matriks_map")
