@@ -1674,9 +1674,12 @@ def produksi_per_wilayah(tahun, bulan, periode, level="kode_bkph", **kw):
     _, dlast = period_bounds(tahun, bulan, periode)
     # persen kumulatif skalar via helper — bukan SUM-dalam-SUM (err 1111).
     total_pct = _target_pct(tahun, bulan, periode)
+    w, wv = _wilayah_where(kw)
     return q(f"""
         SELECT p.{level} AS kode_wilayah, MAX(p.{ncol}) AS nama_wilayah,
-               COUNT(*) AS n_petak,
+               p.{level} AS kode_kph, MAX(p.{ncol}) AS kph,
+               MAX(p.kode_divre) AS kode_divre,
+               COUNT(*) AS n_petak, COUNT(*) AS total_petak,
                ROUND(COALESCE(SUM(prod.actual), 0), 1) AS actual_kg,
                ROUND(COALESCE(SUM(p.target_rkap), 0) * %s / 100, 1) AS target_kg,
                ROUND(100 * COALESCE(SUM(prod.actual), 0)
@@ -1688,10 +1691,10 @@ def produksi_per_wilayah(tahun, bulan, periode, level="kode_bkph", **kw):
             WHERE tanggal BETWEEN %s AND %s
             GROUP BY kode_evapot
         ) prod ON prod.kode_evapot = p.kode_evapot
-        WHERE p.tahun_rtt = %s
+        WHERE p.tahun_rtt = %s{w}
         GROUP BY p.{level}
         ORDER BY actual_kg DESC
-    """, (total_pct, total_pct, d0y, dlast, tahun))
+    """, (total_pct, total_pct, d0y, dlast, tahun, *wv))
 
 
 @template("produksi_trend")

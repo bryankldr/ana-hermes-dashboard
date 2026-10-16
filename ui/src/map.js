@@ -476,7 +476,9 @@ export function initMapPanel({ log = () => {} } = {}) {
 function updateLegend(biz, kat) {
     if (!legend) return;
     const k = String(kat||'').toLowerCase();
-    const _ovLine = '<span class="lg" title="porsi bongkor ≥25%"><i style="background:#EF4444"></i> KPH rawan</span><span class="lg" title="porsi kurang ≥30% atau terpenuhi <60%"><i style="background:#EAB308"></i> KPH perhatian</span><span class="lg" title="selain itu"><i style="background:#22C55E"></i> KPH baik</span><span class="lg" title="overview choropleth KPH (z≤10) — angka per KPH di panel insight">overview KPH</span>';
+    const _ovLine = (String(biz || '').toLowerCase() === 'produksi')
+      ? '<span class="lg" title="achievement KPH <50% (tertimbang tonase)"><i style="background:#EF4444"></i> KPH rendah</span><span class="lg" title="achievement KPH 50-85%"><i style="background:#EAB308"></i> KPH menengah</span><span class="lg" title="achievement KPH >85%"><i style="background:#22C55E"></i> KPH baik</span><span class="lg" title="overview choropleth KPH (z≤10) — angka per KPH di panel insight">overview KPH</span>'
+      : '<span class="lg" title="porsi bongkor ≥25%"><i style="background:#EF4444"></i> KPH rawan</span><span class="lg" title="porsi kurang ≥30% atau terpenuhi <60%"><i style="background:#EAB308"></i> KPH perhatian</span><span class="lg" title="selain itu"><i style="background:#22C55E"></i> KPH baik</span><span class="lg" title="overview choropleth KPH (z≤10) — angka per KPH di panel insight">overview KPH</span>';
     if (biz === 'petak' && k === 'idle') {
       legend.innerHTML = '<span class="lg" title="ada penyadap + aktivitas 2 bln, tapi 0 di periode ini"><i style="background:#EAB308"></i> Idle (kuning)</span><span class="lg"><i style="background:#22C55E"></i> Aktif (hijau)</span>' + _legendAttrib();
     } else if (biz === 'petak' && k === 'multi_penyadap') {
@@ -934,6 +936,7 @@ function updateLegend(biz, kat) {
   }
   async function reloadBusiness() {
     if (_loading) { _pending = true; return; }
+    _scheduleOverview(); // overview KPH ikut filter baru (murah bila kunci sama)
     // filter baru harus menang — batalkan tunggu render sebelumnya
     if (_awaitingFeatures !== null) {
       if (_renderWatchdog) { clearTimeout(_renderWatchdog); _renderWatchdog = null; }
@@ -1501,14 +1504,19 @@ function updateLegend(biz, kat) {
     try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {}
   }
   function _ovInsight(rows, biz) {
-    // Angka per KPH menyertai warna (tooltip angka). Label B/K/T mengikuti
-    // bisnis: petak = Bongkor/Kurang/Terpenuhi; aktivitas = Bongkor/Idle/Aktif;
-    // produksi = pita cap ≤25 / 25-75 / >75.
+    // Angka per KPH menyertai warna. Label mengikuti bisnis:
+    // petak = B/K/T; aktivitas = B/I/A;
+    // produksi = actual vs target + achievement% (basis warna KPH).
     try {
       if (!insightBox || !Array.isArray(rows) || !rows.length) return;
       const b = String(biz || 'petak');
-      const tag = b === 'aktivitas' ? ['B', 'I', 'A'] : b === 'produksi' ? ['≤25', '25-75', '>75'] : ['B', 'K', 'T'];
+      const tag = b === 'aktivitas' ? ['B', 'I', 'A'] : ['B', 'K', 'T'];
       const lines = rows.map(function(r) {
+        if (b === 'produksi') {
+          const a = Number(r.achievement_pct);
+          const av = Number(r.actual_kg || 0), tv = Number(r.target_kg || 0);
+          return esc(String(r.kph || r.nama_wilayah || r.kode_kph || r.kode_wilayah)) + ' ' + av.toLocaleString('id-ID') + '/' + tv.toLocaleString('id-ID') + ' kg (' + (Number.isFinite(a) ? a.toFixed(1).replace('.', ',') + '%' : '-') + ')';
+        }
         return esc(String(r.kph || r.kode_kph)) + ' ' + (r.total_petak || 0) + ' petak — ' + tag[0] + (r.bongkor || 0) + ' ' + tag[1] + (r.kurang || 0) + ' ' + tag[2] + (r.terpenuhi || 0);
       });
       insightBox.dataset.lastBiz = 'petak';
@@ -1606,13 +1614,14 @@ function updateLegend(biz, kat) {
       const _periode = _kPer;
       const _pemke = _kPemke;
       const _ovTpl = _ovBiz === 'aktivitas' ? 'aktivitas_per_kph'
-        : _ovBiz === 'produksi' ? 'produksi_per_kph'
+        : _ovBiz === 'produksi' ? 'produksi_per_wilayah'
         : _ovBiz === 'matriks' || _ovBiz === 'matrik' ? 'efektivitas_per_kph'
         : 'efektivitas_per_kph';
       const _ovParams = { tahun };
       if (_ovBiz === 'aktivitas' || _ovBiz === 'produksi') {
         _ovParams.bulan = _bulan; _ovParams.periode = _periode;
         if (_ovBiz === 'aktivitas' && ['1', '2', '3', '4'].includes(_pemke)) _ovParams.pembaharuan_ke = _pemke;
+        if (_ovBiz === 'produksi') _ovParams.level = 'kode_kph';
       }
       let rows = [];
       try {
@@ -1621,7 +1630,19 @@ function updateLegend(biz, kat) {
       } catch (_) {}
       const colors = {};
       for (const r of rows) {
-        try { const c = _ovColor(r); if (c) colors[String(r.kode_kph)] = c; } catch (_) {}
+        // Produksi: achievement tertimbang per KPH (bukan porsi petak hijau).
+        // Merah <50, kuning 50-85, hijau >85 — selaras rkap_map 5 pita.
+        try {
+          if (_ovBiz === 'produksi') {
+            const a = Number(r.achievement_pct);
+            if (!Number.isFinite(a)) continue;
+            const c = a < 50 ? '#EF4444' : a <= 85 ? '#EAB308' : '#22C55E';
+            const k = String(r.kode_kph || r.kode_wilayah || '');
+            if (k) colors[k] = c;
+            continue;
+          }
+          const c = _ovColor(r); if (c) colors[String(r.kode_kph)] = c;
+        } catch (_) {}
       }
       if (!Object.keys(colors).length) {
         // Agregat kosong/gagal: jangan tampilkan outline putih tanpa warna.
@@ -1742,9 +1763,10 @@ function updateLegend(biz, kat) {
   }
   function _ovBindHit(layer, nums, biz) {
     // Binding post-hoc (pola terverifikasi): tooltip + klik drill per fitur.
-    // Label tooltip mengikuti bisnis (aktivitas = B/I/A, produksi = pita cap).
+    // Label tooltip mengikuti bisnis: aktivitas = B/I/A;
+    // produksi = actual/target + achievement%.
     const _bb = String(biz || 'petak');
-    const _tag = _bb === 'aktivitas' ? ['B', 'I', 'A'] : _bb === 'produksi' ? ['≤25', '25-75', '>75'] : ['B', 'K', 'T'];
+    const _tag = _bb === 'aktivitas' ? ['B', 'I', 'A'] : ['B', 'K', 'T'];
     try {
       layer.eachLayer(function(ll) {
         try {
@@ -1752,8 +1774,14 @@ function updateLegend(biz, kat) {
           const nm = p.kph || p.kode_kph || 'KPH';
           let tip = '<b>' + esc(String(nm)) + '</b>';
           const m = nums[String(p.kode_kph || '')] || null;
-          // Angka berwarna sesuai bisnis (label tag mengikuti bisnis).
-          if (m) tip += '<br><span style="color:#EF4444;font-weight:700">' + esc(_tag[0]) + ' ' + m.b + '</span> '
+          // Angka sesuai bisnis: produksi = actual/target + achievement%.
+          if (m && m.prod) {
+            const _pc = Number(m.pct);
+            const _cs = !Number.isFinite(_pc) ? '#9CA3AF' : _pc < 50 ? '#EF4444' : _pc <= 85 ? '#EAB308' : '#22C55E';
+            tip += '<br><span style="color:' + _cs + ';font-weight:700">' + Number(m.a).toLocaleString('id-ID') + '/' + Number(m.t).toLocaleString('id-ID') + ' kg'
+              + ' (' + (Number.isFinite(_pc) ? _pc.toFixed(1).replace('.', ',') + '%' : '-') + ')</span>'
+              + '<span style="opacity:.65"> dari ' + m.n + ' petak</span>';
+          } else if (m) tip += '<br><span style="color:#EF4444;font-weight:700">' + esc(_tag[0]) + ' ' + m.b + '</span> '
             + '<span style="color:#EAB308;font-weight:700">' + esc(_tag[1]) + ' ' + m.k + '</span> '
             + '<span style="color:#22C55E;font-weight:700">' + esc(_tag[2]) + ' ' + m.t + '</span>'
             + '<span style="opacity:.65"> dari ' + m.n + ' petak</span>';
@@ -1787,7 +1815,16 @@ function updateLegend(biz, kat) {
       if (!feats.length) { _ovHideGeo(); return false; }
       const nums = {};
       for (const r of (rows || [])) {
-        try { nums[String(r.kode_kph)] = { b: r.bongkor || 0, k: r.kurang || 0, t: r.terpenuhi || 0, n: r.total_petak || 0 }; } catch (_) {}
+        try {
+          const _kk = String(r.kode_kph || r.kode_wilayah || '');
+          if (!_kk) continue;
+          if (String(biz || '') === 'produksi') {
+            nums[_kk] = { prod: true, a: Number(r.actual_kg || 0), t: Number(r.target_kg || 0),
+                          pct: Number(r.achievement_pct), n: r.n_petak || r.total_petak || 0 };
+          } else {
+            nums[_kk] = { b: r.bongkor || 0, k: r.kurang || 0, t: r.terpenuhi || 0, n: r.total_petak || 0 };
+          }
+        } catch (_) {}
       }
       const gj = [];
       for (const f of feats) {
