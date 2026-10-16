@@ -60,6 +60,7 @@ Default `asisten` untuk SEMUA pertanyaan bisnis. **Tool bisnis tidak perlu `codi
 - SEMUA pertanyaan bisnis (statistik, tren, korelasi, ranking, chart, pandas analytical) → **TETAP di `asisten`**. Langsung `execute_code` FIX IDEAL (1-2 packet + 1 dashboard) atau `call_pandas_tool` 1-CALL. Jangan `set_mode(coding)`, jangan `read_file`/`search_files`/`skill_view` untuk cari cara — SKILL ini sudah lengkap.
 - `coding` HANYA bila user eksplisit minta artifact kode (`tampilkan code`, `buatkan file .py`, `tampilkan diff`) — bukan untuk chart/peta/tabel bisnis. Chart 1-2 visual, peta, atau tabel KPI bukan alasan coding.
 - Jawab TTS singkat (1-2 kalimat) + visual ter-render (chart/peta). TTS-only saat diminta chart/peta = gagal.
+- Selama eksekusi tool (packet/KPI/chart) JANGAN keluarkan narasi progres per langkah ("menarik data...", "cek bulan...", "render sekarang") — tiap kalimat interim bocor ke panel response dan dibacakan TTS. Kerjakan tool calls diam-diam, hanya jawaban final + visual yang tampil.
 - Server overlay sama: business tool di asisten. `set_mode` tidak dibutuhkan untuk bisnis; UI tetap `asisten`.
 
 **Analytical batch — Pandas owns processing:**
@@ -139,6 +140,8 @@ Kontrak hide: `{"visible":false}` hide, `{"charts":null}` hide, `{"charts":[]}` 
 ## Aktivitas — 4 template, jangan rangkai sendiri
 `periode=0`/`"full"` = bulan penuh (P1+P2), `periode=1` 1–15, `periode=2` 16–akhir. `pembaharuan_ke` "1".."4"/"semua" (4 sah tapi DB 2026-10 cuma 1/2/3).
 
+**Sampai dengan Ya/Tidak (param resmi `sampai_dengan`):** Ya = kumulatif Jan-01 s/d akhir periode; Tidak = periode berjalan saja; Penuh + Ya = Jan s/d bulan itu P1+P2. Produksi/matriks default kumulatif (preserve perilaku lama), aktivitas default snapshot. Helpers: `_sampai_dengan(kw)`, `_range_bounds(tahun,bulan,periode,kw,default_kumulatif)`, `_target_pct_sd(...)` (target persen periode-berjalan vs kumulatif). Template map (`rkap_map`, `matriks_map`, `aktivitas_petak_map`, `idle_*`, `status_petak_per_wilayah`) + agregat KPH (`aktivitas_per_kph`, `produksi_per_kph`, `produksi_per_wilayah`) WAJIB baca param ini — jangan hardcode `period_bounds` untuk `cur`/realisasi bila template mendukung kumulatif. `prev`/`two` (logika idle/bongkor) tetap jendela relatif, bukan akumulasi.
+
 ```python
 show_on_map("aktivitas_top_petak", tahun=2026, bulan=5, periode=0, limit=10)  # per petak + polygon
 call_simoge_tool("aktivitas_agregat", {"tahun":2026,"bulan":5,"periode":0,"grup_by":"pembaharuan"})  # per tahap
@@ -147,6 +150,9 @@ call_simoge_tool("aktivitas_agregat", {"tahun":2026,"bulan":5,"periode":0,"grup_
 show_on_map("aktivitas_per_penyadap_petak", tahun=2026, bulan=5, periode=0, id_penyadap=3590, limit=50)
 ```
 `aktivitas_petak_map` + `pembaharuan_ke` = polygon+pin; `aktivitas_top_petak` = push mentah `delivery:"push"` tanpa pin.
+
+**Filter jenis aktivitas (param resmi `jenis_aktivitas`):** quare/semprot_cas/kerok/naik_batok/budaya_bersih/pulung — saring baris aktivitas ke satu jenis flag (`AND s.<flag>=1`). Terapkan HANYA ke hitungan `cur` (periode berjalan) dan breakdown andil (`aa`/`ab`); `prev`/`two` (jendela logika idle/bongkor) tetap penuh — kalau ikut difilter, definisi idle/bongkor rusak. Helper `_jenis_aktivitas_where(kw, alias)` ikut pola `_pembaharuan_where`; kolom baru yang belum ada di DB live = `AND 1=0` via cek `information_schema` (bukan error 1054). Terima label manusia juga ("semprot cas", "naik batok", "budaya bersih").
+- Uji filter JENIS hanya di periode yang berdata (cek `MAX(tgl_pembaharuan)` dulu) — hasil identik di semua opsi artinya periode kosong, bukan filter rusak. Jangan nyatakan filter broken sebelum verifikasi ini.
 
 **Kolom aktivitas baru** — `tgl_aktivitas` (date aktivitas, beda dari `tgl_pembaharuan` = update date), `pulung` (flag aktivitas), dan `jml_phn_*` (jumlah pohon per jenis). `pulung` otomatis ikut `grup_by:"aktivitas"` via `AKTIVITAS_FLAGS` di `scripts/simoge_db.py`. Selalu filter periode pakai `tgl_pembaharuan`, bukan `tgl_aktivitas`.
 

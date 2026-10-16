@@ -29,3 +29,6 @@ Edit merusak f-string sekitar sisip (`f"..." _fmt_num(x)` → SyntaxError). Atur
 
 ## Pitfall: loop ana_kpi boros
 `search_files ana_kpi` → `read_file ana_kpi.py` → `for y,m,p in loop: get_production_kpi` = 18 call, token 150K. Ganti 1× `call_pandas_tool(..., operations=[percentage_change])` atau 2× `call_simoge_packet`. SKILL 1.3.1 sudah contoh trend.
+
+## Chart 401 walau token benar — sid salah
+`POST /api/spatial/chart` berdata menolak `401 chart berisi data wajib push lewat sesi user login` bila header `X-Hermes-Session` tidak resolve ke user: kirim `HERMES_SESSION_ID` = isi `.ana_current_sid` (sid live dashboard, mis. `fa8526e0`), BUKAN `HERMES_SESSION_ID` bawaan env terminal agen yang beda. Pola CLI: `HERMES_SESSION_ID=$(cat $ANA_WORKDIR/.ana_current_sid | awk '{print $1}') PYTHONPATH=<scripts> python3 <scripts>/ana_chart_tool.py show ...`. Verifikasi: `cat .ana_current_sid` lalu `cat .ana_scope_<sid>.json` wajib memuat `user_id` non-kosong; bila file scope tak ada = sid basi, baca ulang `.ana_current_sid`.
