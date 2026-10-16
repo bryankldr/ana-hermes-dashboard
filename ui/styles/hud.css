@@ -1009,30 +1009,51 @@ html, body {
   word-break: break-word;
 }
 
-/* ═══ CHAT THREAD PREMIUM ═══
-   RESPONSE = thread bubble (user kanan / ANA kiri), kutip pertanyaan,
-   timestamp, aksi per pesan. Tanpa ini riwayat sesi = satu teks polos. */
+/* ═══ CHAT THREAD ═══
+   Gaya percakapan manusia: avatar + ekor bubble + nama alami,
+   bukan kartu seragam. User kanan hijauredup, ANNA kiri kaca gelap. */
 .th-user, .th-ana {
-  border-radius: 10px;
-  padding: 9px 12px;
-  margin: 8px 0;
-  max-width: 92%;
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+  max-width: 94%;
   animation: thIn .22s ease-out;
+  background: none;
+  border: none;
+  padding: 0;
 }
 @keyframes thIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-.th-user {
-  margin-left: auto;
-  background: rgba(0, 220, 255, 0.10);
-  border: 1px solid var(--neon-dim);
-  border-right: 3px solid var(--neon);
+.th-user { margin-left: auto; flex-direction: row-reverse; }
+.th-ana { margin-right: auto; }
+.th-avatar {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+  margin-top: 2px;
 }
-.th-ana {
-  margin-right: auto;
-  background: rgba(5, 27, 58, 0.6);
-  border: 1px solid transparent;
-  border-left: 3px solid var(--neon-dim);
+.th-user .th-avatar { background: rgba(0,220,255,.15); border: 1px solid var(--neon-dim); }
+.th-ana .th-avatar { background: rgba(5,27,58,.9); border: 1px solid var(--neon-dim); }
+.th-content { min-width: 0; max-width: 100%; }
+.th-user .th-content { display: flex; flex-direction: column; align-items: flex-end; }
+.th-bubble {
+  position: relative;
+  border-radius: 14px;
+  padding: 9px 13px;
+  max-width: 100%;
 }
-.th-stream { border-style: dashed; }
+.th-user .th-bubble {
+  background: rgba(0,220,255,.13);
+  border: 1px solid rgba(0,220,255,.25);
+  border-top-right-radius: 4px;
+}
+.th-ana .th-bubble {
+  background: rgba(8,32,66,.72);
+  border: 1px solid rgba(120,160,200,.14);
+  border-top-left-radius: 4px;
+}
+.th-stream .th-bubble { border-style: dashed; }
 .th-head {
   display: flex;
   justify-content: space-between;

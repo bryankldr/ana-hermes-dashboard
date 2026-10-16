@@ -1314,18 +1314,27 @@ function _threadScroll() {
 }
 
 function _threadBubble(role, text, opts = {}) {
+  const isUser = role === 'user';
   const wrap = document.createElement('div');
-  wrap.className = 'th-' + (role === 'user' ? 'user' : 'ana') + (opts.streaming ? ' th-stream' : '');
+  wrap.className = 'th-' + (isUser ? 'user' : 'ana') + (opts.streaming ? ' th-stream' : '');
+  const av = document.createElement('div');
+  av.className = 'th-avatar';
+  av.textContent = isUser ? '◉' : '✦';
+  wrap.appendChild(av);
+  const content = document.createElement('div');
+  content.className = 'th-content';
+  const bub = document.createElement('div');
+  bub.className = 'th-bubble';
   const head = document.createElement('div');
   head.className = 'th-head';
   const who = document.createElement('span');
   who.className = 'th-who';
-  who.textContent = role === 'user' ? 'Anda' : 'ANNA';
+  who.textContent = isUser ? 'Anda' : 'Anna';
   const time = document.createElement('span');
   time.className = 'th-time';
   time.textContent = _threadTime(opts.ts);
   head.appendChild(who); head.appendChild(time);
-  wrap.appendChild(head);
+  bub.appendChild(head);
   if (role === 'user' || opts.quote) {
     const q = document.createElement('div');
     q.className = 'th-quote';
@@ -1334,15 +1343,16 @@ function _threadBubble(role, text, opts = {}) {
     if (role === 'user') q.addEventListener('click', () => {
       try { els.chatInput.value = text; autosizeChat(); els.chatInput.focus(); } catch (_) {}
     });
-    wrap.appendChild(q);
+    bub.appendChild(q);
   }
   if (role !== 'user' || !opts.quoteOnly) {
     const body = document.createElement('div');
     body.className = 'th-body';
     body.textContent = role === 'user' ? '' : text;
     if (role === 'user') body.style.display = 'none';
-    else wrap.appendChild(body);
+    else bub.appendChild(body);
   }
+  content.appendChild(bub);
   if (role !== 'user') {
     const acts = document.createElement('div');
     acts.className = 'th-acts';
@@ -1363,8 +1373,9 @@ function _threadBubble(role, text, opts = {}) {
       try { els.chatInput.value = opts.quote || ''; transmit(els.chatInput.value); } catch (_) {}
     });
     acts.appendChild(copy); acts.appendChild(again);
-    wrap.appendChild(acts);
+    content.appendChild(acts);
   }
+  wrap.appendChild(content);
   return wrap;
 }
 
