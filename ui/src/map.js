@@ -162,19 +162,6 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <button id="spatialRefresh" class="spatial-btn" title="Muat ulang" aria-label="Muat ulang"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>'
       + '      <button id="spatialQuickReset" class="spatial-btn danger solid" title="Reset filter" aria-label="Reset filter"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>'
       + '    </div>'
-      + '    <div id="spatialTilesModal" class="spatial-tiles-modal hidden" role="dialog" aria-label="Pengaturan tiles">'
-      + '      <div class="spatial-tiles-card">'
-      + '        <div class="spatial-tiles-head"><span>Pengaturan Tiles</span><button id="spatialTilesClose" class="spatial-btn ghost" title="Tutup">✕</button></div>'
-      + '        <div id="spatialTilesStatus" class="spatial-tiles-status">memuat…</div>'
-      + '        <label class="spatial-tiles-row">Jadwal cron <input id="spatialTilesSched" class="spatial-mini" value="10 6 * * *" spellcheck="false" style="width:120px"></label>'
-      + '        <div class="spatial-tiles-row">'
-      + '          <button id="spatialTilesRebuild" class="spatial-btn">Rebuild manual</button>'
-      + '          <button id="spatialTilesCronOn" class="spatial-btn">Aktifkan cron</button>'
-      + '          <button id="spatialTilesCronOff" class="spatial-btn ghost">Matikan cron</button>'
-      + '        </div>'
-      + '        <div id="spatialTilesMsg" class="spatial-tiles-msg"></div>'
-      + '      </div>'
-      + '    </div>'
       + '    <div id="spatialFilters" class="spatial-filters flying collapsed">'
       + '      <div class="spatial-fgroup">'
       + '        <div class="spatial-fgroup-title">Waktu <span class="spatial-hint">periode bisnis P1 1-15 / P2 16-akhir / Penuh 1-akhir</span></div>'
@@ -223,6 +210,19 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '    <div class="map-legendbox flying">'
       + '      <div class="map-legend flying" id="mapLegend"></div>'
       + '      <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
+      + '    </div>'
+      + '  </div>'
+      + '  <div id="spatialTilesModal" class="spatial-tiles-modal hidden" role="dialog" aria-label="Pengaturan tiles">'
+      + '    <div class="spatial-tiles-card">'
+      + '      <div class="spatial-tiles-head"><span>Pengaturan Tiles</span><button id="spatialTilesClose" class="spatial-btn ghost" title="Tutup">✕</button></div>'
+      + '      <div id="spatialTilesStatus" class="spatial-tiles-status">memuat…</div>'
+      + '      <label class="spatial-tiles-row">Jadwal cron <input id="spatialTilesSched" class="spatial-mini" value="10 6 * * *" spellcheck="false" style="width:120px"></label>'
+      + '      <div class="spatial-tiles-row">'
+      + '        <button id="spatialTilesRebuild" class="spatial-btn">Rebuild manual</button>'
+      + '        <button id="spatialTilesCronOn" class="spatial-btn">Aktifkan cron</button>'
+      + '        <button id="spatialTilesCronOff" class="spatial-btn ghost">Matikan cron</button>'
+      + '      </div>'
+      + '      <div id="spatialTilesMsg" class="spatial-tiles-msg"></div>'
       + '    </div>'
       + '  </div>'
       + '</div>',
@@ -1323,6 +1323,7 @@ function updateLegend(biz, kat) {
     }
     btn.addEventListener('click', () => { modal.classList.toggle('hidden'); if (!modal.classList.contains('hidden')) loadStatus(); });
     $sel('#spatialTilesClose')?.addEventListener('click', () => modal.classList.add('hidden'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
     $sel('#spatialTilesRebuild')?.addEventListener('click', async function(){
       this.disabled = true; say('rebuild jalan… (1-2 menit)');
       try {
