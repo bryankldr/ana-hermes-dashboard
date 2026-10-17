@@ -128,6 +128,35 @@ if [ -d "$DIST/memories" ]; then
     fi
   done
 fi
+
+# ── vault ANNA-KNOWLEDGE global (616K, 109 file) — knowledge kedua setelah skill
+# hermes profile install tidak mengurus folder custom `vault/` — copy manual ke
+# OBSIDIAN_VAULT_PATH (fallback ~/anna_brain/Anna's brain) agar mesin target
+# dapat wiki/ontology yang sama (skema 8 kolom, 6 flag, coverage, dll).
+if [ -d "$DIST/vault" ]; then
+  # resolve OBSIDIAN_VAULT_PATH: .env PWD > ~/.hermes/.env > default
+  _vault="${OBSIDIAN_VAULT_PATH:-}"
+  if [ -z "$_vault" ] && [ -f "$PWD/.env" ]; then
+    _vault=$(grep -E '^OBSIDIAN_VAULT_PATH=' "$PWD/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || true)
+  fi
+  if [ -z "$_vault" ] && [ -f "$HOME/.hermes/.env" ]; then
+    _vault=$(grep -E '^OBSIDIAN_VAULT_PATH=' "$HOME/.hermes/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || true)
+  fi
+  [ -z "$_vault" ] && _vault="$HOME/anna_brain/Anna's brain"
+  mkdir -p "$_vault"
+  # copy ANNA-KNOWLEDGE (jangan timpa 00 Inbox/10 Daily user — hanya knowledge)
+  if [ -d "$DIST/vault/ANNA-KNOWLEDGE" ]; then
+    rm -rf "$_vault/ANNA-KNOWLEDGE"
+    cp -r "$DIST/vault/ANNA-KNOWLEDGE" "$_vault/"
+    echo "ANA: vault ANNA-KNOWLEDGE → $_vault/ANNA-KNOWLEDGE ($(find "$_vault/ANNA-KNOWLEDGE" -type f | wc -l) file)"
+  fi
+  for _f in "SIMOGE Business Knowledge & Ontology.md" "Business Intelligence Semantic & Ontology Test Suite.md"; do
+    if [ -f "$DIST/vault/$_f" ]; then
+      cp "$DIST/vault/$_f" "$_vault/$_f"
+      echo "ANA: vault $_f → $_vault/"
+    fi
+  done
+fi
 fi # _process_profile
 
 chmod +x start.sh install.sh

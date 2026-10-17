@@ -1,6 +1,6 @@
 name: anna
-version: 0.2.0
-description: ANNA BI operator profile for ana-hermes-dashboard (simoge-business + hud)
+version: 0.3.0
+description: ANNA BI operator profile for ana-hermes-dashboard (simoge-business + hud + vault ANNA-KNOWLEDGE global)
 hermes_requires: ">=0.21.5"
 author: bryankldr
 license: MIT
