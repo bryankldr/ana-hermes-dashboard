@@ -216,7 +216,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '    <div class="spatial-tiles-card">'
       + '      <div class="spatial-tiles-head"><span>Pengaturan Tiles</span><button id="spatialTilesClose" class="spatial-btn ghost" title="Tutup">✕</button></div>'
       + '      <div id="spatialTilesStatus" class="spatial-tiles-status">memuat…</div>'
-      + '      <label class="spatial-tiles-row">Jadwal cron <input id="spatialTilesSched" class="spatial-mini" value="10 6 * * *" spellcheck="false" style="width:120px"></label>'
+      + '      <div class="spatial-tiles-row" style="align-items:end;gap:8px"><label style="display:flex;flex-direction:column;gap:4px">Jadwal rebuild harian <span style="display:flex;gap:6px;align-items:center"><select id="spatialTilesHour" class="spatial-mini" style="width:90px"></select> : <select id="spatialTilesMinute" class="spatial-mini" style="width:90px"></select><span style="font-size:11px;opacity:.7">WIB · setiap hari</span></span></label></div>'
       + '      <div class="spatial-tiles-row">'
       + '        <button id="spatialTilesRebuild" class="spatial-btn">Rebuild manual</button>'
       + '        <button id="spatialTilesCronOn" class="spatial-btn">Aktifkan cron</button>'
@@ -1299,7 +1299,22 @@ function updateLegend(biz, kat) {
     const btn = $sel('#spatialTilesBtn'), modal = $sel('#spatialTilesModal');
     if (!btn || !modal) return;
     const stBox = $sel('#spatialTilesStatus'), msgBox = $sel('#spatialTilesMsg');
-    const schedIn = $sel('#spatialTilesSched');
+    const hourSel = $sel('#spatialTilesHour'), minSel = $sel('#spatialTilesMinute');
+    // isi dropdown jam/menit (manusiawi, bukan cron mentah)
+    try {
+      if (hourSel && !hourSel.options.length) {
+        for (let h=0; h<24; h++) {
+          const o=document.createElement('option'); o.value=String(h); o.textContent=String(h).padStart(2,'0')+':00'; if(h===6) o.selected=true; hourSel.appendChild(o);
+        }
+      }
+      if (minSel && !minSel.options.length) {
+        for (let m=0; m<60; m+=5) {
+          const o=document.createElement('option'); o.value=String(m); o.textContent=String(m).padStart(2,'0'); if(m===10) o.selected=true; minSel.appendChild(o);
+        }
+        // pastikan 10 ada bila step 5 sudah ada, kalau tidak tambahkan
+      }
+    } catch(_) {}
+    const getSched = () => { const h=(hourSel&&hourSel.value)||'6'; const m=(minSel&&minSel.value)||'10'; return m+' '+h+' * * *'; };
     const tok = () => document.querySelector('meta[name="ana-token"]')?.content || '';
     const H = () => ({ 'X-Ana-Token': tok(), 'Content-Type': 'application/json' });
     const fmtB = (n) => (n == null ? '-' : (n > 1048576 ? (n/1048576).toFixed(1)+' MB' : Math.round(n/1024)+' KB'));
@@ -1319,6 +1334,15 @@ function updateLegend(biz, kat) {
           + '<div>NDJSON: <b>' + (nd.exists ? (nd.lines ?? '?')+' baris · '+fmtB(nd.bytes) : '<span style="color:#EF4444">hilang</span>') + '</b></div>'
           + '<div>Cron: <b style="color:' + (cronStat==='aktif' ? '#39F5A6' : '#F59E0B') + '">' + cronStat + '</b> <span style="opacity:.7">' + cronSched.replace(/</g,'&lt;') + '</span></div>'
           + '<div style="font-size:12px;opacity:.85;margin-top:4px">' + String(d.log_tail||'').replace(/</g,'&lt;') + '</div>';
+        // sinkron dropdown jam/menit dari cron yang tersimpan
+        try {
+          const raw = (d.cron && d.cron[0]) || (d.cron_simple && d.cron_simple[0]) || '';
+          const p = String(raw).trim().split(/\s+/);
+          if (p.length>=2 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1])) {
+            if (minSel) minSel.value = p[0];
+            if (hourSel) hourSel.value = p[1];
+          }
+        } catch(_) {}
         say('');
       } catch(e) { if (stBox) stBox.textContent = 'gagal: ' + String(e?.message || e).slice(0,120); }
     }
@@ -1338,7 +1362,7 @@ function updateLegend(biz, kat) {
     async function cronAct(action) {
       say('cron ' + action + '…');
       try {
-        const r = await fetch('/api/tiles/cron', { method: 'POST', headers: H(), body: JSON.stringify({ action, schedule: schedIn?.value || '' }) });
+        const r = await fetch('/api/tiles/cron', { method: 'POST', headers: H(), body: JSON.stringify({ action, schedule: getSched() }) });
         const d = await r.json().catch(() => ({}));
         say(r.ok && d.ok !== false ? 'cron ' + action + ' OK' : 'gagal: ' + (d.error || ('HTTP '+r.status)), !(r.ok && d.ok !== false));
         loadStatus();
