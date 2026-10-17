@@ -43,18 +43,22 @@
 .spatial-fgroup-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: .10em; color: var(--neon); text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; font-weight:700; }
 .spatial-fgroup-title .spatial-hint { font-size: 11px; letter-spacing:0; text-transform:none; color: var(--text-dim); opacity:.9; font-weight:400; }
 .spatial-row { display: grid; grid-template-columns: repeat(12, minmax(0,1fr)); gap: 6px; align-items: end; width: 100%; box-sizing: border-box; }
-.spatial-row.cols4 > label { grid-column: span 3; }
-.spatial-row.cols2 > label { grid-column: span 3; }
-/* WILAYAH baris-1: 3 menu → 4 kolom each (4+4+4=12) */
+/* Semua group 12-kolom seragam — WILAYAH jadi contoh (3 menu 33% = 4/12).
+   WAKTU 4 menu → 3 ke kanan seimbang: tiap label 4 kolom (33%) →
+   baris-1: 3 menu, baris-2: 1 menu (wrap otomatis, ukuran sama 33%).
+   AKTIVITAS 2 menu → 3 ke kanan: tiap label 4 kolom (33%) → 1 baris 2 menu seimbang. */
+.spatial-row.cols4 > label { grid-column: span 4; }
+.spatial-row.cols2 > label { grid-column: span 4; }
+/* WILAYAH contoh: 3 menu → 33% = 4/12 tetap — jadi panutan lebar seimbang */
 .spatial-fgroup .spatial-row:not(.cols4):not(.cols2) > label { grid-column: span 4; }
-/* WILAYAH baris-2: RPH + TPG + 2 tombol → 4 + 4 + 2 + 2 = 12 */
-.spatial-fgroup .spatial-row:last-child > label { grid-column: span 4; }
-.spatial-fgroup .spatial-row:last-child > button { grid-column: span 2; }
+/* WILAYAH baris-2: RPH + TPG + 2 tombol → 4 + 4 + 2 + 2 = 12 — HANYA untuk WILAYAH */
+.spatial-fgroup .spatial-row:last-child:not(.cols4):not(.cols2) { grid-template-columns: repeat(12, minmax(0,1fr)); }
+.spatial-fgroup .spatial-row:last-child:not(.cols4):not(.cols2) > label { grid-column: span 4; }
+.spatial-fgroup .spatial-row:last-child:not(.cols4):not(.cols2) > button { grid-column: span 2; min-width: 0; width: 100%; box-sizing: border-box; justify-self: stretch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spatial-row label { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-weight:600; letter-spacing:.02em; }
 .spatial-mini { width: 100%; min-width: 0; box-sizing: border-box; }
 .spatial-row label .spatial-mini, .spatial-row label select { width: 100%; }
 .spatial-hint { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); opacity: 0.9; }
-.spatial-fgroup .spatial-row:last-child { grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; }
 .spatial-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; padding-top: 2px; border-top: 1px dashed rgba(45,242,255,.12); margin-top: 2px; }
 .spatial-chips:empty { display: none; border: none; margin: 0; padding: 0; }
 /* Status sumber opsi wilayah: hanya tampil saat cache/fallback (klik = muat ulang). */
