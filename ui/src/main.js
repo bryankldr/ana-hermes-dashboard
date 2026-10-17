@@ -993,6 +993,7 @@ function sessionPanelRender(sessions) {
       const list = await loadSessions();
       sessionPanelRender(list);
       try { _threadLoadHistory(s.id); } catch (_) {}
+      try { document.getElementById('sessionPanel').hidden = true; } catch(_) {}
     });
     row.appendChild(item);
 
@@ -1029,6 +1030,7 @@ async function createNewSession() {
       const list = await loadSessions();
       sessionPanelRender(list);
       try { _threadLoadHistory(null); } catch (_) {}
+      try { document.getElementById('sessionPanel').hidden = true; } catch(_) {}
     } else {
       alert('Gagal buat sesi baru: ' + (j.error || 'tidak diketahui'));
     }
@@ -1170,7 +1172,7 @@ function tplRender() {
       if (!_tplEdit) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'tpl-item'; b.textContent = q; b.title = q;
-        b.addEventListener('click', () => { els.chatInput.value = q; autosizeChat(); els.chatInput.focus(); });
+        b.addEventListener('click', () => { els.chatInput.value = q; autosizeChat(); els.chatInput.focus(); try { document.getElementById('tplPanel').hidden = true; } catch(_) {} });
         wrap.appendChild(b);
       } else {
         const row = document.createElement('div');
