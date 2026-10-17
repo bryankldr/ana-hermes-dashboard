@@ -343,11 +343,10 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 /* Kolom kanan: jarak dari tepi agar tak mepet (toolbar atas di kiri). */
 .leaflet-top.leaflet-right { top: 8px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .leaflet-top.leaflet-right .leaflet-control { margin: 0 !important; float: none !important; clear: none !important; }
-/* Baris badge+skala: badge kiri, skala kanan, tanpa background keduanya —
-   teks putih + shadow baca di atas satelit. */
-.zs-row { display: flex; align-items: center; gap: 8px; margin: 0; }
-.zs-row .leaflet-control-scale { margin: 0 !important; }
-/* Kolom kanan: [badge|skala] → layers → zoom. Satu kolom, gap rata. */
+/* Baris badge+skala: 1 baris mendatar — badge kiri, skala kanan,
+   teks putih + shadow baca di atas satelit. Zoom aman di dalam baris. */
+.zs-row { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: nowrap; white-space: nowrap; }
+.zs-row .leaflet-control-scale { margin: 0 !important; flex: 0 0 auto; }
 #mapPanel .leaflet-bar { border: 1px solid rgba(45,242,255,.28); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
 #mapPanel .leaflet-bar a { width: 30px; height: 30px; line-height: 30px; background: rgba(2,15,42,.88); color: var(--neon); border-bottom: 1px solid rgba(45,242,255,.18); font-family: var(--font-mono); backdrop-filter: blur(10px); }
 #mapPanel .leaflet-bar a:last-child { border-bottom: none; }
@@ -356,8 +355,16 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 #mapPanel .leaflet-control-scale-line { background: none; border: none; border-left: 2px solid #fff; border-right: 2px solid #fff; border-bottom: 2px solid #fff; border-radius: 0; color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 1px 6px 2px; text-align: center; box-shadow: none; text-shadow: 0 1px 3px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.7); }
 /* opsi layer serasi toolbar/filter */
 #mapPanel .leaflet-control-layers { background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--text-body); font-family: var(--font-mono); font-size: 12px; }
-#mapPanel .leaflet-control-layers-toggle { width: 30px; height: 30px; border-radius: 8px; }
+/* hover = highlight saja, tidak buka menu (menu hanya klik) */
+#mapPanel .leaflet-control-layers:not(.is-open):hover { border-color: var(--neon); box-shadow: 0 6px 20px rgba(0,0,0,.55), 0 0 0 1px rgba(45,242,255,.35); }
+#mapPanel .leaflet-control-layers-toggle:hover { background: rgba(0,220,255,.14) !important; }
+#mapPanel .leaflet-control-layers-toggle { width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
 #mapPanel .leaflet-control-layers-expanded { padding: 8px 10px; }
+/* klik-only: tanpa .is-open, list tetap tersembunyi walau leaflet sempat menambah .leaflet-control-layers-expanded saat hover */
+#mapPanel .leaflet-control-layers:not(.is-open) .leaflet-control-layers-list,
+#mapPanel .leaflet-control-layers:not(.is-open) .leaflet-control-layers-separator { display: none !important; }
+#mapPanel .leaflet-control-layers:not(.is-open) .leaflet-control-layers-toggle { display: block !important; }
+#mapPanel .leaflet-control-layers.is-open .leaflet-control-layers-toggle { display: none !important; }
 #mapPanel .leaflet-control-layers label { display: flex; align-items: center; gap: 6px; padding: 3px 0; cursor: pointer; }
 #mapPanel .leaflet-control-layers-separator { border-color: rgba(45,242,255,.18); }
 .leaflet-control-zoom { margin-top: 4px !important; }

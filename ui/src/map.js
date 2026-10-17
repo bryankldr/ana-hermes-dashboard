@@ -360,6 +360,46 @@ export function initMapPanel({ log = () => {} } = {}) {
       upd();
     } catch(_){}
   })();
+  // layer klik-only: hover = highlight saja, menu hanya dibuka via klik.
+  // Leaflet default membuka .leaflet-control-layers-expanded saat hover; CSS
+  // kami sembunyikan list tanpa .is-open, JS ini kelola .is-open via klik.
+  (function(){
+    try {
+      const tr = box.querySelector('.leaflet-top.leaflet-right');
+      if(!tr) return;
+      const ly = tr.querySelector('.leaflet-control-layers');
+      if(!ly) return;
+      const toggle = ly.querySelector('.leaflet-control-layers-toggle');
+      const close = () => { ly.classList.remove('is-open'); ly.classList.remove('leaflet-control-layers-expanded'); };
+      const open = () => { ly.classList.add('is-open'); ly.classList.add('leaflet-control-layers-expanded'); };
+      ly.addEventListener('click', (e) => {
+        if(ly.classList.contains('is-open')) {
+          const t = e.target;
+          if(t && t.closest && t.closest('label, input')) return;
+          e.stopPropagation();
+          close();
+          return;
+        }
+        e.stopPropagation();
+        open();
+      });
+      if(toggle) toggle.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if(ly.classList.contains('is-open')) close(); else open();
+      });
+      document.addEventListener('click', (e) => {
+        if(!ly.classList.contains('is-open')) return;
+        if(ly.contains(e.target)) return;
+        close();
+      });
+      document.addEventListener('keydown', (e) => { if(e.key==='Escape') close(); });
+      // hover Leaflet sempat menambah expanded — buang bila belum is-open
+      ly.addEventListener('mouseenter', () => { if(!ly.classList.contains('is-open')) ly.classList.remove('leaflet-control-layers-expanded'); });
+      ly.addEventListener('mouseleave', () => { if(!ly.classList.contains('is-open')) ly.classList.remove('leaflet-control-layers-expanded'); });
+      // map click juga tutup
+      try { map.on('click', () => { if(ly.classList.contains('is-open')) close(); }); } catch(_){}
+    } catch(_){}
+  })();
 
   _ctl = createLeafletControl(map, {
     home: { lat: CENTER[0], lng: CENTER[1], zoom: 11 },
