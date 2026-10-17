@@ -105,7 +105,7 @@
 #mapPanel .panel-title .sh-tiles:hover { color: var(--neon); border-color: var(--neon); background: rgba(0,220,255,.12); }
 /* toggle toolbar: 1 tombol seukuran tombol layer (30x30), sembunyikan
    toolbar + filter + pencarian sekaligus. Pola sama seperti layer control. */
-.map-fly-top { position: relative; top: 8px; display: grid; grid-template-columns: 30px 560px; column-gap: 6px; row-gap: 6px; align-items: center; width: 596px; max-width: calc(100% - 16px); overflow: visible; pointer-events: none; }
+.map-fly-top { position: relative; top: 8px; display: grid; grid-template-columns: 44px 560px; column-gap: 6px; row-gap: 6px; align-items: center; width: 610px; max-width: calc(100% - 16px); overflow: visible; pointer-events: none; }
 .map-fly-top .spatial-toggle-btn { grid-column: 1; grid-row: 1; align-self: center; }
 /* Desktop: toolbar selebar isi (cap 560px), bukan full-width. Specificity di atas rule generik .map-fly. */
 #mapPanel .map-fly-top .spatial-toolbar.flying { grid-column: 2; grid-row: 1; width: auto; max-width: 560px; min-width: 0; align-self: center; }
@@ -123,7 +123,7 @@
 #mapPanel .map-fly-top .map-tools.flying button { flex: 0 0 auto; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 8px; }
 /* Tablet + mobile: bar full-width, toolbar isi sisa. */
 @media (max-width: 1024px) {
-  #mapPanel .map-fly-top { width: 100%; max-width: 100%; grid-template-columns: 30px minmax(0, 1fr); }
+  #mapPanel .map-fly-top { width: 100%; max-width: 100%; grid-template-columns: 44px minmax(0, 1fr); }
   #mapPanel .map-fly-top .spatial-toolbar.flying { width: auto; max-width: none; min-width: 0; }
   #mapPanel .map-fly-top .spatial-filters.flying,
   #mapPanel .map-fly-top .map-tools.flying { max-width: none; }
@@ -131,10 +131,10 @@
 @media (max-width: 560px) {
   #mapPanel .map-fly-top .spatial-toolbar.flying { flex-wrap: wrap; }
 }
-.spatial-toggle-btn { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--neon); cursor: pointer; padding: 0; flex: 0 0 auto; }
+.spatial-toggle-btn { width: 44px; height: 44px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.28); box-shadow: 0 6px 20px rgba(0,0,0,.5); color: var(--neon); cursor: pointer; padding: 0; flex: 0 0 auto; }
 .spatial-toggle-btn:hover { background: rgba(0,220,255,.14); border-color: var(--neon); }
 .spatial-toggle-btn.active { background: rgba(45,242,255,.18); border-color: var(--neon); }
-.spatial-toggle-btn svg { display: block; }
+.spatial-toggle-btn svg { display: block; width: 18px; height: 18px; }
 .map-fly-top.tools-collapsed .spatial-toolbar.flying,
 .map-fly-top.tools-collapsed .spatial-filters.flying,
 .map-fly-top.tools-collapsed .map-tools.flying { display: none !important; }
