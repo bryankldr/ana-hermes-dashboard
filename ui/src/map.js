@@ -160,6 +160,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <button id="spatialFilterBtn" class="spatial-btn" title="Filter" aria-label="Filter"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.5 10 19 14 21 14 12.5"/></svg></button>'
       + '      <button id="spatialKpiBtn" class="spatial-btn ghost" title="KPI">KPI</button>'
       + '      <button id="spatialRefresh" class="spatial-btn" title="Muat ulang" aria-label="Muat ulang"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>'
+      + '      <button id="spatialQuickReset" class="spatial-btn danger solid" title="Reset filter" aria-label="Reset filter"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>'
       + '    </div>'
       + '    <div id="spatialTilesModal" class="spatial-tiles-modal hidden" role="dialog" aria-label="Pengaturan tiles">'
       + '      <div class="spatial-tiles-card">'
@@ -1287,6 +1288,7 @@ function updateLegend(biz, kat) {
     syncKatVisibility(); updateLegend('petak','semua'); updateHead(); renderChips(); reloadBusiness();
   });
   btnRefresh?.addEventListener('click', reloadBusiness);
+  $sel('#spatialQuickReset')?.addEventListener('click', function(){ fReset?.click(); });
 
   // ── P2-4: modal Pengaturan Tiles (rebuild manual + cron harian) ──
   // Token dari meta ana-token (disuntik server via __ANA_TOKEN__).
