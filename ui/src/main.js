@@ -2402,6 +2402,7 @@ async function init() {
   try { applyPanelAccess(layout); } catch (_) {}
   // ChatBox minimize/maximize — 1 tombol ─ di head + FAB 💬 44px.
   // Elegan: fade+scale halus, FAB di tengah-bawah, tidak menonjol.
+  // FAB dapat dipindah: seret untuk posisi, dobel-klik ganti sisi (mirror arsip).
   (function(){
     try {
       const box = document.getElementById('chatBox');
@@ -2409,6 +2410,28 @@ async function init() {
       const minBtn = document.getElementById('chatMinBtn');
       if(!box || !fab || !minBtn) return;
       const KEY = 'ana_chat_min';
+      const KEY_TOP = 'ana_chat_fab_top';
+      const KEY_LEFT = 'ana_chat_fab_left';
+      const hud = document.getElementById('hud') || fab.parentElement;
+      const applyPos = () => {
+        try {
+          const t = parseFloat(localStorage.getItem(KEY_TOP) || '');
+          const l = parseFloat(localStorage.getItem(KEY_LEFT) || '');
+          const hasT = isFinite(t), hasL = isFinite(l);
+          if (!hasT && !hasL) return; // default tengah-bawah (CSS left:50% + bottom:12px)
+          // bekukan ke posisi absolute tersimpan
+          fab.style.top = hasT ? Math.max(8, t) + 'px' : '';
+          fab.style.bottom = hasT ? 'auto' : '';
+          fab.style.left = hasL ? l + 'px' : '';
+          fab.style.right = 'auto';
+          fab.style.transform = 'none';
+        } catch(_){}
+      };
+      const resetPos = () => {
+        fab.style.top = ''; fab.style.bottom = ''; fab.style.left = ''; fab.style.right = ''; fab.style.transform = '';
+        try { localStorage.removeItem(KEY_TOP); localStorage.removeItem(KEY_LEFT); } catch(_){}
+      };
+      applyPos();
       const apply = (min) => {
         box.classList.toggle('is-minimized', !!min);
         fab.classList.toggle('is-visible', !!min);
@@ -2426,7 +2449,63 @@ async function init() {
         if(!min) { try { document.getElementById('chatInput')?.focus(); } catch(_){} }
       };
       minBtn.addEventListener('click', (e) => { e.stopPropagation(); setMin(true); });
-      fab.addEventListener('click', () => setMin(false));
+      let fabDragged = false;
+      fab.addEventListener('click', (e) => {
+        if (fabDragged) { fabDragged = false; e.preventDefault(); e.stopPropagation(); return; }
+        setMin(false);
+      });
+      fab.addEventListener('dblclick', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        resetPos();
+      });
+      // Drag: bekukan ke piksel lalu ikuti pointer, simpan top/left
+      fab.addEventListener('pointerdown', (ev) => {
+        if (!fab.classList.contains('is-visible')) return;
+        ev.preventDefault();
+        const hr = (hud && hud.getBoundingClientRect) ? hud.getBoundingClientRect() : { left: 0, top: 0 };
+        const r = fab.getBoundingClientRect();
+        // bekukan dari CSS centering ke piksel
+        let curTop = r.top - hr.top;
+        let curLeft = r.left - hr.left;
+        fab.style.transform = 'none';
+        fab.style.bottom = 'auto';
+        fab.style.top = curTop + 'px';
+        fab.style.left = curLeft + 'px';
+        fab.style.right = 'auto';
+        const sx = ev.clientX, sy = ev.clientY;
+        let moved = false;
+        fabDragged = false;
+        try { fab.setPointerCapture(ev.pointerId); } catch(_){}
+        fab.style.cursor = 'grabbing';
+        const minY = 8;
+        const move = (e2) => {
+          const dx = e2.clientX - sx, dy = e2.clientY - sy;
+          if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+          if (!moved) return;
+          const maxY = Math.max(minY, (hud ? hud.clientHeight : window.innerHeight) - fab.offsetHeight - 8);
+          const maxX = Math.max(8, (hud ? hud.clientWidth : window.innerWidth) - fab.offsetWidth - 8);
+          const ny = Math.min(Math.max(curTop + dy, minY), maxY);
+          const nx = Math.min(Math.max(curLeft + dx, 8), maxX);
+          fab.style.top = ny + 'px';
+          fab.style.left = nx + 'px';
+        };
+        const up = () => {
+          fab.style.cursor = '';
+          if (moved) fabDragged = true;
+          try {
+            const vT = parseFloat(fab.style.top) || 0;
+            const vL = parseFloat(fab.style.left) || 0;
+            localStorage.setItem(KEY_TOP, String(Math.round(vT)));
+            localStorage.setItem(KEY_LEFT, String(Math.round(vL)));
+          } catch(_){}
+          fab.removeEventListener('pointermove', move);
+          fab.removeEventListener('pointerup', up);
+          fab.removeEventListener('pointercancel', up);
+        };
+        fab.addEventListener('pointermove', move);
+        fab.addEventListener('pointerup', up);
+        fab.addEventListener('pointercancel', up);
+      });
       // Tombol chat di header (jika ada) tidak duplikasi — FAB yang jadi sumber tunggal saat minimized.
     } catch(_){}
   })();
