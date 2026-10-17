@@ -2400,6 +2400,36 @@ async function init() {
   // Allowlist panel_access (DB) — setelah menu Options jadi, panel tak
   // terdaftar di-hide + checkbox dikunci. Panel terdaftar tak tersentuh.
   try { applyPanelAccess(layout); } catch (_) {}
+  // ChatBox minimize/maximize — 1 tombol ─ di head + FAB 💬 44px.
+  // Elegan: fade+scale halus, FAB di tengah-bawah, tidak menonjol.
+  (function(){
+    try {
+      const box = document.getElementById('chatBox');
+      const fab = document.getElementById('chatFab');
+      const minBtn = document.getElementById('chatMinBtn');
+      if(!box || !fab || !minBtn) return;
+      const KEY = 'ana_chat_min';
+      const apply = (min) => {
+        box.classList.toggle('is-minimized', !!min);
+        fab.classList.toggle('is-visible', !!min);
+        try { fab.setAttribute('aria-hidden', String(!min)); } catch(_){}
+      };
+      let min = false;
+      try { min = localStorage.getItem(KEY) === '1'; } catch(_){}
+      apply(min);
+      const setMin = (v) => {
+        min = !!v;
+        apply(min);
+        try { localStorage.setItem(KEY, min ? '1' : '0'); } catch(_){}
+        // FAB muncul/hilang via transition; box visibility delay 320ms — ukuran peta tak terganggu.
+        // Saat maximize, fokus kembali ke input chat.
+        if(!min) { try { document.getElementById('chatInput')?.focus(); } catch(_){} }
+      };
+      minBtn.addEventListener('click', (e) => { e.stopPropagation(); setMin(true); });
+      fab.addEventListener('click', () => setMin(false));
+      // Tombol chat di header (jika ada) tidak duplikasi — FAB yang jadi sumber tunggal saat minimized.
+    } catch(_){}
+  })();
   log('status', 'INIT', 'ANA FUI HUD terintegrasi penuh.');
   setAgentState('IDLE');
   // Boot
