@@ -313,8 +313,16 @@ function ensureDom() {
           if (target && target !== item) {
             target.classList.add(to < from ? "drop-before" : "drop-after");
           }
+          // premium: item di antara bergeser memberi ruang (kesan menyela)
+          rows.forEach((r, i) => {
+            if (r === item) return;
+            let sh = 0;
+            if (to < from && i >= to && i < from) sh = h;
+            else if (to > from && i > from && i <= to) sh = -h;
+            r.style.transform = sh ? "translateY(" + sh + "px)" : "";
+          });
         }
-        item.style.transform = "translateY(" + Math.max(-from * h, Math.min((_items.length - 1 - from) * h, dy)) + "px)";
+        item.style.transform = "translateY(" + Math.max(-from * h, Math.min((_items.length - 1 - from) * h, dy)) + "px) scale(1.015)";
       };
       const up = async () => {
         grip.removeEventListener("pointermove", move);
@@ -322,6 +330,7 @@ function ensureDom() {
         grip.removeEventListener("pointercancel", up);
         item.classList.remove("dragging");
         item.style.transform = "";
+        host.querySelectorAll(".arch-item").forEach(r => { r.style.transform = ""; });
         host.querySelectorAll(".drop-before,.drop-after").forEach(r => r.classList.remove("drop-before", "drop-after"));
         if (cur === from) return;
         _busy = true;
