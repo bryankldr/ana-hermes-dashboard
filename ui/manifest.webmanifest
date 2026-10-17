@@ -1,7 +1,7 @@
 {
   "name": "SIMOGE HUD",
   "short_name": "SIMOGE",
-  "description": "SIMOGE HUD — KPHBWB Sandbox · Autonomous AI dashboard",
+  "description": "SIMOGE HUD — Smart Monitoring & Operational Governance",
   "start_url": "/?pwa=1",
   "scope": "/",
   "display": "standalone",
