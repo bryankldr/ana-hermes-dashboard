@@ -26,8 +26,11 @@
   <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
   <title>ANA · Autonomous AI HUD</title>
-  <!-- Fonts self-hosted via tokens.css @font-face (offline-first, tanpa Google). -->
-  <link rel="preload" href="assets/fonts/jakarta-var.ttf" as="font" type="font/ttf" crossorigin>
+  <!-- Fonts self-hosted via tokens.css @font-face (offline-first, tanpa Google).
+       jakarta-var hanya dipakai di laporan (.rpt-page), bukan HUD awal — preload
+       justru memicu warning "preloaded but not used". Biarkan font-display:swap
+       memuat on-demand saat laporan dibuka. -->
+
   <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/hud.css?v=20261014d">
   <!-- xterm vendored locally (see ui/vendor/): the terminal is the one feature
