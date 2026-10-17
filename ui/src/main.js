@@ -2418,8 +2418,8 @@ async function init() {
       const applySide = (side) => {
         const s = side === 'right' ? 'right' : 'left';
         fab.dataset.side = s;
-        if (s === 'right') { fab.style.left = ''; fab.style.right = '14px'; }
-        else { fab.style.left = '14px'; fab.style.right = ''; }
+        if (s === 'right') { fab.style.left = ''; fab.style.right = '12px'; }
+        else { fab.style.left = '12px'; fab.style.right = ''; }
         try { localStorage.setItem(KEY_SIDE, s); } catch(_){}
       };
       const applyPos = () => {
@@ -2429,15 +2429,25 @@ async function init() {
           else fab.removeAttribute('data-side'); // default tengah-bawah sampai dipindah
           const t = parseFloat(localStorage.getItem(KEY_TOP) || '');
           if (isFinite(t)) {
-            // sudah pernah dipindah: bekukan vertikal, kosongkan bottom
             if (!fab.dataset.side) applySide('left');
-            fab.style.top = Math.max(8, t) + 'px';
+            const hudH = hud ? hud.clientHeight : window.innerHeight;
+            const maxT = Math.max(8, hudH - fab.offsetHeight - 12);
+            fab.style.top = Math.min(Math.max(8, t), maxT) + 'px';
             fab.style.bottom = 'auto';
             fab.style.transform = 'none';
           }
         } catch(_){}
       };
       applyPos();
+      try { window.addEventListener('resize', () => {
+        try {
+          const t = parseFloat(fab.style.top);
+          if (!isFinite(t)) return;
+          const hudH = hud ? hud.clientHeight : window.innerHeight;
+          const maxT = Math.max(8, hudH - fab.offsetHeight - 12);
+          if (t > maxT) fab.style.top = maxT + 'px';
+        } catch(_){}
+      }); } catch(_){}
       const apply = (min) => {
         box.classList.toggle('is-minimized', !!min);
         fab.classList.toggle('is-visible', !!min);

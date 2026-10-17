@@ -422,6 +422,15 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 @media (max-width: 780px){
   .spatial-kpi.flying { min-height: 48px; }
 }
+/* ── Portrait (HP/tablet tegak): bottom-bar jadi kolom — KPI penuh atas,
+   Ringkasan + Legenda penuh bawah. Jangan flex-wrap kacau; portrait
+   butuh kolom vertikal agar tidak tumpuk. Tidak dikunci landscape. */
+@media (orientation: portrait) and (max-width: 1180px) {
+  .map-bottom-bar { flex-direction: column; align-items: stretch; max-height: 42%; gap: 6px; }
+  .map-bottom-bar .spatial-kpi.flying { flex: 0 0 auto; width: 100%; min-width: 0; max-width: none; }
+  .map-bottom-bar .map-bottom-right { flex: 1 1 auto; width: 100%; min-width: 0; }
+  .map-wrap.map-full { min-height: 320px; }
+}
 @media (max-width: 560px){
   .spatial-kpi.flying { grid-template-columns: repeat(2, 1fr); bottom: 56px; }
   /* K5: toolbar mobile rapat — select max 40vw, padding kecil, tombol 30px. */
