@@ -65,3 +65,5 @@ probe_hist.py
 graph.json
 # dataset referensi besar (generated/static, bukan source)
 ui/data/ref_jawa_kabkot.geojson
+.ana_live_stored
+.ana_transcript
