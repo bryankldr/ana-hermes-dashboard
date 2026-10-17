@@ -1156,15 +1156,14 @@ html, body {
 }
 .th-act {
   flex-shrink: 0;
-  background: rgba(0, 220, 255, 0.06);
+  background: rgba(0, 220, 255, 0.08);
   border: 1px solid var(--neon-dim);
-  border-radius: 6px;
-  padding: 1px 6px;
+  border-radius: 8px;
+  padding: 5px 10px;
   color: var(--neon);
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  line-height: 1.5;
+  font-size: 11px;
+  letter-spacing: 0.08em;
   cursor: pointer;
   transition: all 0.2s;
 }
