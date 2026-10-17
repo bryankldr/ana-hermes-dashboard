@@ -2401,8 +2401,8 @@ async function init() {
   // terdaftar di-hide + checkbox dikunci. Panel terdaftar tak tersentuh.
   try { applyPanelAccess(layout); } catch (_) {}
   // ChatBox minimize/maximize — 1 tombol ─ di head + FAB 💬 44px.
-  // Elegan: fade+scale halus, FAB di tengah-bawah, tidak menonjol.
-  // FAB dapat dipindah: seret untuk posisi, dobel-klik ganti sisi (mirror arsip).
+  // Elegan: fade+scale halus, FAB di kiri/kanan vertikal (mirror tombol arsip).
+  // Perilaku: seret vertikal, dobel-klik pindah sisi kiri↔kanan, posisi tersimpan.
   (function(){
     try {
       const box = document.getElementById('chatBox');
@@ -2410,26 +2410,32 @@ async function init() {
       const minBtn = document.getElementById('chatMinBtn');
       if(!box || !fab || !minBtn) return;
       const KEY = 'ana_chat_min';
+      const KEY_SIDE = 'ana_chat_fab_side';
       const KEY_TOP = 'ana_chat_fab_top';
-      const KEY_LEFT = 'ana_chat_fab_left';
+      // migrasikan posisi bebas lama (left) → hanya sisi kiri (arsip behaviour)
+      try { if (localStorage.getItem('ana_chat_fab_left') != null) { localStorage.removeItem('ana_chat_fab_left'); } } catch(_){}
       const hud = document.getElementById('hud') || fab.parentElement;
+      const applySide = (side) => {
+        const s = side === 'right' ? 'right' : 'left';
+        fab.dataset.side = s;
+        if (s === 'right') { fab.style.left = ''; fab.style.right = '10px'; }
+        else { fab.style.left = '10px'; fab.style.right = ''; }
+        try { localStorage.setItem(KEY_SIDE, s); } catch(_){}
+      };
       const applyPos = () => {
         try {
+          const side = localStorage.getItem(KEY_SIDE) || '';
+          if (side === 'right' || side === 'left') applySide(side);
+          else fab.removeAttribute('data-side'); // default tengah-bawah sampai dipindah
           const t = parseFloat(localStorage.getItem(KEY_TOP) || '');
-          const l = parseFloat(localStorage.getItem(KEY_LEFT) || '');
-          const hasT = isFinite(t), hasL = isFinite(l);
-          if (!hasT && !hasL) return; // default tengah-bawah (CSS left:50% + bottom:12px)
-          // bekukan ke posisi absolute tersimpan
-          fab.style.top = hasT ? Math.max(8, t) + 'px' : '';
-          fab.style.bottom = hasT ? 'auto' : '';
-          fab.style.left = hasL ? l + 'px' : '';
-          fab.style.right = 'auto';
-          fab.style.transform = 'none';
+          if (isFinite(t)) {
+            // sudah pernah dipindah: bekukan vertikal, kosongkan bottom
+            if (!fab.dataset.side) applySide('left');
+            fab.style.top = Math.max(8, t) + 'px';
+            fab.style.bottom = 'auto';
+            fab.style.transform = 'none';
+          }
         } catch(_){}
-      };
-      const resetPos = () => {
-        fab.style.top = ''; fab.style.bottom = ''; fab.style.left = ''; fab.style.right = ''; fab.style.transform = '';
-        try { localStorage.removeItem(KEY_TOP); localStorage.removeItem(KEY_LEFT); } catch(_){}
       };
       applyPos();
       const apply = (min) => {
@@ -2444,8 +2450,6 @@ async function init() {
         min = !!v;
         apply(min);
         try { localStorage.setItem(KEY, min ? '1' : '0'); } catch(_){}
-        // FAB muncul/hilang via transition; box visibility delay 320ms — ukuran peta tak terganggu.
-        // Saat maximize, fokus kembali ke input chat.
         if(!min) { try { document.getElementById('chatInput')?.focus(); } catch(_){} }
       };
       minBtn.addEventListener('click', (e) => { e.stopPropagation(); setMin(true); });
@@ -2456,22 +2460,35 @@ async function init() {
       });
       fab.addEventListener('dblclick', (e) => {
         e.preventDefault(); e.stopPropagation();
-        resetPos();
+        const cur = fab.dataset.side === 'right' ? 'right' : 'left';
+        // belum pernah dipindah (tengah): dblclick pertama → kiri (posisi 50% tinggi)
+        if (!fab.dataset.side) {
+          applySide('left');
+          const hr = hud ? hud.getBoundingClientRect() : { top: 0, height: window.innerHeight };
+          const y = Math.round(hr.height / 2 - fab.offsetHeight / 2);
+          fab.style.top = y + 'px';
+          fab.style.bottom = 'auto';
+          fab.style.transform = 'none';
+          try { localStorage.setItem(KEY_TOP, String(y)); } catch(_){}
+        } else {
+          applySide(cur === 'right' ? 'left' : 'right');
+        }
       });
-      // Drag: bekukan ke piksel lalu ikuti pointer, simpan top/left
+      // Drag vertikal saja — sisi dijepit saat seret horizontal jauh (mirror arsip dx>60)
       fab.addEventListener('pointerdown', (ev) => {
         if (!fab.classList.contains('is-visible')) return;
         ev.preventDefault();
-        const hr = (hud && hud.getBoundingClientRect) ? hud.getBoundingClientRect() : { left: 0, top: 0 };
+        const hr = (hud && hud.getBoundingClientRect) ? hud.getBoundingClientRect() : { left: 0, top: 0, height: window.innerHeight };
         const r = fab.getBoundingClientRect();
-        // bekukan dari CSS centering ke piksel
-        let curTop = r.top - hr.top;
-        let curLeft = r.left - hr.left;
+        // Bekukan dari centering/default ke piksel; pastikan sisi terpasang
+        if (!fab.dataset.side) applySide('left');
+        // top kini: jika sudah ada top tersimpan pakai itu, kalau tidak dari posisi sekarang
+        let curTop = parseFloat(fab.style.top);
+        if (!isFinite(curTop)) curTop = r.top - hr.top;
         fab.style.transform = 'none';
         fab.style.bottom = 'auto';
         fab.style.top = curTop + 'px';
-        fab.style.left = curLeft + 'px';
-        fab.style.right = 'auto';
+        // left/right sudah via data-side — jangan ubah horizontal kecuali jepit sisi
         const sx = ev.clientX, sy = ev.clientY;
         let moved = false;
         fabDragged = false;
@@ -2480,23 +2497,21 @@ async function init() {
         const minY = 8;
         const move = (e2) => {
           const dx = e2.clientX - sx, dy = e2.clientY - sy;
-          if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+          if (Math.abs(dy) > 6 || Math.abs(dx) > 6) moved = true;
           if (!moved) return;
           const maxY = Math.max(minY, (hud ? hud.clientHeight : window.innerHeight) - fab.offsetHeight - 8);
-          const maxX = Math.max(8, (hud ? hud.clientWidth : window.innerWidth) - fab.offsetWidth - 8);
           const ny = Math.min(Math.max(curTop + dy, minY), maxY);
-          const nx = Math.min(Math.max(curLeft + dx, 8), maxX);
           fab.style.top = ny + 'px';
-          fab.style.left = nx + 'px';
+          // jepit sisi saat seret horizontal jauh (mirror arsip)
+          if (dx > 60) applySide('right');
+          else if (dx < -60) applySide('left');
         };
         const up = () => {
           fab.style.cursor = '';
           if (moved) fabDragged = true;
           try {
             const vT = parseFloat(fab.style.top) || 0;
-            const vL = parseFloat(fab.style.left) || 0;
             localStorage.setItem(KEY_TOP, String(Math.round(vT)));
-            localStorage.setItem(KEY_LEFT, String(Math.round(vL)));
           } catch(_){}
           fab.removeEventListener('pointermove', move);
           fab.removeEventListener('pointerup', up);
@@ -2506,7 +2521,6 @@ async function init() {
         fab.addEventListener('pointerup', up);
         fab.addEventListener('pointercancel', up);
       });
-      // Tombol chat di header (jika ada) tidak duplikasi — FAB yang jadi sumber tunggal saat minimized.
     } catch(_){}
   })();
   log('status', 'INIT', 'ANA FUI HUD terintegrasi penuh.');
