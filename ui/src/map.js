@@ -201,15 +201,20 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '  <div id="spatialProgress" class="spatial-progress flying hidden" aria-live="polite"><div class="sp-bar"><div id="spBarFill" class="sp-fill" style="width:0%"></div></div><div id="spLabel" class="sp-label">siap</div></div>'
       + '  <div class="map-bottom-bar">'
       + '    <div id="spatialKpi" class="spatial-kpi flying">'
-      + '      <div class="kpi"><div class="kpi-label">Total</div><div class="kpi-value" id="kpiTotal">-</div><div class="kpi-sub" id="kpiTotalSub">memuat</div></div>'
-      + '      <div class="kpi"><div class="kpi-label" id="kpi2Label">Bongkor</div><div class="kpi-value warn" id="kpi2">-</div><div class="kpi-sub" id="kpi2Sub">merah</div></div>'
-      + '      <div class="kpi"><div class="kpi-label" id="kpi3Label">Perhatian</div><div class="kpi-value mid" id="kpi3">-</div><div class="kpi-sub" id="kpi3Sub">kuning/oranye</div></div>'
-      + '      <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/biru</div></div>'
+      + '      <div class="kpi-head" id="kpiHead">Coverage Petak</div>'
+      + '      <div class="kpi-grid">'
+      + '        <div class="kpi"><div class="kpi-label">Total</div><div class="kpi-value" id="kpiTotal">-</div><div class="kpi-sub" id="kpiTotalSub">memuat</div></div>'
+      + '        <div class="kpi"><div class="kpi-label" id="kpi2Label">Bongkor</div><div class="kpi-value warn" id="kpi2">-</div><div class="kpi-sub" id="kpi2Sub">merah</div></div>'
+      + '        <div class="kpi"><div class="kpi-label" id="kpi3Label">Perhatian</div><div class="kpi-value mid" id="kpi3">-</div><div class="kpi-sub" id="kpi3Sub">kuning/oranye</div></div>'
+      + '        <div class="kpi"><div class="kpi-label" id="kpi4Label">Terpenuhi</div><div class="kpi-value ok" id="kpi4">-</div><div class="kpi-sub" id="kpi4Sub">hijau/biru</div></div>'
+      + '      </div>'
       + '    </div>'
-      + '    <div id="spatialInsight" class="spatial-insight flying"></div>'
-      + '    <div class="map-legendbox flying">'
-      + '      <div class="map-legend flying" id="mapLegend"></div>'
-      + '      <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
+      + '    <div class="map-bottom-right">'
+      + '      <div id="spatialInsight" class="spatial-insight flying"></div>'
+      + '      <div class="map-legendbox flying">'
+      + '        <div class="map-legend flying" id="mapLegend"></div>'
+      + '        <div class="map-meta flying"><span id="mapMetric" class="map-metric">-</span><span id="mapStat" class="map-stat">siap</span></div>'
+      + '      </div>'
       + '    </div>'
       + '  </div>'
       + '  <div id="spatialTilesModal" class="spatial-tiles-modal hidden" role="dialog" aria-label="Pengaturan tiles">'
@@ -766,6 +771,18 @@ function updateLegend(biz, kat) {
       kpiTotalSub.textContent = per + ' \u00b7 ' + tot + ' ' + ctx;
       kpiTotalSub.title = 'Total polygon untuk filter ' + per + ' · ' + (biz||'petak');
     }
+    // Header KPI dinamis relevan per bisnis
+    try {
+      const _kHead = document.getElementById('kpiHead');
+      if (_kHead) {
+        const _per = curPerLabel();
+        if (biz==='produksi') _kHead.textContent = 'Capaian RO/NPS \u00b7 ' + _per;
+        else if (biz==='aktivitas') _kHead.textContent = 'Efektivitas Pohon \u00b7 ' + _per;
+        else if (biz==='keaktifan') _kHead.textContent = 'Keaktifan Sadap \u00b7 ' + _per;
+        else if (biz==='matriks' || biz==='matrik') _kHead.textContent = 'Skor Matriks \u00b7 ' + _per;
+        else _kHead.textContent = 'Coverage Petak \u00b7 ' + _per;
+      }
+    } catch(_){}
     let l2='Bongkor', l3='Perhatian', l4='Terpenuhi';
     let v2 = c.merah || 0, v3 = (c.kuning||0)+(c.oranye||0), v4=(c.hijau||0)+(c.emas||0);
     let s2='', s3='', s4='', t2='', t3='', t4='';
