@@ -108,6 +108,29 @@ html, body {
   body:not(.hud-header-open) .bottom-telemetry { display: none !important; }
   body.hud-header-open .top-controls { top: 40px; }
 }
+/* ── Portrait phone: header jadi stack vertikal, tidak saling tumpuk ── */
+@media (max-width: 780px) and (orientation: portrait) {
+  body.hud-header-open .top-controls,
+  body.hud-header-open .top-dials,
+  body.hud-header-open .bottom-telemetry {
+    position: relative !important;
+    top: auto !important; left: auto !important; right: auto !important; bottom: auto !important;
+    transform: none !important; max-width: none !important;
+    width: calc(100% - 24px) !important; margin-left: 12px; margin-right: 12px;
+    flex-wrap: wrap; justify-content: flex-start;
+  }
+  body.hud-header-open .top-controls { margin-top: 44px; }
+  body.hud-header-open .top-dials { margin-top: 8px; }
+  body.hud-header-open .bottom-telemetry { margin-top: 8px; }
+  body.hud-header-open #mapPanel { top: 148px !important; }
+}
+/* ── Portrait tablet (781-1180 tegak): header rapikan agar tidak tumpuk ── */
+@media (min-width: 781px) and (max-width: 1180px) and (orientation: portrait) {
+  .top-controls { max-width: calc(100% - 24px); flex-wrap: wrap; }
+  .top-dials { right: 12px; left: auto; }
+  .bottom-telemetry { right: 12px; left: auto; top: 52px; max-width: calc(100% - 24px); flex-wrap: wrap; }
+  #mapPanel { top: 84px; }
+}
 
 /* ═══ TOP DIALS ═══ */
 /* topDials is a LayoutManager panel (registered in main.js), so it gets the
