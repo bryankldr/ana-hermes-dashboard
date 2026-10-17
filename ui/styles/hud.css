@@ -1062,7 +1062,7 @@ html, body {
 @keyframes thIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 .th-user { margin-left: auto; justify-content: flex-end; }
 .th-ana { margin-right: auto; justify-content: flex-start; }
-.th-content { min-width: 0; max-width: min(82cqi, 82%); flex: 0 1 auto; }
+.th-content { min-width: 0; max-width: min(96cqi, 96%); flex: 0 1 auto; }
 .th-user .th-content { display: flex; flex-direction: column; align-items: flex-end; }
 .th-bubble {
   position: relative;
@@ -1073,7 +1073,8 @@ html, body {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-@container (max-width: 320px) {
+@container (max-width: 360px) {
+  .th-content { max-width: 94%; }
   .th-bubble { padding: 7px 10px; }
   .th-body { font-size: 13px; line-height: 1.5; }
   .th-user .th-quote { font-size: 13px; }
