@@ -2702,22 +2702,43 @@ class Handler(BaseHTTPRequestHandler):
         try:
             cr = subprocess.run(["crontab", "-l"], capture_output=True,
                                 text=True, timeout=10)
-            st["cron"] = [ln for ln in (cr.stdout or "").splitlines()
-                          if "ana-hermes-dashboard" in ln and ln.strip()
-                          and not ln.strip().startswith("#")]
+            raw_cron = [ln for ln in (cr.stdout or "").splitlines()
+                        if "ana-hermes-dashboard" in ln and ln.strip()
+                        and not ln.strip().startswith("#")]
+            # Sederhanakan: hanya jadwal + status, tanpa path demi keamanan
+            cron_simple = []
+            for ln in raw_cron:
+                parts = ln.split()
+                sched = " ".join(parts[:5]) if len(parts) >= 5 else ln[:32]
+                cron_simple.append(sched)
+            st["cron"] = raw_cron
+            st["cron_simple"] = cron_simple
+            st["cron_status"] = "aktif" if raw_cron else "mati"
         except Exception as e:                        # noqa: BLE001
             st["cron"] = []
+            st["cron_simple"] = []
+            st["cron_status"] = "mati"
             st["cron_error"] = str(e)[:120]
         try:
             lg = ROOT / "logs" / "refresh_petak.log"
             if lg.is_file():
                 with lg.open(encoding="utf-8", errors="replace") as fh:
                     lines = fh.readlines()
-                st["log_tail"] = "".join(lines[-8:])[-1200:]
+                # Sederhanakan log: buang path absolut, ambil ringkasan saja
+                tail = "".join(lines[-8:])[-1200:]
+                # Sanitasi path demi keamanan
+                import re as _re
+                tail = _re.sub(r"/[^\s]*ana-hermes-dashboard[^\s]*", "[app]", tail)
+                tail = _re.sub(r"/home/[^\s]+", "[home]", tail)
+                # Ringkas: ambil baris berisi kata kunci status saja
+                keep_kw = ("OK", "sukses", "berhasil", "gagal", "error", "rebuild", "cron")
+                short = [ln for ln in tail.splitlines() if any(k in ln.lower() for k in keep_kw)]
+                st["log_tail"] = "\n".join(short[-4:]) if short else tail.strip().splitlines()[-1] if tail.strip() else "(log kosong)"
+                st["log_tail"] = st["log_tail"][-600:]
             else:
                 st["log_tail"] = "(belum ada log)"
         except OSError as e:
-            st["log_tail"] = f"(log tak terbaca: {e})"
+            st["log_tail"] = "(log tak terbaca)"
         return self._json({"ok": True, **st})
 
     # ── P2-4 cron rebuild harian (dikelola dari UI) ──

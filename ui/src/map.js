@@ -1312,12 +1312,13 @@ function updateLegend(biz, kat) {
         const d = await r.json().catch(() => ({}));
         if (!r.ok || d.ok === false) { if (stBox) stBox.textContent = 'gagal: ' + (d.error || ('HTTP '+r.status)); return; }
         const pm = d['petak.pmtiles'] || {}, nd = d['petak.ndjson'] || {};
-        const cron = (d.cron && d.cron.length) ? d.cron.join('\n') : '(cron mati — rebuild harian tidak jalan)';
+        const cronStat = d.cron_status || (d.cron && d.cron.length ? 'aktif' : 'mati');
+        const cronSched = (d.cron_simple && d.cron_simple[0]) ? d.cron_simple[0] : '-';
         if (stBox) stBox.innerHTML =
           '<div>PMTiles: <b>' + (pm.exists ? fmtB(pm.bytes)+' · '+fmtT(pm.mtime) : '<span style="color:#EF4444">hilang</span>') + '</b></div>'
           + '<div>NDJSON: <b>' + (nd.exists ? (nd.lines ?? '?')+' baris · '+fmtB(nd.bytes) : '<span style="color:#EF4444">hilang</span>') + '</b></div>'
-          + '<div>Cron: <pre style="white-space:pre-wrap;margin:4px 0">' + cron.replace(/</g,'&lt;') + '</pre></div>'
-          + '<div>Log: <pre style="white-space:pre-wrap;margin:4px 0;max-height:120px;overflow:auto">' + String(d.log_tail||'').replace(/</g,'&lt;') + '</pre></div>';
+          + '<div>Cron: <b style="color:' + (cronStat==='aktif' ? '#39F5A6' : '#F59E0B') + '">' + cronStat + '</b> <span style="opacity:.7">' + cronSched.replace(/</g,'&lt;') + '</span></div>'
+          + '<div style="font-size:12px;opacity:.85;margin-top:4px">' + String(d.log_tail||'').replace(/</g,'&lt;') + '</div>';
         say('');
       } catch(e) { if (stBox) stBox.textContent = 'gagal: ' + String(e?.message || e).slice(0,120); }
     }
