@@ -607,8 +607,12 @@ html, body {
 .chatbox-thread {
   flex: 1 1 0;
   min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 10px 14px;
+  container-type: inline-size;
 }
 #chatBox .chat-main {
   flex: 0 0 auto;
@@ -1040,27 +1044,39 @@ html, body {
 
 /* ═══ CHAT THREAD ═══
    Gaya percakapan manusia: avatar + ekor bubble + nama alami,
-   bukan kartu seragam. User kanan hijauredup, ANNA kiri kaca gelap. */
+   bukan kartu seragam. User kanan hijauredup, ANNA kiri kaca gelap.
+   Lebar flex agar ikut panel drag/resize (container query). */
 .th-user, .th-ana {
   display: flex;
   gap: 8px;
   margin: 10px 0;
-  max-width: 94%;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   animation: thIn .22s ease-out;
   background: none;
   border: none;
   padding: 0;
+  container-type: inline-size;
 }
 @keyframes thIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-.th-user { margin-left: auto; }
-.th-ana { margin-right: auto; }
-.th-content { min-width: 0; max-width: 100%; }
+.th-user { margin-left: auto; justify-content: flex-end; }
+.th-ana { margin-right: auto; justify-content: flex-start; }
+.th-content { min-width: 0; max-width: min(82cqi, 82%); flex: 0 1 auto; }
 .th-user .th-content { display: flex; flex-direction: column; align-items: flex-end; }
 .th-bubble {
   position: relative;
   border-radius: 14px;
   padding: 9px 13px;
   max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+@container (max-width: 320px) {
+  .th-bubble { padding: 7px 10px; }
+  .th-body { font-size: 13px; line-height: 1.5; }
+  .th-user .th-quote { font-size: 13px; }
 }
 .th-user .th-bubble {
   background: rgba(0,220,255,.13);
