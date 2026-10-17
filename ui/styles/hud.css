@@ -584,7 +584,7 @@ html, body {
   background: rgba(0, 26, 56, 0.85);
   border: 1px solid var(--neon-dim);
   border-radius: 14px;
-  overflow: visible;
+  overflow: hidden;
   backdrop-filter: blur(6px);
   container-type: size;
   container-name: chatbox;
@@ -811,22 +811,23 @@ html, body {
   box-shadow: 0 0 8px var(--neon-dim);
 }
 
-/* ── Template pertanyaan: tombol ▦ + panel expand, hanya mode asisten ──
-   Visibilitas mode diatur class .only-asisten (map.css: coding sembunyikan).
-   /* Panel absolute terhadap #chatBar (position:absolute) jadi ikut chat bar. */
+/* ── Template/session panel: dropdown di DALAM chatBox, di atas tombol ──
+   ChatBox premium: panel muncul di dalam box tepat di atas toolbar,
+   bukan melayang di luar (terpotong overflow). */
    #tplPanel, #sessionPanel {
      position: absolute;
-     bottom: calc(100% + 8px);
-     left: 0;
-     width: min(460px, 92vw);
-     max-height: min(52vh, 360px);
+     bottom: 48px;
+     left: 8px;
+     right: 8px;
+     width: auto;
+     max-height: 55%;
      overflow-y: auto;
-     background: rgba(2, 15, 42, 0.96);
+     background: rgba(2, 15, 42, 0.98);
      border: 1px solid var(--neon-border);
-     border-radius: 6px;
-     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+     border-radius: 8px;
+     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 12px rgba(0, 220, 255, 0.08);
      padding: 8px;
-     z-index: 30;
+     z-index: 5;
    }
    #tplPanel[hidden], #sessionPanel[hidden] { display: none; }
 /* Bar kelola template per-user: ikon + form inline, compact modern.
