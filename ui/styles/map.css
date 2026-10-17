@@ -374,6 +374,15 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
   .map-bottom-bar .map-legendbox.flying { flex: 1 1 100%; max-height: 160px; }
   .spatial-progress.flying { bottom: 92px; width: 200px; }
 }
+@media (max-width: 900px){
+  .map-bottom-bar { flex-wrap: wrap; align-items: stretch; }
+  .map-bottom-bar .spatial-kpi.flying { flex: 1 1 100%; width: auto; max-width: none; }
+  .map-bottom-bar .map-bottom-right { flex: 1 1 100%; width: 100%; }
+  .map-bottom-bar .spatial-insight.flying { flex: 1 1 200px; white-space: normal; max-height: 52px; }
+  .map-bottom-bar .map-meta.flying { flex: 0 0 auto; }
+  .map-bottom-bar .map-legend.flying { flex: 1 1 100%; width: auto; }
+  .map-bottom-bar .map-legendbox.flying { flex: 1 1 100%; max-height: 160px; }
+}
 @media (max-width: 780px){
   .spatial-kpi.flying { min-height: 48px; }
 }
@@ -397,7 +406,7 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 .map-bottom-bar .spatial-kpi.flying { position: static; width: 352px; max-width: 352px; flex: 0 0 352px; min-width: 0; left: auto; right: auto; bottom: auto; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: rgba(2,15,42,.88); backdrop-filter: blur(10px); border: 1px solid rgba(45,242,255,.22); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.45); overflow: hidden; }
 
 /* kolom kanan: Ringkasan ANNA (atas) + Legenda (bawah) — rapi vertikal */
-.map-bottom-right { display: flex; flex-direction: column; gap: 8px; flex: 1 1 0; min-width: 0; max-width: 560px; pointer-events: auto; }
+.map-bottom-right { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-width: 0; max-width: none; pointer-events: auto; }
 .kpi-head { font-family: var(--font-mono); font-size: 10px; letter-spacing: .10em; text-transform: uppercase; color: var(--neon); font-weight: 700; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 4px; flex: 0 0 auto; }
 .map-bottom-bar .spatial-insight,
