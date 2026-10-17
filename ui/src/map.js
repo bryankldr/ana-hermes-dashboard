@@ -771,16 +771,34 @@ function updateLegend(biz, kat) {
       kpiTotalSub.textContent = per + ' \u00b7 ' + tot + ' ' + ctx;
       kpiTotalSub.title = 'Total polygon untuk filter ' + per + ' · ' + (biz||'petak');
     }
-    // Header KPI dinamis relevan per bisnis
+    // Header KPI dinamis: bisnis + fokus filter (wilayah paling spesifik) + periode
     try {
       const _kHead = document.getElementById('kpiHead');
       if (_kHead) {
         const _per = curPerLabel();
-        if (biz==='produksi') _kHead.textContent = 'Capaian RO/NPS \u00b7 ' + _per;
-        else if (biz==='aktivitas') _kHead.textContent = 'Efektivitas Pohon \u00b7 ' + _per;
-        else if (biz==='keaktifan') _kHead.textContent = 'Keaktifan Sadap \u00b7 ' + _per;
-        else if (biz==='matriks' || biz==='matrik') _kHead.textContent = 'Skor Matriks \u00b7 ' + _per;
-        else _kHead.textContent = 'Coverage Petak \u00b7 ' + _per;
+        let base = 'Coverage Petak';
+        if (biz==='produksi') base = 'Capaian RO/NPS';
+        else if (biz==='aktivitas') base = 'Efektivitas Pohon';
+        else if (biz==='keaktifan') base = 'Keaktifan Sadap';
+        else if (biz==='matriks' || biz==='matrik') base = 'Skor Matriks';
+        // fokus filter: TPG > RPH > BKPH > KPH > DIVRE
+        let focus = '';
+        try {
+          const pick = (s) => {
+            if (!s || !s.value) return '';
+            const t = (s.selectedOptions && s.selectedOptions[0] ? s.selectedOptions[0].textContent : s.value) || '';
+            const v = String(t).trim();
+            if (!v || /^semua$/i.test(v)) return '';
+            return v;
+          };
+          focus = pick(typeof fTpg !== 'undefined' ? fTpg : null)
+               || pick(typeof fRph !== 'undefined' ? fRph : null)
+               || pick(typeof fBkph !== 'undefined' ? fBkph : null)
+               || pick(typeof fKph !== 'undefined' ? fKph : null)
+               || pick(typeof fDivre !== 'undefined' ? fDivre : null) || '';
+        } catch(_) {}
+        _kHead.textContent = focus ? (base + ' \u00b7 ' + focus + ' \u00b7 ' + _per) : (base + ' \u00b7 ' + _per);
+        _kHead.title = _kHead.textContent;
       }
     } catch(_){}
     let l2='Bongkor', l3='Perhatian', l4='Terpenuhi';
