@@ -2418,8 +2418,8 @@ async function init() {
       const applySide = (side) => {
         const s = side === 'right' ? 'right' : 'left';
         fab.dataset.side = s;
-        if (s === 'right') { fab.style.left = ''; fab.style.right = '12px'; }
-        else { fab.style.left = '12px'; fab.style.right = ''; }
+        if (s === 'right') { fab.style.left = ''; fab.style.right = '14px'; }
+        else { fab.style.left = '14px'; fab.style.right = ''; }
         try { localStorage.setItem(KEY_SIDE, s); } catch(_){}
       };
       const applyPos = () => {
