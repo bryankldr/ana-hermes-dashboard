@@ -50,11 +50,11 @@
 .spatial-row.cols4 > label { grid-column: span 4; }
 .spatial-row.cols2 > label { grid-column: span 4; }
 /* WILAYAH contoh: 3 menu → 33% = 4/12 tetap — jadi panutan lebar seimbang */
-.spatial-fgroup .spatial-row:not(.cols4):not(.cols2) > label { grid-column: span 4; }
-/* WILAYAH baris-2: RPH + TPG + 2 tombol → 4 + 4 + 2 + 2 = 12 — HANYA untuk WILAYAH */
-.spatial-fgroup .spatial-row:last-child:not(.cols4):not(.cols2) { grid-template-columns: repeat(12, minmax(0,1fr)); }
-.spatial-fgroup .spatial-row:last-child:not(.cols4):not(.cols2) > label { grid-column: span 4; }
-.spatial-fgroup .spatial-row:last-child:not(.cols4):not(.cols2) > button { grid-column: span 2; min-width: 0; width: 100%; box-sizing: border-box; justify-self: stretch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spatial-fgroup .spatial-row:not(.cols4):not(.cols2):not(.wil-actions) > label { grid-column: span 4; }
+/* WILAYAH baris-2: RPH + TPG + aksi (Terapkan+Reset bagi 1 grid) → 4 + 4 + 4 = 12 */
+.spatial-row.wil-actions > label { grid-column: span 4; }
+.spatial-row.wil-actions > .spatial-actions { grid-column: span 4; display: flex; gap: 6px; align-items: end; min-width: 0; }
+.spatial-row.wil-actions > .spatial-actions > .spatial-btn { flex: 1 1 0; min-width: 0; justify-content: center; }
 .spatial-row label { min-width: 0; display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-weight:600; letter-spacing:.02em; }
 .spatial-mini { width: 100%; min-width: 0; box-sizing: border-box; }
 .spatial-row label .spatial-mini, .spatial-row label select { width: 100%; }
