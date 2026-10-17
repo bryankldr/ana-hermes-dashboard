@@ -584,7 +584,7 @@ html, body {
   background: rgba(0, 26, 56, 0.85);
   border: 1px solid var(--neon-dim);
   border-radius: 14px;
-  overflow: hidden;
+  overflow: visible;
   backdrop-filter: blur(6px);
   container-type: size;
   container-name: chatbox;
@@ -617,26 +617,6 @@ html, body {
   border-radius: 0;
   background: rgba(0, 18, 40, 0.6);
 }
-/* height:auto di sini pernah menggagalkan resize: LayoutManager menulis
-   el.style.height inline, dan inline selalu menang atas height:auto — jadi
-   panel terkunci pada tinggi yang diukur saat load dan textarea tak pernah
-   ikut bertambah. */
-#chatBox {
-  position: absolute;
-  /* safe-area: tombol kirim tak tertutup home-indicator iOS/gesture bar. */
-  bottom: calc(8px + env(safe-area-inset-bottom, 0px)); left: 50%;
-  transform: translateX(-50%);
-  width: min(560px, calc(100% - 20px));
-  min-height: 76px;
-  z-index: 20;
-  display: flex;
-  /* Container query, bukan JS: tinggi panel dikontrol LayoutManager lewat drag
-     handle, dan resize observer / rAF tidak pernah jalan di tab hidden (sudah
-     dibuktikan di panel options). Container query murni CSS, selalu sinkron. */
-  container-type: size;
-  container-name: chatbar;
-}
-
 /* ── Chatbox modern: kartu 2-baris (teks atas, toolbar bawah) ──
    Toolbar: template kiri, mode+mic+kirim kanan bawah. ID tombol tetap
    (tplBtn/modeBtn/micBtn/sendBtn) jadi JS tak berubah. */
