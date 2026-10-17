@@ -622,8 +622,8 @@ html, body {
   transition: opacity .32s cubic-bezier(.22,1,.36,1), transform .32s cubic-bezier(.22,1,.36,1), visibility 0s linear .32s, border-color .2s, background .2s, left .22s, right .22s, top .22s;
 }
 #chatFab:active { cursor: grabbing; }
-#chatFab[data-side="left"] { left: 10px; right: auto; bottom: auto; top: 50%; transform: translateY(-50%); }
-#chatFab[data-side="right"] { left: auto; right: 10px; bottom: auto; top: 50%; transform: translateY(-50%); }
+#chatFab[data-side="left"] { left: 10px; right: auto; bottom: auto; top: calc(50% + 60px); transform: translateY(-50%); }
+#chatFab[data-side="right"] { left: auto; right: 10px; bottom: auto; top: calc(50% + 60px); transform: translateY(-50%); }
 #chatFab[data-side][style*="top:"] { transform: none; }
 #chatFab.is-visible {
   opacity: 1;

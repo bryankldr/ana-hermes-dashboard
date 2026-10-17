@@ -2460,17 +2460,14 @@ async function init() {
       });
       fab.addEventListener('dblclick', (e) => {
         e.preventDefault(); e.stopPropagation();
-        const cur = fab.dataset.side === 'right' ? 'right' : 'left';
-        // belum pernah dipindah (tengah): dblclick pertama → kiri (posisi 50% tinggi)
         if (!fab.dataset.side) {
           applySide('left');
-          const hr = hud ? hud.getBoundingClientRect() : { top: 0, height: window.innerHeight };
-          const y = Math.round(hr.height / 2 - fab.offsetHeight / 2);
-          fab.style.top = y + 'px';
-          fab.style.bottom = 'auto';
-          fab.style.transform = 'none';
-          try { localStorage.setItem(KEY_TOP, String(y)); } catch(_){}
+          // CSS sudah top calc(50%+60px) dengan gap 60px dari arsip — hapus top inline agar pakai CSS
+          fab.style.top = '';
+          fab.style.bottom = '';
+          try { localStorage.removeItem(KEY_TOP); } catch(_){}
         } else {
+          const cur = fab.dataset.side === 'right' ? 'right' : 'left';
           applySide(cur === 'right' ? 'left' : 'right');
         }
       });
@@ -2509,6 +2506,29 @@ async function init() {
         const up = () => {
           fab.style.cursor = '';
           if (moved) fabDragged = true;
+          // anti-tindih: bila sisi sama dengan tombol arsip, jangan bertumpuk
+          try {
+            const arch = document.getElementById('spatialArchiveBtn');
+            if (arch && arch.dataset.side === fab.dataset.side && arch.getBoundingClientRect) {
+              const ar = arch.getBoundingClientRect();
+              const fr = fab.getBoundingClientRect();
+              const overlap = !(fr.bottom < ar.top - 6 || fr.top > ar.bottom + 6);
+              if (overlap) {
+                const hudH = hud ? hud.clientHeight : window.innerHeight;
+                // geser chat menjauh dari arsip: di bawah arsip + 12px, atau di atas bila dekat bawah
+                const below = ar.bottom + 12;
+                const above = ar.top - fab.offsetHeight - 12;
+                let ny2 = parseFloat(fab.style.top) || 0;
+                // pilih arah yang masih muat
+                if (below + fab.offsetHeight + 8 <= hudH) ny2 = below - (hud ? hud.getBoundingClientRect().top : 0);
+                else if (above >= 8) ny2 = above - (hud ? hud.getBoundingClientRect().top : 0);
+                else ny2 = Math.max(8, below - (hud ? hud.getBoundingClientRect().top : 0));
+                // clamp
+                ny2 = Math.min(Math.max(ny2, 8), Math.max(8, hudH - fab.offsetHeight - 8));
+                fab.style.top = Math.round(ny2) + 'px';
+              }
+            }
+          } catch(_){}
           try {
             const vT = parseFloat(fab.style.top) || 0;
             localStorage.setItem(KEY_TOP, String(Math.round(vT)));
