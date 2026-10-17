@@ -91,7 +91,7 @@
 #mapBox { pointer-events: auto; }
 .map-wrap.map-full { pointer-events: auto; }
 /* header panel SPATIAL MAP — judul + BUSINESS INTELLIGENCE + periode/mode (bukan flying di map) */
-#mapPanel .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; letter-spacing:.06em; }
+#mapPanel .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; letter-spacing:.06em; width: min(596px, calc(100% - 16px)); max-width: 596px; box-sizing: border-box; flex: 0 0 auto; align-self: flex-start; }
 #mapPanel .panel-title .sh-title { font-family: var(--font-disp); font-size: 10px; letter-spacing: .12em; color: var(--text-dim); opacity: .9; }
 #mapPanel .panel-title .sh-badges { display: flex; gap: 4px; align-items: center; }
 #mapPanel .panel-title .sh-badge { font-family: var(--font-mono); font-size: 10px; padding: 3px 8px; letter-spacing:.04em; border-radius: 999px; border: 1px solid var(--neon-border); color: var(--text-dim); background: rgba(2,15,42,.6); }
