@@ -310,8 +310,9 @@ html[data-ana-mode="asisten"] .only-coding { display: none !important; }
 .arch-badge[data-kind="report"] { color: #FACC15; border-color: rgba(250,204,21,.4); }
 .arch-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .arch-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
-.arch-del { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(251,113,133,.45); background: rgba(251,113,133,.12); color: #FDA4AF; border-radius: 8px; padding: 4px 8px; cursor: pointer; }
-.arch-del:hover { color: #fff; border-color: #FB7185; background: rgba(251,113,133,.28); }
+.arch-del { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-dim); opacity: .55; padding: 6px; cursor: pointer; border-radius: 6px; transition: color .18s, opacity .18s, transform .18s; }
+.arch-del:hover { color: #FB7185; opacity: 1; transform: scale(1.08); }
+.arch-del:active { transform: scale(.96); }
 .arch-del svg { display: block; }
 .arch-open.busy, .arch-del.busy { opacity: .5; pointer-events: none; }
 .arch-foot { flex: 0 0 auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); text-align: center; padding: 5px; border-top: 1px solid rgba(45,242,255,.14); }
