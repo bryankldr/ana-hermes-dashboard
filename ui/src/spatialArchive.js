@@ -86,6 +86,12 @@ function renderList() {
   }).join("");
 }
 
+function updateBadge() {
+  try {
+    const c = document.getElementById("spatialArchiveCount");
+    if (c) { c.textContent = String(_items.length); c.style.display = _items.length ? "flex" : "none"; }
+  } catch (_) {}
+}
 async function refresh() {
   const host = document.getElementById("spatialArchiveList");
   try {
@@ -94,10 +100,7 @@ async function refresh() {
   } catch (e) {
     if (host) host.innerHTML = '<div class="arch-empty">Gagal memuat arsip: ' + esc(String(e?.message || e).slice(0, 80)) + '</div>';
   }
-  try {
-    const c = document.getElementById("spatialArchiveCount");
-    if (c) { c.textContent = String(_items.length); c.style.display = _items.length ? "flex" : "none"; }
-  } catch (_) {}
+  updateBadge();
 }
 
 function setOpen(v) {
@@ -314,7 +317,7 @@ function ensureDom() {
           const e0 = _items[from];
           const j = await apiMove(e0.id, cur);
           _items = j.items || [];
-          renderList();
+          renderList(); updateBadge();
           _log("arch", "ARSIP", "geser #" + (from + 1) + " -> #" + (cur + 1) + ": " + (e0.title || e0.id).slice(0, 60));
         } catch (err) {
           _log("arch", "ARSIP", "gagal: " + String(err?.message || err).slice(0, 100));
@@ -348,7 +351,7 @@ function ensureDom() {
           if (!confirm("Hapus arsip \"" + (e.title || e.id).slice(0, 60) + "\"?")) return;
           const j = await apiDel(e.id);
           _items = j.items || _items.filter(x => x.id !== e.id);
-          renderList();
+          renderList(); updateBadge();
           _log("arch", "ARSIP", "hapus: " + (e.title || e.id).slice(0, 60));
         }
       } catch (err) {
@@ -373,6 +376,7 @@ function ensureDom() {
       try {
         const j = await apiSave("chart");
         _items = j.items || [];
+        updateBadge();
         _log("arch", "ARSIP", "chart tersimpan: " + String(j.saved?.title || "").slice(0, 60));
         alert("Chart tersimpan di arsip.");
         if (_open) renderList();
@@ -388,6 +392,7 @@ function ensureDom() {
       try {
         const j = await apiSave("report");
         _items = j.items || [];
+        updateBadge();
         _log("arch", "ARSIP", "laporan tersimpan: " + String(j.saved?.title || "").slice(0, 60));
         alert("Laporan tersimpan di arsip.");
         if (_open) renderList();
@@ -405,6 +410,17 @@ export function initSpatialArchive({ token = "", log = () => {} } = {}) {
   _token = token || "";
   _log = log;
   ensureDom();
+  // preload badge segera (tanpa buka drawer) — yang bikin 0 sampai klik buka.
+  // Token bisa kosong saat initMapPanel (auth belum siap); retry sampai token ada.
+  let _preloadTries = 0;
+  const preload = async () => {
+    if (!_token) {
+      try { _token = document.querySelector('meta[name="ana-token"]')?.content || ""; } catch(_) {}
+    }
+    if (!_token && _preloadTries++ < 20) { setTimeout(preload, 800); return; }
+    try { _items = await apiList(); updateBadge(); } catch(_) {}
+  };
+  preload();
   // panel chart/report dibuat on-demand oleh pollernya — pasang ulang tiap 3 dtk
   // sampai dua-duanya draggable (guard _anaDrag bikin ini murah).
   let n = 0;
