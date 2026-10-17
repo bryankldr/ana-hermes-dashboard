@@ -1,7 +1,7 @@
 {
-  "name": "ANA · Autonomous AI HUD",
-  "short_name": "ANA",
-  "description": "ANA HUD — KPHBWB Sandbox · Autonomous AI dashboard",
+  "name": "SIMOGE HUD",
+  "short_name": "SIMOGE",
+  "description": "SIMOGE HUD — KPHBWB Sandbox · Autonomous AI dashboard",
   "start_url": "/?pwa=1",
   "scope": "/",
   "display": "standalone",
@@ -50,12 +50,12 @@
     {
       "name": "Buka HUD",
       "url": "/",
-      "description": "Buka ANA HUD"
+      "description": "Buka SIMOGE HUD"
     },
     {
       "name": "Login",
       "url": "/login.html",
-      "description": "Masuk ke ANA"
+      "description": "Masuk ke SIMOGE"
     }
   ],
   "handle_links": "preferred",
