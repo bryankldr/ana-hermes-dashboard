@@ -174,7 +174,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      </div>'
       + '      <div class="spatial-fgroup">'
       + '        <div class="spatial-fgroup-title">AKTIVITAS <span class="spatial-hint">filter pin + polygon; DB punya 1/2/3</span></div>'
-      + '        <div class="spatial-row">'
+      + '        <div class="spatial-row cols2">'
       + '          <label>Pembaharuan <select id="fPemKe" class="spatial-mini"><option value="">Semua</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>'
       + '          <label>Aktivitas <select id="fJenisAkt" class="spatial-mini"><option value="">Semua</option><option value="quare">Quare</option><option value="semprot_cas">Semprot Cas</option><option value="kerok">Kerok</option><option value="naik_batok">Naik Batok</option><option value="budaya_bersih">Budaya Bersih</option><option value="pulung">Pulung</option></select></label>'
       + '        </div>'
