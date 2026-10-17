@@ -89,7 +89,19 @@ function renderList() {
 function updateBadge() {
   try {
     const c = document.getElementById("spatialArchiveCount");
-    if (c) { c.textContent = String(_items.length); c.style.display = _items.length ? "flex" : "none"; }
+    if (!c) return;
+    const n = _items.length;
+    c.textContent = String(n);
+    c.style.display = n ? "flex" : "none";
+    if (!n) return;
+    const p = Math.max(0, Math.min(1, n / 20));
+    const hue = 120 * (1 - p); // 120 hijau → 0 merah
+    c.style.background = `hsl(${hue.toFixed(1)} 82% 44%)`;
+    c.style.color = p > 0.62 ? "#fff" : "#02101f";
+    c.style.boxShadow = `0 2px 8px hsla(${hue.toFixed(1)} 82% 44% / .45)`;
+    c.title = n + " / 20 arsip";
+    if (p >= 1) c.style.animation = "archFull .9s ease-in-out infinite";
+    else c.style.animation = "";
   } catch (_) {}
 }
 async function refresh() {
