@@ -2991,12 +2991,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._json({"error": "invalid host"}, 403)
         
-        # Anti-scraping: Check suspicious User-Agent
-        ua = self.headers.get("User-Agent", "") or ""
-        if auth_local.is_suspicious_user_agent(ua):
-            ip = _get_client_ip(self)
-            _alog(f"suspicious ua blocked ip={ip} ua={(ua[:50] if ua else 'empty')}", "warn")
-            return self._json({"error": "suspicious request"}, 403)
+        # Anti-scraping: Check suspicious User-Agent (DISABLED for Apache proxy)
+        # ua = self.headers.get("User-Agent", "") or ""
+        # if auth_local.is_suspicious_user_agent(ua):
+        #     ip = _get_client_ip(self)
+        #     _alog(f"suspicious ua blocked ip={ip} ua={(ua[:50] if ua else 'empty')}", "warn")
+        #     return self._json({"error": "suspicious request"}, 403)
         
         # Anti-scraping: Global rate limit per IP
         ip = _get_client_ip(self)
@@ -3767,12 +3767,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._json({"error": "request origin rejected"}, 403)
         
-        # Anti-scraping: Check suspicious User-Agent
-        ua = self.headers.get("User-Agent", "") or ""
-        if auth_local.is_suspicious_user_agent(ua):
-            ip = _get_client_ip(self)
-            _alog(f"suspicious ua blocked POST ip={ip} ua={(ua[:50] if ua else 'empty')}", "warn")
-            return self._json({"error": "suspicious request"}, 403)
+        # Anti-scraping: Check suspicious User-Agent (DISABLED for Apache proxy)
+        # ua = self.headers.get("User-Agent", "") or ""
+        # if auth_local.is_suspicious_user_agent(ua):
+        #     ip = _get_client_ip(self)
+        #     _alog(f"suspicious ua blocked POST ip={ip} ua={(ua[:50] if ua else 'empty')}", "warn")
+        #     return self._json({"error": "suspicious request"}, 403)
         
         # Anti-scraping: Global rate limit per IP
         ip = _get_client_ip(self)
