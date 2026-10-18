@@ -3589,6 +3589,16 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(urlparse(self.path).query)
             tid = (qs.get("id", [""])[0] or "").strip()
             return self._terminal_stream(tid)
+        # ── SPA Routing (Minimal) ──────────────────────────────────────
+        # Redirect /login → /login.html untuk SPA-style URL
+        if p == "/login":
+            self.send_response(302)
+            self.send_header("Location", "/login.html")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        
+        # Auth check untuk root dan index.html
         if ANA_AUTH_REQUIRED and p in ("/", "/index.html"):
             if _session_from_cookie(self) is None and not self._token_ok():
                 self.send_response(302)
@@ -3596,6 +3606,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 return
+        
+        # Login page dan assets
         if p in ("/login.html", "/login.js", "/login.css") or p.startswith("/src/login"):
             pass
         elif p == "/switch":
@@ -3663,6 +3675,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Retry-After", str(auth_local._RL_API_WINDOW_SECONDS))
                     self.end_headers()
                     return
+        # Default: resolve file path
         rel = "index.html" if p == "/" else p.lstrip("/")
         # A plain startswith() check passes for "../ui_secret" and
         # "../uix/anything" because there is no separator between the prefix
