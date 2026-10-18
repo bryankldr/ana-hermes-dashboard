@@ -2463,11 +2463,11 @@ class Handler(BaseHTTPRequestHandler):
         # Allow inline scripts/styles untuk legacy compatibility
         csp = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob: https://server.arcgisonline.com; "
             "font-src 'self' data:; "
-            "connect-src 'self' https://server.arcgisonline.com; "
+            "connect-src 'self' https://server.arcgisonline.com https://static.cloudflareinsights.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self';"
@@ -3706,9 +3706,8 @@ class Handler(BaseHTTPRequestHandler):
         elif f.suffix == ".js":
             ctype = "application/javascript"
         data = f.read_bytes()
-        # Token replacement disabled for now (causing hangs)
-        # if rel == "index.html":
-        #     data = data.replace(b"__ANA_TOKEN__", API_TOKEN.encode())
+        if rel == "index.html":
+            data = data.replace(b"__ANA_TOKEN__", API_TOKEN.encode())
             # Base URL foto Directus server (popup pin aktivitas, opsi langsung).
             # Publik tanpa kredensial — hanya host, bukan secret.
             try:
