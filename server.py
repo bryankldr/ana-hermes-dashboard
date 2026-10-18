@@ -3107,7 +3107,7 @@ class Handler(BaseHTTPRequestHandler):
                 source=runtime.SOURCE,
                 workdir=runtime.WORKDIR,
                 model=runtime.MODEL or "Hermes default",
-                tools=runtime.hermes_tools_snapshot(),
+                tools=[],  # Disable tools snapshot for now (Hermes gateway not configured)
                 browser_stt=True,
                 browser_tts=True,
                 voice_mode="edge",
