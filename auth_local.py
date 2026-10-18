@@ -41,7 +41,14 @@ _LOCK = threading.Lock()
 SESSION_TTL = int(os.environ.get("ANA_SESSION_TTL", "28800"))
 DEVICE_SALT = os.environ.get("ANA_DEVICE_SALT", "ana-device-salt-v1")
 
-_RL = {}
+# Rate limiting configuration
+_RL_MAX_REQUESTS = int(os.environ.get("ANA_RATE_LIMIT_MAX", "5"))  # Default: 5 requests
+_RL_WINDOW_SECONDS = int(os.environ.get("ANA_RATE_LIMIT_WINDOW", "60"))  # Default: 60 seconds
+_RL_API_MAX_REQUESTS = int(os.environ.get("ANA_RATE_LIMIT_API_MAX", "100"))  # Default: 100 requests
+_RL_API_WINDOW_SECONDS = int(os.environ.get("ANA_RATE_LIMIT_API_WINDOW", "60"))  # Default: 60 seconds
+
+_RL = {}  # {ip: [timestamp, ...]}
+_RL_API = {}  # {session_id: [timestamp, ...]} for API rate limiting
 _RL_LOCK = threading.Lock()
 
 # ── TOTP (RFC 6238) ───────────────────────────────────────────
@@ -128,16 +135,36 @@ def _save_sessions(d):
     except: pass
 
 def check_rate_limit(ip):
+    """Check login rate limit per IP (brute force protection)."""
     now = time.time()
     with _RL_LOCK:
         arr = _RL.get(ip, [])
-        arr = [t for t in arr if now - t < 60]
-        if len(arr) >= 5:
+        arr = [t for t in arr if now - t < _RL_WINDOW_SECONDS]
+        if len(arr) >= _RL_MAX_REQUESTS:
             _RL[ip] = arr
             return False
         arr.append(now)
         _RL[ip] = arr
         return True
+
+def check_api_rate_limit(session_id: str) -> tuple[bool, int]:
+    """
+    Check API rate limit per session.
+    
+    Returns:
+        (allowed, remaining): True if allowed, False if rate limited
+    """
+    now = time.time()
+    with _RL_LOCK:
+        arr = _RL_API.get(session_id, [])
+        arr = [t for t in arr if now - t < _RL_API_WINDOW_SECONDS]
+        if len(arr) >= _RL_API_MAX_REQUESTS:
+            _RL_API[session_id] = arr
+            return False, 0
+        arr.append(now)
+        _RL_API[session_id] = arr
+        remaining = _RL_API_MAX_REQUESTS - len(arr)
+        return True, remaining
 
 # ── DB ────────────────────────────────────────────────────────
 def _parse_env_value(raw: str) -> str:

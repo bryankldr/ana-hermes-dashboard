@@ -24,6 +24,7 @@ import threading
 import time
 import traceback
 import webbrowser
+from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -1613,6 +1614,14 @@ def _ana_device_id(handler) -> str:
         pass
     return ""
 
+
+def _get_client_ip(handler) -> str:
+    """Get client IP, respect X-Forwarded-For from Apache proxy."""
+    forwarded = handler.headers.get("X-Forwarded-For", "").strip()
+    if forwarded:
+        # Take first IP in X-Forwarded-For chain
+        return forwarded.split(",")[0].strip()
+    return handler.client_address[0] if handler.client_address else "unknown"
 
 def _session_from_cookie(handler) -> dict | None:
     raw = handler.headers.get("Cookie","")
@@ -3640,6 +3649,20 @@ class Handler(BaseHTTPRequestHandler):
         elif ANA_AUTH_REQUIRED and p.startswith("/api/") and not p.startswith("/api/auth/") and p not in ("/api/token-status",):
             if not self._token_ok():
                 return self._unauth()
+            # API rate limiting for authenticated requests
+            sess = _session_from_cookie(self)
+            if sess:
+                session_id = sess.get("id") or ""
+                allowed, remaining = auth_local.check_api_rate_limit(session_id)
+                if not allowed:
+                    _alog(f"api 429 rate-limit session={session_id[:8]} path={p}", "warn")
+                    self.send_response(429)
+                    self._set_security_headers()
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("X-RateLimit-Remaining", "0")
+                    self.send_header("Retry-After", str(auth_local._RL_API_WINDOW_SECONDS))
+                    self.end_headers()
+                    return
         rel = "index.html" if p == "/" else p.lstrip("/")
         # A plain startswith() check passes for "../ui_secret" and
         # "../uix/anything" because there is no separator between the prefix
