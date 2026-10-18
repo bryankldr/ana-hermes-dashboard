@@ -46,10 +46,18 @@ _RL_MAX_REQUESTS = int(os.environ.get("ANA_RATE_LIMIT_MAX", "5"))  # Default: 5 
 _RL_WINDOW_SECONDS = int(os.environ.get("ANA_RATE_LIMIT_WINDOW", "60"))  # Default: 60 seconds
 _RL_API_MAX_REQUESTS = int(os.environ.get("ANA_RATE_LIMIT_API_MAX", "100"))  # Default: 100 requests
 _RL_API_WINDOW_SECONDS = int(os.environ.get("ANA_RATE_LIMIT_API_WINDOW", "60"))  # Default: 60 seconds
+_RL_GLOBAL_MAX_REQUESTS = int(os.environ.get("ANA_RATE_LIMIT_GLOBAL_MAX", "200"))  # Default: 200 requests per IP
+_RL_GLOBAL_WINDOW_SECONDS = int(os.environ.get("ANA_RATE_LIMIT_GLOBAL_WINDOW", "60"))  # Default: 60 seconds
 
 _RL = {}  # {ip: [timestamp, ...]}
 _RL_API = {}  # {session_id: [timestamp, ...]} for API rate limiting
+_RL_GLOBAL = {}  # {ip: [timestamp, ...]} for global IP rate limiting
 _RL_LOCK = threading.Lock()
+
+# CSRF tokens
+_CSRF_TOKENS = {}  # {session_id: {"token": str, "expires": float}}
+_CSRF_LOCK = threading.Lock()
+_CSRF_TTL = 3600  # 1 hour
 
 # ── TOTP (RFC 6238) ───────────────────────────────────────────
 def _b32_secret(nbytes=20):
@@ -165,6 +173,111 @@ def check_api_rate_limit(session_id: str) -> tuple[bool, int]:
         _RL_API[session_id] = arr
         remaining = _RL_API_MAX_REQUESTS - len(arr)
         return True, remaining
+
+def check_global_rate_limit(ip: str) -> tuple[bool, int]:
+    """
+    Check global rate limit per IP (anti-scraping).
+    
+    Returns:
+        (allowed, remaining): True if allowed, False if rate limited
+    """
+    now = time.time()
+    with _RL_LOCK:
+        arr = _RL_GLOBAL.get(ip, [])
+        arr = [t for t in arr if now - t < _RL_GLOBAL_WINDOW_SECONDS]
+        if len(arr) >= _RL_GLOBAL_MAX_REQUESTS:
+            _RL_GLOBAL[ip] = arr
+            return False, 0
+        arr.append(now)
+        _RL_GLOBAL[ip] = arr
+        remaining = _RL_GLOBAL_MAX_REQUESTS - len(arr)
+        return True, remaining
+
+def is_suspicious_user_agent(user_agent: str) -> bool:
+    """
+    Detect suspicious User-Agent (headless browsers, scrapers).
+    
+    Returns:
+        True if suspicious, False if legitimate
+    """
+    if not user_agent:
+        return True  # No UA is suspicious
+    
+    ua_lower = user_agent.lower()
+    
+    # Known headless browsers and scrapers
+    suspicious_patterns = [
+        'headless',
+        'phantom',
+        'selenium',
+        'webdriver',
+        'crawler',
+        'bot',
+        'spider',
+        'scraper',
+        'curl',
+        'wget',
+        'python-requests',
+        'httpclient',
+        'axios',
+        'postman',
+        'insomnia',
+    ]
+    
+    for pattern in suspicious_patterns:
+        if pattern in ua_lower:
+            return True
+    
+    # Very short UA (< 10 chars) is suspicious
+    if len(user_agent) < 10:
+        return True
+    
+    return False
+
+def generate_csrf_token(session_id: str) -> str:
+    """
+    Generate CSRF token for a session.
+    
+    Returns:
+        CSRF token string
+    """
+    token = secrets.token_urlsafe(32)
+    expires = time.time() + _CSRF_TTL
+    
+    with _CSRF_LOCK:
+        _CSRF_TOKENS[session_id] = {"token": token, "expires": expires}
+    
+    return token
+
+def validate_csrf_token(session_id: str, token: str) -> bool:
+    """
+    Validate CSRF token for a session.
+    
+    Returns:
+        True if valid, False if invalid or expired
+    """
+    if not token:
+        return False
+    
+    with _CSRF_LOCK:
+        data = _CSRF_TOKENS.get(session_id)
+        if not data:
+            return False
+        
+        # Check expiration
+        if time.time() > data["expires"]:
+            del _CSRF_TOKENS[session_id]
+            return False
+        
+        # Validate token
+        if data["token"] != token:
+            return False
+        
+        # Rotate token after successful validation (prevent replay)
+        new_token = secrets.token_urlsafe(32)
+        _CSRF_TOKENS[session_id] = {"token": new_token, "expires": time.time() + _CSRF_TTL}
+        
+        return True
 
 # ── DB ────────────────────────────────────────────────────────
 def _parse_env_value(raw: str) -> str:

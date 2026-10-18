@@ -2990,6 +2990,27 @@ class Handler(BaseHTTPRequestHandler):
         self._t0 = time.time()
         if not self._host_ok():
             return self._json({"error": "invalid host"}, 403)
+        
+        # Anti-scraping: Check suspicious User-Agent
+        ua = self.headers.get("User-Agent", "") or ""
+        if auth_local.is_suspicious_user_agent(ua):
+            ip = _get_client_ip(self)
+            _alog(f"suspicious ua blocked ip={ip} ua={(ua[:50] if ua else 'empty')}", "warn")
+            return self._json({"error": "suspicious request"}, 403)
+        
+        # Anti-scraping: Global rate limit per IP
+        ip = _get_client_ip(self)
+        allowed, remaining = auth_local.check_global_rate_limit(ip)
+        if not allowed:
+            _alog(f"global rate limit blocked ip={ip}", "warn")
+            self.send_response(429)
+            self._set_security_headers()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-RateLimit-Remaining", "0")
+            self.send_header("Retry-After", str(auth_local._RL_GLOBAL_WINDOW_SECONDS))
+            self.end_headers()
+            return
+        
         p = urlparse(self.path).path
         # Tanpa auth dan TANPA menyentuh token: hanya sinyal "server ini proses
         # yang mana". Frontend poll ini; boot berubah = server restart = token
@@ -3014,7 +3035,10 @@ class Handler(BaseHTTPRequestHandler):
                 _me_safe["tfa_enforced"] = bool(_tfa_enforced())
             except Exception:
                 pass
-            return self._json({"ok": True, "authenticated": True, "user": _me_safe, "session": {"created": sess.get("created"), "last_seen": sess.get("last_seen")}} )
+            # Generate CSRF token for this session
+            session_id = sess.get("id") or ""
+            csrf_token = auth_local.generate_csrf_token(session_id)
+            return self._json({"ok": True, "authenticated": True, "user": _me_safe, "session": {"created": sess.get("created"), "last_seen": sess.get("last_seen")}, "csrf_token": csrf_token})
         if p == "/api/token-status":
             return self._json({"boot": BOOT_ID})
         if p == "/api/landing/insight":
@@ -3742,6 +3766,26 @@ class Handler(BaseHTTPRequestHandler):
         p = urlparse(self.path).path
         if not self._host_ok():
             return self._json({"error": "request origin rejected"}, 403)
+        
+        # Anti-scraping: Check suspicious User-Agent
+        ua = self.headers.get("User-Agent", "") or ""
+        if auth_local.is_suspicious_user_agent(ua):
+            ip = _get_client_ip(self)
+            _alog(f"suspicious ua blocked POST ip={ip} ua={(ua[:50] if ua else 'empty')}", "warn")
+            return self._json({"error": "suspicious request"}, 403)
+        
+        # Anti-scraping: Global rate limit per IP
+        ip = _get_client_ip(self)
+        allowed, remaining = auth_local.check_global_rate_limit(ip)
+        if not allowed:
+            _alog(f"global rate limit blocked POST ip={ip}", "warn")
+            self.send_response(429)
+            self._set_security_headers()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-RateLimit-Remaining", "0")
+            self.send_header("Retry-After", str(auth_local._RL_GLOBAL_WINDOW_SECONDS))
+            self.end_headers()
+            return
         # /api/auth/* adalah entry-point login: browser fetch selalu kirim Origin,
         # tapi curl/ health-check tanpa Origin tetap harus lulus host-check saja.
         if not p.startswith("/api/auth/") and not self._origin_ok():
@@ -3753,6 +3797,15 @@ class Handler(BaseHTTPRequestHandler):
             pass
         elif not self._token_ok():
             return self._unauth()
+        # CSRF validation for state-changing POST requests (non-auth)
+        elif p not in ("/api/auth/login", "/api/auth/tfa/generate", "/api/auth/refresh"):
+            sess = _session_from_cookie(self)
+            if sess:
+                session_id = sess.get("id") or ""
+                csrf_token = self.headers.get("X-CSRF-Token", "")
+                if not auth_local.validate_csrf_token(session_id, csrf_token):
+                    _alog(f"csrf validation failed session={session_id[:8]} path={p}", "warn")
+                    return self._json({"error": "invalid csrf token"}, 403)
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
