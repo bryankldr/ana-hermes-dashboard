@@ -3107,7 +3107,7 @@ class Handler(BaseHTTPRequestHandler):
                 source=runtime.SOURCE,
                 workdir=runtime.WORKDIR,
                 model=runtime.MODEL or "Hermes default",
-                tools=[],  # Disable tools snapshot for now (Hermes gateway not configured)
+                tools=[],  # kode asli : tools=runtime.hermes_tools_snapshot(), Disable tools snapshot for now (Hermes gateway not configured)
                 browser_stt=True,
                 browser_tts=True,
                 voice_mode="edge",
@@ -3706,8 +3706,9 @@ class Handler(BaseHTTPRequestHandler):
         elif f.suffix == ".js":
             ctype = "application/javascript"
         data = f.read_bytes()
-        if rel == "index.html":
-            data = data.replace(b"__ANA_TOKEN__", API_TOKEN.encode())
+        # Token replacement disabled for now (causing hangs)
+        # if rel == "index.html":
+        #     data = data.replace(b"__ANA_TOKEN__", API_TOKEN.encode())
             # Base URL foto Directus server (popup pin aktivitas, opsi langsung).
             # Publik tanpa kredensial — hanya host, bukan secret.
             try:
