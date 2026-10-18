@@ -9,5 +9,26 @@ cd "$(dirname "$0")/.." || exit 1
 # Tanpa ini cron 06:10 gagal ModuleNotFoundError dan pmtiles basi lagi.
 PYBIN="python3"
 [ -x .venv/bin/python ] && PYBIN=".venv/bin/python"
-"$PYBIN" scripts/export_petak.py --tahun 2026 --out tiles/petak.ndjson && \
+
+# Gunakan tahun berjalan nyata dari sistem
+TAHUN=$(date '+%Y')
+
+# 1. Export semua KPH sebagai PMTiles terpisah (untuk skalabilitas DIREKSI/ADMINISTRATOR)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Memulai export per-KPH PMTiles untuk tahun $TAHUN..."
+"$PYBIN" scripts/export_all_kph.py --tahun "$TAHUN"
+ALL_KPH_STATUS=$?
+
+# 2. Export single PMTiles (fallback/compatibility untuk user scope kecil)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Export single PMTiles (fallback) untuk tahun $TAHUN..."
+"$PYBIN" scripts/export_petak.py --tahun "$TAHUN" --out tiles/petak.ndjson && \
 "$PYBIN" scripts/build_pmtiles.py
+SINGLE_STATUS=$?
+
+# 3. Cleanup NDJSON intermediate files (hemat storage)
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Cleanup NDJSON intermediate files..."
+rm -f tiles/petak.ndjson
+rm -f tiles/kph_*.ndjson
+rm -f tiles/kph_*_*.ndjson
+CLEANUP_STATUS=$?
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Rebuild selesai. Tahun: $TAHUN, All-KPH: $ALL_KPH_STATUS, Single: $SINGLE_STATUS, Cleanup: $CLEANUP_STATUS"

@@ -106,6 +106,16 @@ except ImportError:
     # WIP paralel (modul belum di-commit): endpoint /api/metabase/* jawab 503
     # sampai file mendarat — server tetap boot, fitur lain utuh.
     metabase = None
+try:
+    import bit_case_store
+    _BIT_CASES_AVAILABLE = True
+except ImportError:
+    bit_case_store = None
+    _BIT_CASES_AVAILABLE = False
+try:
+    import bit_engine
+except ImportError:
+    bit_engine = None
 
 
 def _metabase_503():
@@ -224,6 +234,19 @@ def _alog(msg, level="info"):
     else:
         # info juga ke file bila debug on
         _log_to_file(line.strip())
+    try:
+        sys.stderr.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _blog(msg, level="info"):
+    """BIT debug: info hanya saat _DEBUG_MAP, warn/error selalu. Prefix BIT."""
+    is_err = level in ("warn", "error")
+    if not is_err and not _DEBUG_MAP:
+        return
+    line = f"  [BIT {time.strftime('%H:%M:%S')}] {msg}"
+    _log_to_file(line.strip())
     try:
         sys.stderr.write(line + "\n")
     except Exception:
@@ -2400,7 +2423,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── helpers ──────────────────────────────────────────────
     def _json(self, body, code=200):
-        data = json.dumps(body).encode()
+        import decimal
+        def _dec(o):
+            if isinstance(o, decimal.Decimal): return float(o)
+            raise TypeError
+        data = json.dumps(body, default=_dec).encode()
         try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
@@ -2471,7 +2498,9 @@ class Handler(BaseHTTPRequestHandler):
     # Basemap Esri via server (same-origin) — lihat route /api/tiles/esri/.
     _ESRI_TILES = {
         "sat": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        "dark": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "street": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        "topo": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        "pencil": "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
         "ref": "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     }
 
@@ -4180,6 +4209,313 @@ class Handler(BaseHTTPRequestHandler):
                 _dlog(f"show_on_map {template} ERROR {type(e).__name__}: {str(e)[:160]}")
                 if _DEBUG_MAP:
                     traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/bit/target_gap":
+            # BIT v0.1 — deterministic Target vs Rencana vs Actual
+            # Body: {tahun, bulan, periode, include_breakdown?, kode_* scope optional (ditimpa scope login)}
+            try:
+                tahun = int(body.get("tahun", 2026))
+                bulan = int(body.get("bulan", 4))
+                periode = int(body.get("periode", 2))
+            except Exception:
+                return self._json({"error": "tahun/bulan/periode harus angka"}, 400)
+            if not (1 <= bulan <= 12) or periode not in (0,1,2):
+                return self._json({"error": "bulan 1-12, periode 0/1/2"}, 400)
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dengan="ya"
+            elif sampai_dengan in ("n","no","0","tidak","false"): sampai_dengan="tidak"
+            else: sampai_dengan="ya"
+            include_breakdown = bool(body.get("include_breakdown", body.get("breakdown", False)))
+            # scope from login (enforced) + optional body scope (clamped)
+            try:
+                _scope = _wilayah_scope_from_session(self)
+            except Exception:
+                _scope = {}
+            # allow body to hint deeper scope but clamp to login scope
+            for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg"):
+                if body.get(k):
+                    body.setdefault(k, body.get(k))
+            # merge body scope into _scope (body = params, _enforce does it)
+            _params_scope = {k: body.get(k) for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg") if body.get(k) is not None}
+            if _params_scope:
+                # reuse enforce logic
+                _merged, _clamped2, _deny2, _deny2_msg = _enforce_wilayah_scope(self, _params_scope, "bit_target_gap")
+                if _deny2:
+                    return self._json({"error": _deny2_msg}, 403)
+                _scope = {**_scope, **{k: v for k, v in _merged.items() if v}}
+            if bit_engine is None:
+                return self._json({"error": "bit_engine belum tersedia"}, 503)
+            try:
+                out = bit_engine.get_target_gap(tahun, bulan, periode, scope=_scope, sampai_dengan=sampai_dengan, include_breakdown=include_breakdown)
+                try:
+                    _k = (out.get("kpi") or {}) if isinstance(out, dict) else {}
+                    _blog(f"target_gap {tahun}-{bulan:02d} P{periode} s/d={sampai_dengan} scope={_scope or '{}'} -> target={_k.get('target_expected_kg')} rencana={_k.get('rencana_main_kg')} actual={_k.get('actual_main_kg')} ach={_k.get('achievement_pct')} gap={_k.get('current_gap_kg')} cached={out.get('cached', False)}")
+                    if out.get("limitations"):
+                        _blog(f"  limitations: {'; '.join(map(str, out.get('limitations',[])[:2]))[:200]}")
+                except Exception:
+                    pass
+                # chain check already via _scope handling above; keep consistent
+                return self._json(out)
+            except Exception as e:
+                _blog(f"target_gap ERROR scope={_scope}  {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/bit/diagnostic":
+            try:
+                tahun = int(body.get("tahun", 2026))
+                bulan = int(body.get("bulan", 4))
+                periode = int(body.get("periode", 2))
+            except Exception:
+                return self._json({"error": "tahun/bulan/periode harus angka"}, 400)
+            if not (1 <= bulan <= 12) or periode not in (0,1,2):
+                return self._json({"error": "bulan 1-12, periode 0/1/2"}, 400)
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dengan="ya"
+            elif sampai_dengan in ("n","no","0","tidak","false"): sampai_dengan="tidak"
+            else: sampai_dengan="ya"
+            try:
+                _scope = _wilayah_scope_from_session(self)
+            except Exception:
+                _scope = {}
+            _params_scope = {k: body.get(k) for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg") if body.get(k) is not None}
+            if _params_scope:
+                _merged, _clamped2, _deny2, _deny2_msg = _enforce_wilayah_scope(self, _params_scope, "bit_diagnostic")
+                if _deny2:
+                    return self._json({"error": _deny2_msg}, 403)
+                _scope = {**_scope, **{k: v for k, v in _merged.items() if v}}
+            if bit_engine is None:
+                return self._json({"error": "bit_engine belum tersedia"}, 503)
+            try:
+                out = bit_engine.get_diagnostic(tahun, bulan, periode, scope=_scope, sampai_dengan=sampai_dengan)
+                try:
+                    _k = (out.get("kpi") or {}); _a = (out.get("aktivitas") or {})
+                    _blog(f"diagnostic {tahun}-{bulan:02d} P{periode} s/d={sampai_dengan} scope={_scope or '{}'} -> aktivitas={_a.get('n_aktivitas')} penyadap={_a.get('n_penyadap_aktiv')} petak={_a.get('n_petak_aktiv')} pohon_tersentuh={_a.get('pohon_tersentuh_total')} target={_k.get('target_expected_kg')}")
+                except Exception:
+                    pass
+                return self._json(out)
+            except Exception as e:
+                _blog(f"diagnostic ERROR scope={_scope}  {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/bit/hypothesis":
+            try:
+                tahun = int(body.get("tahun", 2026))
+                bulan = int(body.get("bulan", 4))
+                periode = int(body.get("periode", 2))
+            except Exception:
+                return self._json({"error": "tahun/bulan/periode harus angka"}, 400)
+            if not (1 <= bulan <= 12) or periode not in (0,1,2):
+                return self._json({"error": "bulan 1-12, periode 0/1/2"}, 400)
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dengan="ya"
+            elif sampai_dengan in ("n","no","0","tidak","false"): sampai_dengan="tidak"
+            else: sampai_dengan="ya"
+            try:
+                _scope = _wilayah_scope_from_session(self)
+            except Exception:
+                _scope = {}
+            _params_scope = {k: body.get(k) for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg") if body.get(k) is not None}
+            if _params_scope:
+                _merged, _c2, _d2, _m2 = _enforce_wilayah_scope(self, _params_scope, "bit_hypothesis")
+                if _d2:
+                    return self._json({"error": _m2}, 403)
+                _scope = {**_scope, **{k: v for k, v in _merged.items() if v}}
+            if bit_engine is None:
+                return self._json({"error": "bit_engine belum tersedia"}, 503)
+            try:
+                out = bit_engine.get_hypothesis(tahun, bulan, periode, scope=_scope, sampai_dengan=sampai_dengan)
+                try:
+                    _hy = out.get("hypotheses") or []; _s = ", ".join([f"{h.get('id')}:{h.get('status')}" for h in _hy])
+                    _blog(f"hypothesis {tahun}-{bulan:02d} P{periode} s/d={sampai_dengan} scope={_scope or '{}'} -> {_s} cmp={out.get('meta',{}).get('comparison','')}")
+                except Exception:
+                    pass
+                return self._json(out)
+            except Exception as e:
+                _blog(f"hypothesis ERROR scope={_scope}  {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/bit/sebaran":
+            try:
+                tahun = int(body.get("tahun", 2026))
+                bulan = int(body.get("bulan", 4))
+                periode = int(body.get("periode", 2))
+            except Exception:
+                return self._json({"error": "tahun/bulan/periode harus angka"}, 400)
+            if not (1 <= bulan <= 12) or periode not in (0,1,2):
+                return self._json({"error": "bulan 1-12, periode 0/1/2"}, 400)
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dengan="ya"
+            elif sampai_dengan in ("n","no","0","tidak","false"): sampai_dengan="tidak"
+            else: sampai_dengan="ya"
+            try:
+                _scope = _wilayah_scope_from_session(self)
+            except Exception:
+                _scope = {}
+            _params_scope = {k: body.get(k) for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg") if body.get(k) is not None}
+            if _params_scope:
+                _merged, _c2, _d2, _m2 = _enforce_wilayah_scope(self, _params_scope, "bit_sebaran")
+                if _d2:
+                    return self._json({"error": _m2}, 403)
+                _scope = {**_scope, **{k: v for k, v in _merged.items() if v}}
+            if bit_engine is None:
+                return self._json({"error": "bit_engine belum tersedia"}, 503)
+            try:
+                out = bit_engine.get_sebaran(tahun, bulan, periode, scope=_scope, sampai_dengan=sampai_dengan)
+                try:
+                    _rows = out.get("rows") or []; _lvl = out.get("level","")
+                    _top = ( _rows[0].get("nama","")[:18] + f" gap { _rows[0].get('gap_kg')}" ) if _rows else "no rows"
+                    _blog(f"sebaran {tahun}-{bulan:02d} P{periode} s/d={sampai_dengan} scope={_scope or '{}'} lvl={_lvl} rows={len(_rows)} top={_top}")
+                except Exception:
+                    pass
+                return self._json(out)
+            except Exception as e:
+                _blog(f"sebaran ERROR scope={_scope}  {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/bit/analisis":
+            try:
+                tahun = int(body.get("tahun", 2026)); bulan = int(body.get("bulan", 4)); periode = int(body.get("periode", 2))
+            except Exception:
+                return self._json({"error": "tahun/bulan/periode harus angka"}, 400)
+            if not (1 <= bulan <= 12) or periode not in (0,1,2):
+                return self._json({"error": "bulan 1-12, periode 0/1/2"}, 400)
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dengan="ya"
+            elif sampai_dengan in ("n","no","0","tidak","false"): sampai_dengan="tidak"
+            else: sampai_dengan="ya"
+            try: _scope = _wilayah_scope_from_session(self)
+            except Exception: _scope={}
+            _ps = {k: body.get(k) for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg") if body.get(k) is not None}
+            if _ps:
+                _m,_c,_d,_msg = _enforce_wilayah_scope(self, _ps, "bit_analisis")
+                if _d: return self._json({"error": _msg}, 403)
+                _scope = {**_scope, **{k: v for k, v in _m.items() if v}}
+            if bit_engine is None: return self._json({"error": "bit_engine belum tersedia"}, 503)
+            try:
+                import time as _tt; _t0=_tt.perf_counter()
+                out = bit_engine.get_analisis(tahun, bulan, periode, scope=_scope, sampai_dengan=sampai_dengan)
+                _ms=(_tt.perf_counter()-_t0)*1000
+                _blog(f"analisis {tahun}-{bulan:02d} P{periode} s/d={sampai_dengan} scope={_scope or '{}'} tren={len(out.get('tren',[]))} anomali={len(out.get('anomali',[]))} ({_ms:.0f}ms)")
+                return self._json(out)
+            except Exception as e:
+                _blog(f"analisis ERROR scope={_scope}  {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p == "/api/bit/rekomendasi":
+            try:
+                tahun = int(body.get("tahun", 2026))
+                bulan = int(body.get("bulan", 4))
+                periode = int(body.get("periode", 2))
+            except Exception:
+                return self._json({"error": "tahun/bulan/periode harus angka"}, 400)
+            if not (1 <= bulan <= 12) or periode not in (0,1,2):
+                return self._json({"error": "bulan 1-12, periode 0/1/2"}, 400)
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dangan="ya"
+            else: sampai_dengan = "ya" if sampai_dengan in ("ya","y") else ("tidak" if sampai_dengan in ("tidak","n","no","0","false") else "ya")
+            # fix typo
+            sampai_dengan = str(body.get("sampai_dengan", body.get("sampaiDengan", "ya")) or "ya").strip().lower()
+            if sampai_dengan in ("y","yes","t","1","true"): sampai_dengan="ya"
+            elif sampai_dengan in ("n","no","0","tidak","false"): sampai_dengan="tidak"
+            else: sampai_dengan="ya"
+            try:
+                _scope = _wilayah_scope_from_session(self)
+            except Exception:
+                _scope = {}
+            _params_scope = {k: body.get(k) for k in ("kode_divre","kode_kph","kode_bkph","kode_rph","kode_tpg") if body.get(k) is not None}
+            if _params_scope:
+                _merged, _c2, _d2, _m2 = _enforce_wilayah_scope(self, _params_scope, "bit_rekomendasi")
+                if _d2:
+                    return self._json({"error": _m2}, 403)
+                _scope = {**_scope, **{k: v for k, v in _merged.items() if v}}
+            if bit_engine is None:
+                return self._json({"error": "bit_engine belum tersedia"}, 503)
+            _t0 = 0
+            try:
+                import time as _tt
+                _t0 = _tt.perf_counter()
+                out = bit_engine.get_rekomendasi(tahun, bulan, periode, scope=_scope, sampai_dengan=sampai_dengan)
+                _ms = (_tt.perf_counter() - _t0) * 1000
+                _blog(f"rekomendasi {tahun}-{bulan:02d} P{periode} s/d={sampai_dengan} scope={_scope or '{}'} -> {len(out.get('rekomendasi',[]))} opsi prio1={[r.get('id') for r in (out.get('rekomendasi_sorted') or [])[:2]]} ({_ms:.0f}ms)")
+                return self._json(out)
+            except Exception as e:
+                _blog(f"rekomendasi ERROR scope={_scope}  {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
+                return self._json({"error": str(e)[:300]}, 500)
+
+        if p in ("/api/bit/cases", "/api/bit/case"):
+            if bit_case_store is None:
+                return self._json({"error": "bit_case_store belum tersedia"}, 503)
+            body = body or {}
+            method = self.command
+            # derive user
+            try:
+                sess = _session_from_cookie(self)
+                email = str((sess or {}).get("email") or (sess or {}).get("user_email") or "")
+                scope = _wilayah_scope_from_session(self) or {}
+            except Exception:
+                email=""; scope={}
+            try:
+                if p == "/api/bit/cases":
+                    if method == "GET" or body.get("action") in (None, "", "list"):
+                        q = str(body.get("q") or body.get("search") or "").strip()[:200]
+                        status = str(body.get("status") or "").strip().lower() or None
+                        lim = int(body.get("limit", 20) or 20)
+                        off = int(body.get("offset", 0) or 0)
+                        out = bit_case_store.list_cases(limit=lim, offset=off, status=status, q=q or None)
+                        return self._json({"ok": True, **out})
+                    if body.get("action") in ("create", "add"):
+                        payload = body.get("payload") or body.get("case") or {k: body[k] for k in ("gejala","pertanyaan","periode","snapshot","hipotesis","kesimpulan","kepastian","keputusan","hasil","tags") if k in body}
+                        # periode now: if missing use current BIT params
+                        if not payload.get("periode"):
+                            payload["periode"] = {"tahun": int(body.get("tahun", 2026)), "bulan": int(body.get("bulan", 2)), "periode": int(body.get("periode", 0)), "sampai_dengan": str(body.get("sampai_dengan","ya")), "scope": scope}
+                        out = bit_case_store.create_case(payload, user_email=email, scope=scope)
+                        _blog(f"cases create {out.get('id')} gejala={out.get('gejala','')[:60]} by {email or 'anon'}", "info")
+                        return self._json({"ok": True, "case": out})
+                    return self._json({"error": "action list|create"}, 400)
+                else:  # /api/bit/case single
+                    cid = str(body.get("id") or body.get("case_id") or "").strip()
+                    act = str(body.get("action") or "").strip().lower()
+                    if not cid and act not in ("list",):
+                        return self._json({"error": "id case diperlukan"}, 400)
+                    if act in ("", "get"):
+                        out = bit_case_store.get_case(cid)
+                        return self._json({"ok": True, "case": out})
+                    if act in ("update","patch"):
+                        patch = body.get("patch") or {k: body[k] for k in ("status","kesimpulan","kepastian","keputusan","hasil","tags","hipotesis") if k in body}
+                        out = bit_case_store.update_case(cid, patch, user_email=email)
+                        _blog(f"cases update {cid} -> {patch} by {email}", "info")
+                        return self._json({"ok": True, "case": out})
+                    if act in ("delete","remove"):
+                        out = bit_case_store.delete_case(cid)
+                        _blog(f"cases delete {cid} by {email}", "info")
+                        return self._json({"ok": True, **out})
+                    if act in ("verify",):
+                        # shortcut: status verified + hasil
+                        patch = {"status": "verified", "hasil": body.get("hasil") or {"outcome": str(body.get("outcome","sukses")), "catatan": str(body.get("catatan",""))}}
+                        out = bit_case_store.update_case(cid, patch, user_email=email)
+                        return self._json({"ok": True, "case": out})
+                    return self._json({"error": "action get|update|delete|verify"}, 400)
+            except ValueError as ve:
+                return self._json({"error": str(ve)[:300]}, 400)
+            except KeyError as ke:
+                return self._json({"error": str(ke)[:300]}, 404)
+            except Exception as e:
+                _blog(f"cases ERROR {type(e).__name__}: {str(e)[:160]}", "error")
+                if _DEBUG_MAP:
+                    import traceback; traceback.print_exc()
                 return self._json({"error": str(e)[:300]}, 500)
 
         if p == "/api/tiles/cron":

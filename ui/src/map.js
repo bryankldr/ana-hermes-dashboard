@@ -13,7 +13,7 @@ import { loadBusinessData, fetchWilayahOptions, fetchAktivitasPoints, resolveTem
 import { initSpatialChart } from './spatialChart.js';
 import { initSpatialReport } from './spatialReport.js';
 import { initSpatialArchive } from './spatialArchive.js';
-import { isMobile as _isMobileDevice } from './core/device.js';
+import { isMobile as _isMobileDevice, isLowEndDevice } from './core/device.js';
 
 const CENTER = [-8.1915, 114.1491];
 const BASE_STYLE = { color: '#2DF2FF', weight: 1, opacity: 0.8, fillColor: '#2DF2FF', fillOpacity: 0.12 };
@@ -28,7 +28,7 @@ export function mapControl() { return _ctl; }
 let _spatialHandler = null;
 export function setSpatialHandler(fn) { _spatialHandler = (typeof fn === 'function') ? fn : null; }
 
-const MAP_BRIDGE_MS = 400;
+const MAP_BRIDGE_MS = isLowEndDevice() ? 800 : 400; // Slower polling on low-end devices
 let _bridgeTimer = null;
 // ANA bisa push set_features mentah (template di luar _TEMPLATE_SPATIAL, mis.
 // aktivitas_top_petak). Feature count-nya BERBEDA dari load panel sendiri, jadi
@@ -51,7 +51,7 @@ export function startMapBridge({ token = '', log = () => {} } = {}) {
     } catch (_) {}
   };
   const poll = async () => {
-    if (!_ctl) return;
+    if (!_ctl || document.hidden) return; // Skip polling when tab is hidden
     try {
       const r = await fetch('/api/map/queue', { headers: { 'X-Ana-Token': token }, credentials: 'same-origin' });
       if (!r.ok) return;
@@ -197,6 +197,62 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '    </div>'
       + '    <div class="map-tools flying"><input id="mapSearch" placeholder="Cari No Petak…" autocomplete="off"><button id="mapFit" title="fit ke semua petak">◎</button></div>'
       + '  </div>'
+      + '  <div id="bitDrawer" class="bit-drawer collapsed" aria-label="Kesenjangan Target">'
+      + '      <div class="bit-drawer-head" id="bitToggle"><span>BISNIS \u2014 KESENJANGAN TARGET</span><span class="bit-toggle-ico">></span></div>'
+      + '      <div class="bit-drawer-body" id="bitBody">'
+      + '        <div class="bit-controls">'
+      + '          <label class="bit-check" title="Kumulatif 1 Jan s/d hari ini — reset ke tahun/bulan/periode saat ini"><input type="checkbox" id="bitYTD" checked> YTD</label>'
+      + '          <label>Tahun <select id="bitTahun" class="spatial-mini" style="width:68px"><option>2024</option><option>2025</option><option selected>2026</option></select></label>'
+      + '          <label>Bulan <select id="bitBulan" class="spatial-mini" style="width:92px"></select></label>'
+      + '          <label>Sampai dgn <select id="bitSampai" class="spatial-mini" style="width:88px" title="Ya = hitung sejak awal tahun sampai periode terpilih, Tidak = hanya periode terpilih"><option value="ya" selected>Ya</option><option value="tidak">Tidak</option></select></label>'
+      + '          <label>Periode <select id="bitPeriode" class="spatial-mini" style="width:118px"><option value="0">Penuh (P1+P2)</option><option value="1">P1 (1-15)</option><option value="2" selected>P2 (16-akhir)</option></select></label>'
+      + '          <label class="bit-check" title="Tampilkan rincian per Mandor dan TPG"><input type="checkbox" id="bitBreakdown"> Per Mandor \u00d7 TPG</label>'
+      + '          <button id="bitRefresh" class="spatial-btn" style="margin-left:auto">Tampilkan</button>'
+      + '        </div>'
+      + '        <div class="bit-tabs" role="tablist">' 
+      + '          <button class="bit-tab active" data-tab="ringkasan" role="tab" aria-selected="true">Ringkasan</button>' 
+      + '          <button class="bit-tab" data-tab="analisis" role="tab">Analisis</button>'
+      + '          <button class="bit-tab" data-tab="sebaran" role="tab">Sebaran</button>'
+      + '          <button class="bit-tab" data-tab="telusur" role="tab">Telusur</button>' 
+      + '          <button class="bit-tab" data-tab="hipotesis" role="tab">Dugaan</button>' 
+      + '          <button class="bit-tab" data-tab="rekomendasi" role="tab">Rekomendasi</button>' 
+      + '          <button class="bit-tab" data-tab="kasus" role="tab">Kasus</button>' 
+      + '        </div>' 
+      + '        <div id="bitTabRingkasan" class="bit-tab-pane active">' 
+      + '          <div id="bitKpis" class="bit-kpis"></div>' 
+      + '          <div id="bitBar" class="bit-bar"></div>' 
+      + '          <div id="bitMeta" class="bit-meta"></div>' 
+      + '          <div id="bitEvidence" class="bit-evidence"></div>' 
+      + '          <div id="bitTableWrap" class="bit-table-wrap" style="display:none"><table id="bitTable" class="bit-table"></table></div>' 
+      + '        </div>' 
+      + '        <div id="bitTabAnalisis" class="bit-tab-pane">'
+      + '          <div id="bitAnalisis" class="bit-analisis"></div>'
+      + '        </div>'
+      + '        <div id="bitTabSebaran" class="bit-tab-pane">'
+      + '          <div id="bitSebaran" class="bit-sebaran"></div>' 
+      + '        </div>' 
+      + '        <div id="bitTabTelusur" class="bit-tab-pane">' 
+      + '          <div id="bitDiagnostic" class="bit-diagnostic"></div>' 
+      + '        </div>' 
+      + '        <div id="bitTabHipotesis" class="bit-tab-pane">' 
+      + '          <div id="bitHypothesis" class="bit-hypothesis"></div>' 
+      + '        </div>' 
+      + '        <div id="bitTabRekomendasi" class="bit-tab-pane">' 
+      + '          <div id="bitRekomendasi" class="bit-rekomendasi"></div>' 
+      + '        </div>' 
+      + '        <div id="bitTabKasus" class="bit-tab-pane">' 
+      + '          <div id="bitKasus" class="bit-kasus"></div>' 
+      + '        </div>'
+      + '        <div class="bit-handle bit-handle-n" data-dir="n" title="Tarik atas"></div>'
+      + '        <div class="bit-handle bit-handle-s" data-dir="s" title="Tarik bawah"></div>'
+      + '        <div class="bit-handle bit-handle-e" data-dir="e" title="Tarik kanan"></div>'
+      + '        <div class="bit-handle bit-handle-w" data-dir="w" title="Tarik kiri"></div>'
+      + '        <div class="bit-handle bit-handle-ne" data-dir="ne" title="Tarik pojok"></div>'
+      + '        <div class="bit-handle bit-handle-nw" data-dir="nw"></div>'
+      + '        <div class="bit-handle bit-handle-se" data-dir="se"></div>'
+      + '        <div class="bit-handle bit-handle-sw" data-dir="sw"></div>'
+      + '      </div>'
+      + '    </div>'
       + '  <div id="spatialProgress" class="spatial-progress flying hidden" aria-live="polite"><div class="sp-bar"><div id="spBarFill" class="sp-fill" style="width:0%"></div></div><div id="spLabel" class="sp-label">siap</div></div>'
       + '  <div class="map-bottom-bar">'
       + '    <div id="spatialKpi" class="spatial-kpi flying">'
@@ -262,17 +318,58 @@ export function initMapPanel({ log = () => {} } = {}) {
     // Canvas renderer: ratusan polygon + ribuan pin/garis tetap mulus
     // (SVG = ribuan node DOM = jank tiap render/zoom). Popup/tooltip/
     // dash/bringToFront tetap didukung. Animasi zoom/pan eksplisit.
-    preferCanvas: true, zoomAnimation: true, fadeAnimation: true, inertia: true,
+    preferCanvas: false, zoomAnimation: true, fadeAnimation: true, inertia: true,
+    zoomSnap: 0.2,               // Snap ke increment 0.2 (1, 1.2, 1.4, 1.6, 1.8, 2, ...)
+    wheelPxPerZoomLevel: 120,    // Lebih banyak scroll pixel per zoom level untuk lebih halus (default 60)
   }).setView(CENTER, 11);
-  const dark = window.L.tileLayer('/api/tiles/esri/dark/{z}/{x}/{y}', { maxZoom: 18, attribution: 'Esri' });
-  const sat = window.L.tileLayer('/api/tiles/esri/sat/{z}/{x}/{y}', { maxZoom: 18, attribution: 'Esri, Maxar, Earthstar Geographics' });
+  const street = window.L.tileLayer('/api/tiles/esri/street/{z}/{x}/{y}', {
+    maxZoom: 18,
+    attribution: 'Esri',
+    updateWhenIdle: false,        // Update langsung saat zoom/pan (tidak tunggu idle)
+    updateWhenZooming: true,     // Update saat zoom (responsif)
+    keepBuffer: 4,               // Buffer 4 zoom levels untuk smooth (default 2)
+    minZoom: 0,
+  });
+  const sat = window.L.tileLayer('/api/tiles/esri/sat/{z}/{x}/{y}', { 
+    maxZoom: 18, 
+    attribution: 'Esri, Maxar, Earthstar Geographics',
+    updateWhenIdle: false,        // Update langsung saat zoom/pan
+    updateWhenZooming: true,     // Update saat zoom
+    keepBuffer: 4,               // Buffer 4 zoom levels untuk smooth
+    minZoom: 0,
+  });
+  const topo = window.L.tileLayer('/api/tiles/esri/topo/{z}/{x}/{y}', {
+    maxZoom: 18,
+    attribution: 'Esri',
+    updateWhenIdle: false,
+    updateWhenZooming: true,
+    keepBuffer: 4,
+    minZoom: 0,
+  });
+  const pencil = window.L.tileLayer('/api/tiles/esri/pencil/{z}/{x}/{y}', {
+    maxZoom: 18,
+    attribution: 'Esri',
+    updateWhenIdle: false,
+    updateWhenZooming: true,
+    keepBuffer: 4,
+    minZoom: 0,
+  });
   // Label di pane sendiri: filter redup imagery tak kena teks (cegah halo/bayangan).
   try { map.createPane('labelPane'); const lp = map.getPane('labelPane'); if (lp) { lp.style.zIndex = 250; lp.style.pointerEvents = 'none'; } } catch(_) {}
-  const refLbl = window.L.tileLayer('/api/tiles/esri/ref/{z}/{x}/{y}', { maxZoom: 18, pane: 'labelPane' });
+  const refLbl = window.L.tileLayer('/api/tiles/esri/ref/{z}/{x}/{y}', { 
+    maxZoom: 18, 
+    pane: 'labelPane',
+    updateWhenIdle: false,        // Update langsung saat zoom/pan
+    updateWhenZooming: true,     // Update saat zoom
+    keepBuffer: 4,               // Buffer 4 zoom levels untuk smooth
+    minZoom: 0,
+  });
   const petakLayer = window.L.layerGroup();
   const satGroup = window.L.layerGroup([sat]);
-  const darkGroup = window.L.layerGroup([dark]);
-  // Offline-first: ubin Esri (satelit/gelap/label) hanya dipasang bila host-nya
+  const streetGroup = window.L.layerGroup([street]);
+  const topoGroup = window.L.layerGroup([topo]);
+  const pencilGroup = window.L.layerGroup([pencil]);
+  // Offline-first: ubin Esri (satelit/peta/topo/pencil/label) hanya dipasang bila host-nya
   // reachable. Hasil probe DIINGAT di localStorage: jaringan blokir = cukup
   // SATU error sekali, load berikut NOL request + NOL error. Tanpa ingatan,
   // tiap load mengulang probe yang diblokir (= error abadi di console).
@@ -292,10 +389,13 @@ export function initMapPanel({ log = () => {} } = {}) {
     const onTileErr = () => {
       if (++errN < 4) return;
       esriRemember(false);
-      try { map.removeLayer(satGroup); map.removeLayer(refLbl); } catch (_) {}
+      try { map.removeLayer(satGroup); map.removeLayer(streetGroup); map.removeLayer(topoGroup); map.removeLayer(pencilGroup); map.removeLayer(refLbl); } catch (_) {}
       try { log('map', 'BASEMAP', 'Esri gagal — turun ke mode lokal'); } catch (_) {}
     };
     sat.on('tileerror', onTileErr);
+    street.on('tileerror', onTileErr);
+    topo.on('tileerror', onTileErr);
+    pencil.on('tileerror', onTileErr);
     refLbl.on('tileerror', onTileErr);
   } catch (_) {}
   if (esriRemembered === '1') {
@@ -327,7 +427,7 @@ export function initMapPanel({ log = () => {} } = {}) {
   try { log('map', 'BASEMAP', esriRemembered === '0' ? 'Esri diblokir (tersimpan) — mode lokal' : 'basemap Esri aktif/dicek'); } catch (_) {}
   petakLayer.addTo(map);
   window.L.control.scale({ position: 'topright' }).addTo(map);
-  window.L.control.layers({ 'Satelit': satGroup, 'Gelap': darkGroup }, { 'Petak': petakLayer, 'Label': refLbl }, { position: 'topright' }).addTo(map);
+  window.L.control.layers({ 'Satelit': satGroup, 'Peta': streetGroup, 'Topografi': topoGroup, 'Pencil': pencilGroup }, { 'Petak': petakLayer, 'Label': refLbl }, { position: 'topright' }).addTo(map);
   window.L.control.zoom({ position: 'topright' }).addTo(map);
   // zoom-badge: info zoom + tier di SEBELAH KIRI skala, tanpa background
   // (teks putih + shadow, baca di atas satelit). Urutan kolom:
@@ -434,8 +534,10 @@ export function initMapPanel({ log = () => {} } = {}) {
       }
     },
   });
-  _ctl.registerBase('Satelit', satGroup, true);
-  _ctl.registerBase('Gelap', dark, false);
+  _ctl.registerBase('Satelit', satGroup, true);   // Default base map
+  _ctl.registerBase('Peta', streetGroup, false);
+  _ctl.registerBase('Topografi', topoGroup, false);
+  _ctl.registerBase('Pencil', pencilGroup, false);
   _ctl.registerLayer('Petak', petakLayer, true);
   // Label didaftarkan agar visibilitasnya terlacak state _ctl (persistensi
   // + sinkron kontrol native). Flag awal = kenyataan di peta.
@@ -520,7 +622,7 @@ export function initMapPanel({ log = () => {} } = {}) {
   }
 
   function _legendAttrib(){
-  return '<span class="lg-attrib" title="Peta: Esri World Imagery + Dark Gray + Boundaries — via Leaflet">Leaflet \u00b7 Esri, Maxar, Earthstar Geographics</span>';
+  return '<span class="lg-attrib" title="Peta: Esri World Street Map + Satellite — via Leaflet">Leaflet \u00b7 Esri, Maxar, Earthstar Geographics</span>';
 }
 function updateLegend(biz, kat) {
     if (!legend) return;
@@ -602,7 +704,7 @@ function updateLegend(biz, kat) {
         snap.filters.zoom = map.getZoom();
       } catch (_) {}
       // Visibilitas layer = pilihan user via kontrol layer (basemap Satelit/
-      // Gelap + overlay Petak/Label). Tier PMTiles-vs-GeoJSON mengikuti zoom
+      // Peta/Topografi/Pencil + overlay Petak/Label). Tier PMTiles-vs-GeoJSON mengikuti zoom
       // (otomatis, tak disimpan). Pin aktivitas mengikuti bisnis+tier.
       try {
         const _ly = { base: null, overlays: {} };
@@ -1235,7 +1337,8 @@ function updateLegend(biz, kat) {
             // bisa tersaring viewport < total; pin periode penuh terpotong
             // ke 600). Periode tersibuk ±2000 baris < 4000. ORDER BY tanggal
             // DESC: bila >4000, yang terpotong = terlama (terdokumentasi).
-            const pinLimit = 4000;
+            // Device-based pin limit: low-end=1000, mobile=2000, desktop=4000
+            const pinLimit = isLowEndDevice() ? 1000 : (_isMobileDevice() ? 2000 : 4000);
             const r2 = await fetchAktivitasPoints({ business: st.business, filters: st.filters }, { limit: pinLimit });
             if (r2 && r2.ok && Array.isArray(r2.rows)) {
               // Return hitung marker yang benar-benar tampil (baris tanpa
@@ -1474,7 +1577,9 @@ function updateLegend(biz, kat) {
       _lastVp = vp.key;
       _viewportExtra.bounds = vp.bounds;
       _viewportExtra.zoom = vp.zoom;
-      _viewportExtra.page_size = 1000;
+      // Device-based page_size: low-end=2000, mobile=5000, desktop=10000
+      const deviceLimit = isLowEndDevice() ? 2000 : (_isMobileDevice() ? 5000 : 10000);
+      _viewportExtra.page_size = deviceLimit;
       clearTimeout(_vpT);
       _vpT = setTimeout(scheduleReload, 600);
       // P2-3 hybrid: switch PMTiles <-> GeoJSON berdasarkan zoom (hanya business petak)
@@ -1509,7 +1614,7 @@ function updateLegend(biz, kat) {
   map.on('baselayerchange', function(e) {
     try {
       const l = e && e.layer;
-      const id = (l === satGroup) ? 'Satelit' : ((l === darkGroup) ? 'Gelap' : null);
+      const id = (l === satGroup) ? 'Satelit' : ((l === streetGroup) ? 'Peta' : ((l === topoGroup) ? 'Topografi' : ((l === pencilGroup) ? 'Pencil' : null)));
       if (!id || !_ctl || typeof _ctl.set_basemap !== 'function') return;
       try { if (_ctl.get_state && _ctl.get_state().basemap === id) return; } catch (_) {}
       try { _ctl.set_basemap(id); } catch (_) {}
