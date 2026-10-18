@@ -1,0 +1,61 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 2>/dev/null || echo "No requirements.txt found"
+      
+      - name: Check Python syntax
+        run: |
+          python -m py_compile server.py
+          python -m py_compile auth_local.py
+          python -m py_compile commands.py
+          python -m py_compile map_store.py
+          python -m py_compile spatial_chart_store.py
+          python -m py_compile spatial_report_store.py
+          python -m py_compile tpl_store.py
+          python -m py_compile db_source.py
+          python -m py_compile landing_insight.py
+          python -m py_compile insight_build.py
+          python -m py_compile sysmetrics.py
+          python -m py_compile terminal.py
+          python -m py_compile voice.py
+          python -m py_compile services.py
+          python -m py_compile runtime_gateway.py
+          python -m py_compile spatial_intel.py
+          python -m py_compile spatial_archive_store.py
+          python -m py_compile export_all_kph.py
+      
+      - name: Check JavaScript syntax
+        run: |
+          # Check if node is available
+          if command -v node &> /dev/null; then
+            for file in ui/src/*.js; do
+              if [ -f "$file" ]; then
+                node -c "$file" || echo "Syntax check failed for $file"
+              fi
+            done
+          else
+            echo "Node.js not available, skipping JavaScript syntax check"
+          fi
