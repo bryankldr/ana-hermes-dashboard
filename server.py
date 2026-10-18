@@ -1670,7 +1670,15 @@ def _ana_auth_error(handler) -> tuple:
     return 401, {"error": "tidak ada sesi", "authenticated": False, "reason": reason}
 
 def _set_session_cookie(handler, sid: str, did: str = ""):
+    # Auto-detect HTTPS from environment or Apache proxy headers
     secure = os.environ.get("ANA_COOKIE_SECURE","0").strip() == "1"
+    if not secure:
+        # Check Apache proxy headers for HTTPS
+        secure = (
+            handler.headers.get("X-Forwarded-Proto", "").lower() == "https" or
+            handler.headers.get("X-Forwarded-SSL", "").lower() == "on" or
+            handler.headers.get("HTTPS", "").lower() == "on"
+        )
     parts = [f"ana_session={sid}", "Path=/", "HttpOnly", "SameSite=Lax"]
     if secure: parts.append("Secure")
     try: ttl = int(os.environ.get("ANA_SESSION_TTL","28800"))
@@ -1690,9 +1698,16 @@ def _set_session_cookie(handler, sid: str, did: str = ""):
         pass
 
 def _clear_session_cookie(handler):
-    handler.send_header("Set-Cookie", "ana_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+    # Auto-detect HTTPS for secure cookie deletion
+    secure = (
+        handler.headers.get("X-Forwarded-Proto", "").lower() == "https" or
+        handler.headers.get("X-Forwarded-SSL", "").lower() == "on" or
+        handler.headers.get("HTTPS", "").lower() == "on"
+    )
+    secure_flag = "; Secure" if secure else ""
+    handler.send_header("Set-Cookie", f"ana_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure_flag}")
     try:
-        handler.send_header("Set-Cookie", "ana_device=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+        handler.send_header("Set-Cookie", f"ana_device=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure_flag}")
     except Exception:
         pass
 
@@ -2422,6 +2437,34 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("  " + (fmt % args) + "\n")
 
     # ── helpers ──────────────────────────────────────────────
+    def _set_security_headers(self):
+        """Set security headers untuk enterprise requirements."""
+        # HSTS - Enforce HTTPS (opsional, hanya jika HTTPS enabled)
+        if os.environ.get("ANA_HTTPS", "").lower() in ("1", "true", "yes"):
+            self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # Frame protection - clickjacking
+        self.send_header("X-Frame-Options", "DENY")
+        # MIME sniffing protection
+        self.send_header("X-Content-Type-Options", "nosniff")
+        # XSS protection
+        self.send_header("X-XSS-Protection", "1; mode=block")
+        # Referrer policy
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        # Content-Security-Policy - Permissive untuk awal, bisa diperketat nanti
+        # Allow inline scripts/styles untuk legacy compatibility
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob: https://server.arcgisonline.com; "
+            "font-src 'self' data:; "
+            "connect-src 'self' https://server.arcgisonline.com; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self';"
+        )
+        self.send_header("Content-Security-Policy", csp)
+
     def _json(self, body, code=200):
         import decimal
         def _dec(o):
@@ -2430,6 +2473,7 @@ class Handler(BaseHTTPRequestHandler):
         data = json.dumps(body, default=_dec).encode()
         try:
             self.send_response(code)
+            self._set_security_headers()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
@@ -2482,6 +2526,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         try:
             self.send_response(code)
+            self._set_security_headers()
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", cache_control)

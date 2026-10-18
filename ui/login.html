@@ -50,7 +50,7 @@
       <div class="ref-live"><span class="dot"></span><span>LIVE INSIGHT</span></div>
       <div class="ref-hero-row">
         <div class="ref-hero-main">
-          <h2>Hutan Lestari,<br><span class="grad">Nilai untuk Negeri</span></h2>
+          <h2><span class="grad">Cipta Hutan Lestari</span></h2>
           <p>SIMOGE HUD menghadirkan informasi, analisis, dan pengambilan keputusan berbasis data untuk mendukung pengelolaan hutan yang lebih efektif dan berkelanjutan.</p>
         </div>
         <!-- Papan skor GLOBAL: YTD + periode + hari ini (cron, bukan live-query).
@@ -62,14 +62,14 @@
         </div>
       </div>
     </div>
-    <nav class="ref-tabs ref-reveal" aria-label="Navigasi cepat">
-      <button type="button" class="active">⌂ <span>Start</span></button>
-      <button type="button">📰 <span>News</span></button>
-      <button type="button">▦ <span>Feed</span></button>
-      <button type="button">✦ <span>For You</span></button>
-      <button type="button">➕ <span>Following</span></button>
-      <button type="button">⧉ <span>Channels</span></button>
-      <button type="button">🛡 <span>Publisher</span></button>
+    <nav class="ref-tabs ref-reveal" aria-label="Navigasi cepat" style="display:none">
+      <button type="button" class="active" disabled>⌂ <span>Start</span></button>
+      <button type="button" disabled>📰 <span>News</span></button>
+      <button type="button" disabled>▦ <span>Feed</span></button>
+      <button type="button" disabled>✦ <span>For You</span></button>
+      <button type="button" disabled>➕ <span>Following</span></button>
+      <button type="button" disabled>⧉ <span>Channels</span></button>
+      <button type="button" disabled>🛡 <span>Publisher</span></button>
     </nav>
     <!-- 3 kartu tengah: news dinamis + produksi + supply (rotasi slides, live) -->
     <section class="ref-cards ref-reveal" id="insightGrid">
@@ -125,7 +125,6 @@
         </div>
       </div>
     </section>
-    <p class="ref-note" id="insightNote">Memuat angka operasional dari database…</p>
     <!-- Strip tren produksi seluruh KPH (fallback KPH kini; N KPH = seri baru otomatis) -->
     <section class="ref-kphstrip ref-reveal" id="kphStrip" hidden>
       <div class="ref-insight-head"><span id="insKphKick">TREN PRODUKSI SELURUH KPH · 12 BULAN</span><span class="ref-ver-tag" id="insVer5"></span></div>
@@ -193,7 +192,7 @@
         </div>
       </div>
       <div class="ref-trust"><span>🛡 Aman</span><i>|</i><span>✔ Terpercaya</span><i>|</i><span>⚑ Untuk Negeri</span></div>
-      <div class="footer">Butuh bantuan? Hubungi admin KPHBWB · <a href="/">Kembali</a></div>
+      <div class="footer">Butuh bantuan? Hubungi admin KPH BWB · <a href="/"></a></div>
     </form>
   </div>
 </main>
