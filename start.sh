@@ -7,9 +7,14 @@ ROOT="$(pwd)"
 # Load .env file if exists
 if [ -f .env ]; then
   set -a
-  source .env
+  source .env 2>/dev/null || true
   set +a
 fi
+
+# Explicitly export Hermes service credentials (for hermes_service.py)
+export HERMES_SERVICE_USER="${HERMES_SERVICE_USER:-}"
+export HERMES_SERVICE_PASSWORD="${HERMES_SERVICE_PASSWORD:-}"
+export HERMES_SERVICE_PROVIDER="${HERMES_SERVICE_PROVIDER:-basic}"
 
 if [ -z "${ANA_PORT:-}" ] && [ -f .env ]; then
   ANA_PORT=$(grep -E '^[[:space:]]*ANA_PORT=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d ' "' | tr -d "'")
