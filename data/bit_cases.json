@@ -1,0 +1,622 @@
+[
+  {
+    "id": "c_50083414",
+    "created_at": "2026-10-18T04:49:58.242371+07:00",
+    "updated_at": "2026-10-18T04:49:58.242371+07:00",
+    "created_by": {
+      "email": "",
+      "scope": {}
+    },
+    "status": "open",
+    "gejala": "E2E test kasus baru",
+    "pertanyaan": "",
+    "periode": {
+      "tahun": 2026,
+      "bulan": 2,
+      "periode": 0,
+      "sampai_dengan": "ya",
+      "scope": {}
+    },
+    "snapshot": {
+      "kpi": {
+        "tahun": 2026,
+        "bulan": 2,
+        "periode": 0,
+        "sampai_dengan": "ya",
+        "period_bounds": [
+          "2026-01-01",
+          "2026-02-28"
+        ],
+        "ytd_bounds": [
+          "2026-01-01",
+          "2026-02-28"
+        ],
+        "period_only_bounds": [
+          "2026-02-01",
+          "2026-02-28"
+        ],
+        "target_total_kg": 3680000.3,
+        "target_expected_kg": 588800.0,
+        "target_pct": 16.0,
+        "target_ytd_kg": 588800.0,
+        "target_ytd_pct": 16.0,
+        "rencana_kg": 225625.1,
+        "n_rencana": 4410,
+        "rencana_ytd_kg": 432061.9,
+        "rencana_main_kg": 432061.9,
+        "actual_kg": 397434.0,
+        "actual_period_kg": 171142.0,
+        "actual_main_kg": 397434.0,
+        "plan_coverage_pct": 73.38,
+        "plan_coverage_ytd_pct": 73.38,
+        "plan_coverage_period_pct": 38.32,
+        "achievement_pct": 67.5,
+        "achievement_ytd_pct": 67.5,
+        "achievement_period_pct": 29.07,
+        "plan_gap_kg": 156738.1,
+        "plan_gap_period_kg": 363174.9,
+        "execution_gap_kg": 34627.9,
+        "execution_gap_period_kg": 54483.1,
+        "current_gap_kg": 191366.0,
+        "current_gap_ytd_kg": 191366.0
+      },
+      "aktivitas": {
+        "n_aktivitas": 6659,
+        "n_penyadap_aktiv": 1456,
+        "n_petak_aktiv": 736,
+        "per_jenis": [
+          {
+            "jenis": "quare",
+            "label": "Quare",
+            "arti": "lukai batang buka jalur",
+            "count": 6483,
+            "pohon": 0
+          },
+          {
+            "jenis": "semprot_cas",
+            "label": "Semprot CAS",
+            "arti": "stimulan",
+            "count": 5821,
+            "pohon": 0
+          },
+          {
+            "jenis": "kerok",
+            "label": "Kerok",
+            "arti": "panen getah beku",
+            "count": 1012,
+            "pohon": 0
+          },
+          {
+            "jenis": "budaya_bersih",
+            "label": "Budaya Bersih",
+            "arti": "kebersihan sadapan",
+            "count": 3757,
+            "pohon": 0
+          },
+          {
+            "jenis": "naik_batok",
+            "label": "Naik Batok",
+            "arti": "naikkan wadah",
+            "count": 2603,
+            "pohon": 0
+          },
+          {
+            "jenis": "pulung",
+            "label": "Pulung",
+            "arti": "kumpul getah cair",
+            "count": 0,
+            "pohon": 0
+          }
+        ],
+        "per_pembaharuan": [
+          {
+            "dim": "1",
+            "label": "Pembaharuan 1",
+            "count": 4624,
+            "photo_count": 4320,
+            "petak_count": 736
+          },
+          {
+            "dim": "2",
+            "label": "Pembaharuan 2",
+            "count": 1879,
+            "photo_count": 1649,
+            "petak_count": 459
+          },
+          {
+            "dim": "3",
+            "label": "Pembaharuan 3",
+            "count": 156,
+            "photo_count": 129,
+            "petak_count": 84
+          }
+        ],
+        "pohon_scope": 1269492,
+        "luas_scope_ha": 5847.5,
+        "pohon_tersentuh_total": 0
+      },
+      "hypotheses": [
+        {
+          "id": "H1",
+          "label": "Kapasitas tenaga kerja menurun",
+          "data_dibutuhkan": "Status penyadap, periode aktif, realisasi produksi (n_penyadap_aktiv cur vs prev)",
+          "kondisi_gugur": "Jika n_penyadap_aktiv tidak turun (delta ≥0%), H1 gugur",
+          "status": "Tidak didukung",
+          "delta_pct": 19.7,
+          "cur": 1456,
+          "prev": 1216,
+          "evidence": "Penyadap aktif tidak turun (19.7% 1216→1456) — H1 gugur: kapasitas tenaga tidak menjelaskan gap."
+        },
+        {
+          "id": "H2",
+          "label": "Aktivitas penyadapan berkurang",
+          "data_dibutuhkan": "Rencana, aktivitas bertanggal per jenis (quare..pulung × pohon), luas petak",
+          "kondisi_gugur": "Jika frekuensi aktivitas tidak turun (delta ≥ -2%), H2 gugur",
+          "status": "Tidak didukung",
+          "delta_pct": 107.4,
+          "cur": 6659,
+          "prev": 3211,
+          "evidence": "Aktivitas tidak berkurang (107.4% 3211→6659) — H2 gugur; frekuensi operasi bukan penyebab, cek yield (H3) atau data (H4)."
+        },
+        {
+          "id": "H3",
+          "label": "Produktivitas per aktivitas menurun",
+          "data_dibutuhkan": "Volume hasil, jumlah aktivitas valid, kondisi petak (cuaca/akses/alt)",
+          "kondisi_gugur": "Jika yield per aktivitas tidak turun, H3 gugur",
+          "status": "Didukung",
+          "delta_pct": -15.3,
+          "cur": 59.684,
+          "prev": 70.474,
+          "evidence": "Yield per aktivitas turun -15.3% (70.474→59.684 kg/aktivitas) — perlu uji stratifikasi cuaca/akses/petak sebanding."
+        },
+        {
+          "id": "H4",
+          "label": "Masalah pencatatan / integrasi data",
+          "data_dibutuhkan": "Timestamp, ID transaksi, log sinkronisasi, rekonsiliasi rencana↔aktivitas↔penerimaan",
+          "kondisi_gugur": "Jika rekonsiliasi sumber konsisten (tidak ada missing/dup/lag), H4 gugur",
+          "status": "Didukung",
+          "evidence": "Kualitas data bermasalah: jml_phn_* 100% NULL (pohon per jenis tidak terisi) — rekonsiliasi ID/transaksi & log sync diperlukan sebelum klaim kausal.",
+          "issues": [
+            "jml_phn_* 100% NULL (pohon per jenis tidak terisi)"
+          ]
+        }
+      ],
+      "sebaran_level": "kode_bkph",
+      "sebaran_top2": [
+        {
+          "kode": "3121104",
+          "nama": "GLENMORE",
+          "n_petak": 289,
+          "pohon": 526950,
+          "total_rkap": 1402671.4,
+          "target_expected": 224427.4,
+          "rencana_kg": 159358.0,
+          "n_rencana": 1583,
+          "actual_kg": 153192.0,
+          "achievement_pct": 68.3,
+          "plan_coverage_pct": 71.0,
+          "gap_kg": 71235.4,
+          "share_gap_pct": 37.2
+        },
+        {
+          "kode": "3121103",
+          "nama": "KALISETAIL",
+          "n_petak": 283,
+          "pohon": 334957,
+          "total_rkap": 1013946.9,
+          "target_expected": 162231.5,
+          "rencana_kg": 125807.8,
+          "n_rencana": 1550,
+          "actual_kg": 117003.0,
+          "achievement_pct": 72.1,
+          "plan_coverage_pct": 77.5,
+          "gap_kg": 45228.5,
+          "share_gap_pct": 23.6
+        }
+      ],
+      "query_ids": [
+        {
+          "template": "target_gap",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        },
+        {
+          "template": "diagnostic",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        },
+        {
+          "template": "hypothesis",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        },
+        {
+          "template": "sebaran",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        }
+      ]
+    },
+    "hipotesis": [
+      {
+        "id": "H1",
+        "label": "Kapasitas tenaga kerja menurun",
+        "data_dibutuhkan": "Status penyadap, periode aktif, realisasi produksi (n_penyadap_aktiv cur vs prev)",
+        "kondisi_gugur": "Jika n_penyadap_aktiv tidak turun (delta ≥0%), H1 gugur",
+        "status": "Tidak didukung",
+        "delta_pct": 19.7,
+        "cur": 1456,
+        "prev": 1216,
+        "evidence": "Penyadap aktif tidak turun (19.7% 1216→1456) — H1 gugur: kapasitas tenaga tidak menjelaskan gap."
+      },
+      {
+        "id": "H2",
+        "label": "Aktivitas penyadapan berkurang",
+        "data_dibutuhkan": "Rencana, aktivitas bertanggal per jenis (quare..pulung × pohon), luas petak",
+        "kondisi_gugur": "Jika frekuensi aktivitas tidak turun (delta ≥ -2%), H2 gugur",
+        "status": "Tidak didukung",
+        "delta_pct": 107.4,
+        "cur": 6659,
+        "prev": 3211,
+        "evidence": "Aktivitas tidak berkurang (107.4% 3211→6659) — H2 gugur; frekuensi operasi bukan penyebab, cek yield (H3) atau data (H4)."
+      },
+      {
+        "id": "H3",
+        "label": "Produktivitas per aktivitas menurun",
+        "data_dibutuhkan": "Volume hasil, jumlah aktivitas valid, kondisi petak (cuaca/akses/alt)",
+        "kondisi_gugur": "Jika yield per aktivitas tidak turun, H3 gugur",
+        "status": "Didukung",
+        "delta_pct": -15.3,
+        "cur": 59.684,
+        "prev": 70.474,
+        "evidence": "Yield per aktivitas turun -15.3% (70.474→59.684 kg/aktivitas) — perlu uji stratifikasi cuaca/akses/petak sebanding."
+      },
+      {
+        "id": "H4",
+        "label": "Masalah pencatatan / integrasi data",
+        "data_dibutuhkan": "Timestamp, ID transaksi, log sinkronisasi, rekonsiliasi rencana↔aktivitas↔penerimaan",
+        "kondisi_gugur": "Jika rekonsiliasi sumber konsisten (tidak ada missing/dup/lag), H4 gugur",
+        "status": "Didukung",
+        "evidence": "Kualitas data bermasalah: jml_phn_* 100% NULL (pohon per jenis tidak terisi) — rekonsiliasi ID/transaksi & log sync diperlukan sebelum klaim kausal.",
+        "issues": [
+          "jml_phn_* 100% NULL (pohon per jenis tidak terisi)"
+        ]
+      }
+    ],
+    "kesimpulan": "",
+    "kepastian": "Belum teruji",
+    "keputusan": "",
+    "hasil": {
+      "catatan": "",
+      "outcome": "belum",
+      "verified_at": null
+    },
+    "tags": []
+  },
+  {
+    "id": "c_957c56e4",
+    "created_at": "2026-10-18T04:46:11.422796+07:00",
+    "updated_at": "2026-10-18T04:46:11.423850+07:00",
+    "created_by": {
+      "email": "test@a",
+      "scope": {}
+    },
+    "status": "open",
+    "gejala": "Produksi Feb turun vs Jan - test",
+    "pertanyaan": "",
+    "periode": {
+      "tahun": 2026,
+      "bulan": 2,
+      "periode": 0,
+      "sampai_dengan": "ya",
+      "scope": {}
+    },
+    "snapshot": {
+      "kpi": {
+        "tahun": 2026,
+        "bulan": 2,
+        "periode": 0,
+        "sampai_dengan": "ya",
+        "period_bounds": [
+          "2026-01-01",
+          "2026-02-28"
+        ],
+        "ytd_bounds": [
+          "2026-01-01",
+          "2026-02-28"
+        ],
+        "period_only_bounds": [
+          "2026-02-01",
+          "2026-02-28"
+        ],
+        "target_total_kg": 3680000.3,
+        "target_expected_kg": 588800.0,
+        "target_pct": 16.0,
+        "target_ytd_kg": 588800.0,
+        "target_ytd_pct": 16.0,
+        "rencana_kg": 225625.1,
+        "n_rencana": 4410,
+        "rencana_ytd_kg": 432061.9,
+        "rencana_main_kg": 432061.9,
+        "actual_kg": 397434.0,
+        "actual_period_kg": 171142.0,
+        "actual_main_kg": 397434.0,
+        "plan_coverage_pct": 73.38,
+        "plan_coverage_ytd_pct": 73.38,
+        "plan_coverage_period_pct": 38.32,
+        "achievement_pct": 67.5,
+        "achievement_ytd_pct": 67.5,
+        "achievement_period_pct": 29.07,
+        "plan_gap_kg": 156738.1,
+        "plan_gap_period_kg": 363174.9,
+        "execution_gap_kg": 34627.9,
+        "execution_gap_period_kg": 54483.1,
+        "current_gap_kg": 191366.0,
+        "current_gap_ytd_kg": 191366.0
+      },
+      "aktivitas": {
+        "n_aktivitas": 6659,
+        "n_penyadap_aktiv": 1456,
+        "n_petak_aktiv": 736,
+        "per_jenis": [
+          {
+            "jenis": "quare",
+            "label": "Quare",
+            "arti": "lukai batang buka jalur",
+            "count": 6483,
+            "pohon": 0
+          },
+          {
+            "jenis": "semprot_cas",
+            "label": "Semprot CAS",
+            "arti": "stimulan",
+            "count": 5821,
+            "pohon": 0
+          },
+          {
+            "jenis": "kerok",
+            "label": "Kerok",
+            "arti": "panen getah beku",
+            "count": 1012,
+            "pohon": 0
+          },
+          {
+            "jenis": "budaya_bersih",
+            "label": "Budaya Bersih",
+            "arti": "kebersihan sadapan",
+            "count": 3757,
+            "pohon": 0
+          },
+          {
+            "jenis": "naik_batok",
+            "label": "Naik Batok",
+            "arti": "naikkan wadah",
+            "count": 2603,
+            "pohon": 0
+          },
+          {
+            "jenis": "pulung",
+            "label": "Pulung",
+            "arti": "kumpul getah cair",
+            "count": 0,
+            "pohon": 0
+          }
+        ],
+        "per_pembaharuan": [
+          {
+            "dim": "1",
+            "label": "Pembaharuan 1",
+            "count": 4624,
+            "photo_count": 4320,
+            "petak_count": 736
+          },
+          {
+            "dim": "2",
+            "label": "Pembaharuan 2",
+            "count": 1879,
+            "photo_count": 1649,
+            "petak_count": 459
+          },
+          {
+            "dim": "3",
+            "label": "Pembaharuan 3",
+            "count": 156,
+            "photo_count": 129,
+            "petak_count": 84
+          }
+        ],
+        "pohon_scope": 1269492,
+        "luas_scope_ha": 5847.5,
+        "pohon_tersentuh_total": 0
+      },
+      "hypotheses": [
+        {
+          "id": "H1",
+          "label": "Kapasitas tenaga kerja menurun",
+          "data_dibutuhkan": "Status penyadap, periode aktif, realisasi produksi (n_penyadap_aktiv cur vs prev)",
+          "kondisi_gugur": "Jika n_penyadap_aktiv tidak turun (delta ≥0%), H1 gugur",
+          "status": "Tidak didukung",
+          "delta_pct": 19.7,
+          "cur": 1456,
+          "prev": 1216,
+          "evidence": "Penyadap aktif tidak turun (19.7% 1216→1456) — H1 gugur: kapasitas tenaga tidak menjelaskan gap."
+        },
+        {
+          "id": "H2",
+          "label": "Aktivitas penyadapan berkurang",
+          "data_dibutuhkan": "Rencana, aktivitas bertanggal per jenis (quare..pulung × pohon), luas petak",
+          "kondisi_gugur": "Jika frekuensi aktivitas tidak turun (delta ≥ -2%), H2 gugur",
+          "status": "Tidak didukung",
+          "delta_pct": 107.4,
+          "cur": 6659,
+          "prev": 3211,
+          "evidence": "Aktivitas tidak berkurang (107.4% 3211→6659) — H2 gugur; frekuensi operasi bukan penyebab, cek yield (H3) atau data (H4)."
+        },
+        {
+          "id": "H3",
+          "label": "Produktivitas per aktivitas menurun",
+          "data_dibutuhkan": "Volume hasil, jumlah aktivitas valid, kondisi petak (cuaca/akses/alt)",
+          "kondisi_gugur": "Jika yield per aktivitas tidak turun, H3 gugur",
+          "status": "Didukung",
+          "delta_pct": -15.3,
+          "cur": 59.684,
+          "prev": 70.474,
+          "evidence": "Yield per aktivitas turun -15.3% (70.474→59.684 kg/aktivitas) — perlu uji stratifikasi cuaca/akses/petak sebanding."
+        },
+        {
+          "id": "H4",
+          "label": "Masalah pencatatan / integrasi data",
+          "data_dibutuhkan": "Timestamp, ID transaksi, log sinkronisasi, rekonsiliasi rencana↔aktivitas↔penerimaan",
+          "kondisi_gugur": "Jika rekonsiliasi sumber konsisten (tidak ada missing/dup/lag), H4 gugur",
+          "status": "Didukung",
+          "evidence": "Kualitas data bermasalah: jml_phn_* 100% NULL (pohon per jenis tidak terisi) — rekonsiliasi ID/transaksi & log sync diperlukan sebelum klaim kausal.",
+          "issues": [
+            "jml_phn_* 100% NULL (pohon per jenis tidak terisi)"
+          ]
+        }
+      ],
+      "sebaran_level": "kode_bkph",
+      "sebaran_top2": [
+        {
+          "kode": "3121104",
+          "nama": "GLENMORE",
+          "n_petak": 289,
+          "pohon": 526950,
+          "total_rkap": 1402671.4,
+          "target_expected": 224427.4,
+          "rencana_kg": 159358.0,
+          "n_rencana": 1583,
+          "actual_kg": 153192.0,
+          "achievement_pct": 68.3,
+          "plan_coverage_pct": 71.0,
+          "gap_kg": 71235.4,
+          "share_gap_pct": 37.2
+        },
+        {
+          "kode": "3121103",
+          "nama": "KALISETAIL",
+          "n_petak": 283,
+          "pohon": 334957,
+          "total_rkap": 1013946.9,
+          "target_expected": 162231.5,
+          "rencana_kg": 125807.8,
+          "n_rencana": 1550,
+          "actual_kg": 117003.0,
+          "achievement_pct": 72.1,
+          "plan_coverage_pct": 77.5,
+          "gap_kg": 45228.5,
+          "share_gap_pct": 23.6
+        }
+      ],
+      "query_ids": [
+        {
+          "template": "target_gap",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        },
+        {
+          "template": "diagnostic",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        },
+        {
+          "template": "hypothesis",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        },
+        {
+          "template": "sebaran",
+          "params": {
+            "tahun": 2026,
+            "bulan": 2,
+            "periode": 0,
+            "sampai_dengan": "ya"
+          }
+        }
+      ]
+    },
+    "hipotesis": [
+      {
+        "id": "H1",
+        "label": "Kapasitas tenaga kerja menurun",
+        "data_dibutuhkan": "Status penyadap, periode aktif, realisasi produksi (n_penyadap_aktiv cur vs prev)",
+        "kondisi_gugur": "Jika n_penyadap_aktiv tidak turun (delta ≥0%), H1 gugur",
+        "status": "Tidak didukung",
+        "delta_pct": 19.7,
+        "cur": 1456,
+        "prev": 1216,
+        "evidence": "Penyadap aktif tidak turun (19.7% 1216→1456) — H1 gugur: kapasitas tenaga tidak menjelaskan gap."
+      },
+      {
+        "id": "H2",
+        "label": "Aktivitas penyadapan berkurang",
+        "data_dibutuhkan": "Rencana, aktivitas bertanggal per jenis (quare..pulung × pohon), luas petak",
+        "kondisi_gugur": "Jika frekuensi aktivitas tidak turun (delta ≥ -2%), H2 gugur",
+        "status": "Tidak didukung",
+        "delta_pct": 107.4,
+        "cur": 6659,
+        "prev": 3211,
+        "evidence": "Aktivitas tidak berkurang (107.4% 3211→6659) — H2 gugur; frekuensi operasi bukan penyebab, cek yield (H3) atau data (H4)."
+      },
+      {
+        "id": "H3",
+        "label": "Produktivitas per aktivitas menurun",
+        "data_dibutuhkan": "Volume hasil, jumlah aktivitas valid, kondisi petak (cuaca/akses/alt)",
+        "kondisi_gugur": "Jika yield per aktivitas tidak turun, H3 gugur",
+        "status": "Didukung",
+        "delta_pct": -15.3,
+        "cur": 59.684,
+        "prev": 70.474,
+        "evidence": "Yield per aktivitas turun -15.3% (70.474→59.684 kg/aktivitas) — perlu uji stratifikasi cuaca/akses/petak sebanding."
+      },
+      {
+        "id": "H4",
+        "label": "Masalah pencatatan / integrasi data",
+        "data_dibutuhkan": "Timestamp, ID transaksi, log sinkronisasi, rekonsiliasi rencana↔aktivitas↔penerimaan",
+        "kondisi_gugur": "Jika rekonsiliasi sumber konsisten (tidak ada missing/dup/lag), H4 gugur",
+        "status": "Didukung",
+        "evidence": "Kualitas data bermasalah: jml_phn_* 100% NULL (pohon per jenis tidak terisi) — rekonsiliasi ID/transaksi & log sync diperlukan sebelum klaim kausal.",
+        "issues": [
+          "jml_phn_* 100% NULL (pohon per jenis tidak terisi)"
+        ]
+      }
+    ],
+    "kesimpulan": "Yield turun -15%",
+    "kepastian": "Didukung",
+    "keputusan": "Cek petak GLENMORE",
+    "hasil": {
+      "catatan": "terverifikasi",
+      "outcome": "sukses",
+      "verified_at": "2026-10-18T04:46:11.423835+07:00"
+    },
+    "tags": []
+  }
+]

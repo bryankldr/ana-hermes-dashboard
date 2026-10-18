@@ -39,7 +39,7 @@
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <!-- ?v= bumped manual tiap ubah CSS/JS: tanpa ini browser pakai cache lama
        dan perbaikan panel chart tak akan terlihat. -->
-  <link rel="stylesheet" href="styles/map.css?v=20261014f">
+  <link rel="stylesheet" href="styles/map.css?v=20261018x">
   <!-- Boot gate (anti kilas panel disabled saat refresh): seluruh #hud
        tersembunyi sampai LayoutManager selesai terapkan layout/disabled,
        diganti tabir loading. Inline di HTML (no-store) agar selalu segar.
@@ -62,7 +62,7 @@
   <script defer src="vendor/leaflet/leaflet.js"></script>
   <script defer src="vendor/protomaps/protomaps-leaflet.min.js"></script>
   <script defer src="vendor/chart.js"></script>
-  <script src="vendor/qrcode-generator.js"></script>
+  <script defer src="vendor/qrcode-generator.js"></script>
 </head>
 <body>
 <div id="bootVeil" aria-hidden="true"><div class="boot-spin"></div><div>MEMUAT</div></div>
@@ -217,7 +217,7 @@
 
 </div>
 
-<script type="module" src="src/main.js?v=20261014a"></script>
+<script type="module" src="src/main.js?v=20261018x"></script>
 <script>
 // PWA SW — universal (Chrome/Edge/Firefox/Safari/Samsung). Scope / via Service-Worker-Allowed header.
 if ('serviceWorker' in navigator) {

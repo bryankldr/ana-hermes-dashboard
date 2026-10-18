@@ -159,7 +159,7 @@
 .spatial-kpi.flying .kpi { background: rgba(45,242,255,.09); border-color: rgba(45,242,255,.18); padding: 4px 5px; display: flex; flex-direction: column; gap: 1px; justify-content: center; min-width: 0; }
 .spatial-kpi.flying .kpi-label { font-size: 10px; letter-spacing: .05em; font-weight: 700; color: var(--text-main); opacity: 1; }
 .spatial-kpi.flying .kpi-value { font-size: 19px; font-weight: 800; line-height: 1.05; letter-spacing: -.02em; }
-.spatial-kpi.flying .kpi-sub { font-size: 10px; opacity: .90; line-height: 1.3; font-weight: 500; white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 39px; max-height: 39px; }
+.spatial-kpi.flying .kpi-sub { font-size: 10px; opacity: .90; line-height: 1.3; font-weight: 500; white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 39px; max-height: 39px; }
 .spatial-kpi.flying .kpi { min-height: 84px; max-height: 84px; overflow: hidden; }
 
 /* legacy map box moved into .map-wrap */
@@ -688,3 +688,58 @@ html[data-touch="coarse"] .arch-mv, html[data-touch="coarse"] .arch-del { min-wi
   body.rpt-printing .rpt-page:last-child { break-after: auto; page-break-after: auto; }
   body.rpt-printing .rpt-btn { display: none; }
 }
+
+/* BIT drawer — inside spatial map, not a free panel */
+.bit-drawer{position:absolute;left:50%;top:8px;transform:translateX(-50%);width:min(520px,calc(100% - 24px));max-height:min(56vh,520px);display:flex;flex-direction:column;border:1px solid rgba(45,242,255,.22);border-radius:10px;background:rgba(4,18,44,.96);backdrop-filter:blur(10px);box-shadow:0 8px 24px rgba(0,0,0,.45);touch-action:none;user-select:none;overflow:hidden}
+.bit-drawer.dragging{transition:none;box-shadow:0 12px 32px rgba(0,0,0,.6)}
+.bit-drawer .bit-handle{position:absolute;z-index:3;touch-action:none}
+.bit-drawer .bit-handle-e{right:-4px;top:0;bottom:0;width:8px;cursor:ew-resize}
+.bit-drawer .bit-handle-w{left:-4px;top:0;bottom:0;width:8px;cursor:ew-resize}
+.bit-drawer .bit-handle-s{left:0;right:0;bottom:-4px;height:8px;cursor:ns-resize}
+.bit-drawer .bit-handle-n{left:0;right:0;top:-4px;height:8px;cursor:ns-resize}
+.bit-drawer .bit-handle-se{right:-4px;bottom:-4px;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg, transparent 50%, rgba(45,242,255,.45) 50%);border-radius:0 0 10px 0}
+.bit-drawer .bit-handle-sw{left:-4px;bottom:-4px;width:14px;height:14px;cursor:nesw-resize;background:linear-gradient(225deg, transparent 50%, rgba(45,242,255,.45) 50%);border-radius:0 0 0 10px}
+.bit-drawer .bit-handle-ne{right:-4px;top:-4px;width:14px;height:14px;cursor:nesw-resize}
+.bit-drawer .bit-handle-nw{left:-4px;top:-4px;width:14px;height:14px;cursor:nwse-resize}
+.bit-drawer.collapsed{max-height:none;overflow:visible}
+.bit-drawer.collapsed .bit-drawer-body, .bit-drawer.collapsed .bit-handle{display:none}
+.bit-drawer.collapsed .bit-drawer-body{display:none}
+.bit-drawer-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:grab;font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;color:var(--neon);background:rgba(4,18,44,.98);border-bottom:1px solid rgba(45,242,255,.14);user-select:none;flex:0 0 auto}
+.bit-drawer-head:active{cursor:grabbing}
+.bit-toggle-ico{transition:transform .15s}
+.bit-drawer:not(.collapsed) .bit-toggle-ico{transform:rotate(90deg)}
+.bit-drawer-body{padding:8px;display:flex;flex-direction:column;gap:8px;overflow:auto;flex:1 1 auto;min-height:0}
+.bit-controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.bit-check{font-size:11px;display:flex;gap:4px;align-items:center;color:var(--text-dim)}
+.bit-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.bit-kpis>div{background:rgba(255,255,255,.06);border:1px solid var(--neon-border);border-radius:6px;padding:6px 8px}
+.bit-bar{background:rgba(255,255,255,.04);border:1px solid var(--neon-border);border-radius:6px;padding:8px}
+.bit-meta,.bit-evidence{font-size:11px;color:var(--text-dim);line-height:1.45}
+.bit-table-wrap{max-height:220px;overflow:auto;border:1px solid var(--neon-border);border-radius:6px}
+.bit-table{width:100%;font-size:11px;border-collapse:collapse}
+.bit-table th{position:sticky;top:0;background:rgba(2,15,42,.92);text-align:left;padding:4px 6px;border-bottom:1px solid var(--neon-border)}
+.bit-table td{padding:3px 6px;border-top:1px solid var(--neon-border)}
+
+.bit-diagnostic{background:rgba(255,255,255,.04);border:1px solid var(--neon-border);border-radius:6px;padding:8px}
+.bit-chip{display:inline-block;padding:2px 6px;border:1px solid var(--neon-border);border-radius:99px;font-size:10px;margin:2px}
+
+.bit-hypothesis{background:rgba(255,255,255,.02);border:1px solid var(--neon-border);border-radius:6px;padding:8px}
+
+.bit-tabs{display:flex;gap:4px;padding:4px 0 0;border-bottom:1px solid rgba(45,242,255,.14);flex-wrap:wrap}
+.bit-tab{appearance:none;border:1px solid transparent;border-bottom:none;background:rgba(255,255,255,.04);color:var(--text-dim);font-size:11px;padding:5px 10px;border-radius:6px 6px 0 0;cursor:pointer}
+.bit-tab.active{background:rgba(45,242,255,.12);color:var(--neon);border-color:rgba(45,242,255,.22);font-weight:600}
+.bit-tab-pane{display:none;padding-top:8px}
+.bit-tab-pane.active{display:block}
+.bit-sebaran .bit-table-wrap{max-height:220px;overflow:auto}
+
+.bit-kasus{font-size:11px}
+.bit-kasus textarea::placeholder, .bit-kasus input::placeholder{color:var(--text-dim)}
+
+.bit-rekomendasi{font-size:11px;line-height:1.45}
+.bit-rekomendasi .reko-card{border:1px solid var(--neon-border);border-radius:8px;padding:8px;margin-bottom:8px;background:rgba(255,255,255,.03)}
+.bit-rekomendasi .reko-prio1{border-color:#22C55E}
+.bit-rekomendasi .reko-prio2{border-color:#FACC15}
+.bit-rekomendasi .reko-prio3{border-color:#94A3B8}
+
+.bit-analisis{font-size:11px;line-height:1.45}
+.bit-analisis .ana-card{border:1px solid var(--neon-border);border-radius:6px;padding:6px;margin-bottom:6px;background:rgba(255,255,255,.02)}

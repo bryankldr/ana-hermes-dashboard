@@ -4,6 +4,8 @@
 //
 // Mendukung >1 chart dalam 1 box (layout "grid"), KPI row, dan narasi.
 // Lihat docs/refaktor/anna_chart.md untuk mapping intent → visualisasi.
+import { isLowEndDevice } from './core/device.js';
+
 let _charts = [];                 // instance Chart.js, paralel dgn spec
 let _token = "";
 let _log = () => {};
@@ -364,7 +366,7 @@ function render(state){
 let _busy = false;
 
 async function tick(){
-  if (_busy) return;
+  if (_busy || document.hidden) return; // Skip when tab is hidden
   _busy = true;
   try{
     const r = await fetch("/api/spatial/chart", { headers:{ "X-Ana-Token": _token }, cache:"no-store", credentials:"same-origin" });
@@ -389,7 +391,9 @@ export function initSpatialChart({ token="", log=()=>{} }={}){
   ensureDom();
   if (_timer) return;
   tick();
-  _timer = setInterval(tick, 2000);
+  // Reduce polling frequency on low-end devices (4s instead of 2s)
+  const pollInterval = isLowEndDevice() ? 4000 : 2000;
+  _timer = setInterval(tick, pollInterval);
   try{ window.__spatialChart = { tick, render, hide: hideLocal, get lastUpdated(){return _lastUpdated;}, get count(){return _charts.length;} }; }catch(_){}
 }
 

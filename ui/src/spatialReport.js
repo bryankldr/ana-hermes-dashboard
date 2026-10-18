@@ -4,6 +4,8 @@
 // Angka masuk lewat KPI + tabel + paragraf, satu elemen pages[] = satu halaman.
 // @media print menyembunyikan semua panel lain lalu cetak .rpt-page saja.
 
+import { isLowEndDevice } from './core/device.js';
+
 let _token = "";
 let _log = () => {};
 let _timer = null;
@@ -241,7 +243,7 @@ function render(state) {
 
 let _busy = false;
 async function tick() {
-  if (_busy) return;
+  if (_busy || document.hidden) return; // Skip when tab is hidden
   _busy = true;
   try {
     const r = await fetch("/api/spatial/report", { headers: { "X-Ana-Token": _token }, cache: "no-store", credentials: "same-origin" });
@@ -264,7 +266,9 @@ export function initSpatialReport({ token = "", log = () => {} } = {}) {
   ensureDom();
   if (_timer) return;
   tick();
-  _timer = setInterval(tick, 2000);
+  // Reduce polling frequency on low-end devices (4s instead of 2s)
+  const pollInterval = isLowEndDevice() ? 4000 : 2000;
+  _timer = setInterval(tick, pollInterval);
   try { window.__spatialReport = { tick, hide: hideLocal, get lastUpdated() { return _lastUpdated; } }; } catch (_) {}
 }
 

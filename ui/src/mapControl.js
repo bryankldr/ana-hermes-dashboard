@@ -1103,7 +1103,15 @@ set_aktivitas_visibility(visible) {
     }
     let added = 0, reused = 0;
     const errors = [];
-    for (const [tileUrl, s] of want.entries()) {
+    
+    // Optimasi: Load batch pertama (5 sources) segera, sisa load di background
+    // Ini mengurukan network congestion untuk banyak sources
+    const sourceEntries = [...want.entries()];
+    const immediateBatch = sourceEntries.slice(0, 5);
+    const deferredBatch = sourceEntries.slice(5);
+    
+    // Load immediate batch
+    for (const [tileUrl, s] of immediateBatch) {
       if (grp.has(tileUrl)) {
         try { if (!this.map.hasLayer(grp.get(tileUrl))) grp.get(tileUrl).addTo(this.map); } catch (_) {}
         reused++;
@@ -1121,6 +1129,29 @@ set_aktivitas_visibility(visible) {
         added++;
       } catch (e) { errors.push(String((e && e.message) || e).slice(0, 120)); }
     }
+    
+    // Load deferred batch di background (non-blocking)
+    if (deferredBatch.length > 0) {
+      setTimeout(() => {
+        for (const [tileUrl, s] of deferredBatch) {
+          if (grp.has(tileUrl)) {
+            try { if (!this.map.hasLayer(grp.get(tileUrl))) grp.get(tileUrl).addTo(this.map); } catch (_) {}
+            continue;
+          }
+          try {
+            const rules = Array.isArray(s.rules) ? s.rules : (s.kind === 'kph' ? [] : this._petakRules());
+            const layer = window.protomapsL.leafletLayer({
+              url: tileUrl, paintRules: rules, labelRules: [],
+              maxDataZoom: s.maxDataZoom || (s.kind === 'kph' ? 10 : 15),
+            });
+            layer.addTo(this.map);
+            try { layer.bringToFront(); } catch (_) {}
+            grp.set(tileUrl, layer);
+          } catch (_) {}
+        }
+      }, 100);
+    }
+    
     try {
       const anyOn = [...grp.values()].some(l => { try { return this.map.hasLayer(l); } catch (_) { return false; } });
       this.state.layers[gid === 'bounds' ? 'KphBounds' : 'PMTilesPetak'] = anyOn;

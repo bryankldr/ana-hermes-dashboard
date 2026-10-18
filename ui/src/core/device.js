@@ -93,7 +93,66 @@ export function applyDeviceFlags() {
     // Tier penuh untuk CSS; isMobile (phone saja) untuk slot layout.
     document.documentElement.dataset.device = deviceTier();
     document.documentElement.dataset.touch = isCoarse() ? 'coarse' : 'fine';
+    // Performance flags untuk optimasi animasi dan polling
+    document.documentElement.dataset.lowEnd = isLowEndDevice() ? 'true' : 'false';
+    document.documentElement.dataset.reducedMotion = prefersReducedMotion() ? 'true' : 'false';
+    document.documentElement.dataset.perfLevel = getPerformanceLevel();
   } catch (_) {}
+}
+
+// ═══ DEVICE CAPABILITY DETECTION (Performance Optimization) ═══
+
+// Deteksi low-end device berdasarkan hardwareConcurrency dan memory
+// Returns true jika perangkat dianggap low-end (CPU cores <= 4 atau RAM <= 4GB)
+export function isLowEndDevice() {
+  try {
+    // hardwareConcurrency: jumlah logical processors (cores)
+    // <= 4 dianggap low-end untuk performa-intensive apps
+    const cores = navigator.hardwareConcurrency;
+    if (typeof cores === 'number' && cores <= 4) return true;
+
+    // deviceMemory: RAM dalam GB (Chrome-only, experimental)
+    // <= 4GB dianggap low-end
+    const memory = navigator.deviceMemory;
+    if (typeof memory === 'number' && memory <= 4) return true;
+
+    // Fallback: hanya anggap phone sebagai low-end jika tidak ada data hardware
+    // Tablet dan desktop tidak dianggap low-end secara default
+    if (isMobile() && typeof cores !== 'number' && typeof memory !== 'number') return true;
+  } catch (_) {}
+  return false;
+}
+
+// Deteksi user preference untuk reduced motion (accessibility)
+// Returns true jika user minta reduced motion
+export function prefersReducedMotion() {
+  try {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (_) {}
+  return false;
+}
+
+// Deteksi connection type untuk bandwidth-aware loading
+// Returns 'slow' untuk 2G/3G, 'fast' untuk 4G+, null jika tidak tersedia
+export function getConnectionType() {
+  try {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!conn) return null;
+    if (conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g' || conn.effectiveType === '3g') {
+      return 'slow';
+    }
+    if (conn.effectiveType === '4g') return 'fast';
+  } catch (_) {}
+  return null;
+}
+
+// Combined performance level: 'low', 'medium', 'high'
+// Digunakan untuk menentukan level animasi/polling
+export function getPerformanceLevel() {
+  if (prefersReducedMotion()) return 'low';
+  if (isLowEndDevice()) return 'low';
+  if (getConnectionType() === 'slow') return 'medium';
+  return 'high';
 }
 
 // Self-check: node --input-type=module --check

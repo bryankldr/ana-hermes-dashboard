@@ -13,6 +13,7 @@ import pathlib
 import re
 import time
 
+import threading
 import pymysql
 
 # Load .env from dashboard if env vars missing (ANA runs in Hermes venv
@@ -66,6 +67,7 @@ DB = dict(
 )
 
 _conn = None
+_lock = threading.Lock()
 
 
 def conn():
@@ -104,10 +106,25 @@ def q(sql, params=None):
     if not re.match(r"^\s*(SELECT|WITH|SHOW|DESCRIBE|EXPLAIN)\b", sql, re.IGNORECASE):
         raise ValueError("read-only: must start with SELECT/WITH/SHOW/DESCRIBE/EXPLAIN")
     t0 = time.perf_counter()
-    with conn().cursor() as cur:
-        cur.execute(sql, params or ())
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description] if cur.description else []
+    # ponytail: single shared connection + threading.Lock for ThreadingHTTPServer. Upgrade to pool if latency shows.
+    with _lock:
+        for _attempt in (0, 1):
+            try:
+                with conn().cursor() as cur:
+                    cur.execute(sql, params or ())
+                    rows = cur.fetchall()
+                    cols = [d[0] for d in cur.description] if cur.description else []
+                break
+            except Exception as e:
+                # Packet sequence / closed file = concurrent race or stale conn — reset once then retry
+                msg = str(e)
+                if _attempt == 0 and ("Packet sequence" in msg or "read of closed file" in msg or "Lost connection" in msg or "MySQL server has gone away" in msg):
+                    try:
+                        reset_conn()
+                    except Exception:
+                        pass
+                    continue
+                raise
     return {
         "columns": cols,
         "rows": [dict(zip(cols, r.values())) for r in rows] if rows else [],
@@ -310,11 +327,17 @@ def _page_size(kw, default=500):
 
 def _target_pct(tahun, bulan, periode):
     """Persen RO kumulatif s/d (bulan, periode) sebagai skalar float.
-    P2 = Σ(p1+p2) Jan..bulan; P1 = bulan penuh sebelum + p1 berjalan.
+    Penuh(0) = Σ(p1+p2) Jan..bulan; P2 = Σ(p1+p2) Jan..bulan; P1 = bulan penuh sebelum + p1 berjalan.
     Skalar via Python — JOIN getah_target_ro_nps per-baris ikut perkalian
     (polygon-dup × 12 baris persen) sehingga target_periode ganda di
     petak ber-polygon ganda. Seluruh pemakai target_expr wajib lewat sini."""
 
+    if periode in _FULL_P:
+        rows = q(
+            "SELECT COALESCE(SUM(ro_periode_1 + ro_periode_2), 0) AS p "
+            "FROM getah_target_ro_nps WHERE tahun = %s AND bulan BETWEEN 1 AND %s",
+            (tahun, bulan))["rows"]
+        return float(rows[0]["p"] or 0)
     if periode == 2:
         rows = q(
             "SELECT COALESCE(SUM(ro_periode_1 + ro_periode_2), 0) AS p "

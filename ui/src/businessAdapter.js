@@ -3,10 +3,27 @@
 // Engine di server (skill), bukan di frontend. Adapter hanya fetch ke /api/simoge/*
 // dan translate filter bisnis → template+params. Tidak ada SQL di sini.
 
+import { isLowEndDevice, isMobile } from './core/device.js';
+
 const TOKEN = () => document.querySelector('meta[name="ana-token"]')?.content || '';
 
 function headers() {
   return { 'X-Ana-Token': TOKEN(), 'Content-Type': 'application/json' };
+}
+
+// Device-based limit untuk skalabilitas: low-end=2000, mobile=5000, desktop=10000
+function getDeviceLimit() {
+  if (isLowEndDevice()) return 2000;
+  if (isMobile()) return 5000;
+  return 10000;
+}
+
+// Device-based page_size clamp untuk viewport filtering
+function getDevicePageSize(userValue) {
+  const p = parseInt(userValue);
+  if (!Number.isFinite(p)) return getDeviceLimit();
+  const max = getDeviceLimit();
+  return Math.max(50, Math.min(max, p));
 }
 
 // Mapping business + kategori → template yang punya polygon (untuk peta)
@@ -17,7 +34,7 @@ export function resolveTemplate(state) {
   // 0 = bulan penuh (P1+P2) — dipakai ANNA untuk "bulan 5" tanpa menyebut periode
   const _p = parseInt(f.periode);
   const periode = (_p === 0 || _p === 1 || _p === 2) ? _p : 1;
-  const limit = 1000;
+  const limit = getDeviceLimit();
   const base = { tahun, bulan, periode, limit };
   // Viewport P1: bounds/zoom/page_size dari _viewportExtra via collectState.
   // bounds = [w,s,e,n] (array) atau string "[w,s,e,n]"; zoom int; page_size clamp 50-2000.
@@ -32,11 +49,7 @@ export function resolveTemplate(state) {
     try { const b = JSON.parse(f.bounds); if (Array.isArray(b) && b.length === 4) _bounds = b; }
     catch (_) { _bounds = f.bounds; }
   }
-  let _ps = 1000;
-  if (f.page_size !== undefined && f.page_size !== null && String(f.page_size).trim() !== '') {
-    const p = parseInt(f.page_size);
-    if (Number.isFinite(p)) _ps = Math.max(50, Math.min(2000, p));
-  }
+  let _ps = getDevicePageSize(f.page_size);
   const viewport = { bounds: _bounds, zoom: _zoom, page_size: _ps };
 
   // wilayah diteruskan dan di-WHERE di DB (simoge_db._wilayah_where, allowlist paramised)

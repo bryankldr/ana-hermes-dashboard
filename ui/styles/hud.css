@@ -47,6 +47,12 @@ html, body {
   pointer-events: none;
 }
 
+/* Hide particles on low-end devices or reduced motion preference */
+html[data-low-end="true"] #particles,
+html[data-reduced-motion="true"] #particles {
+  display: none;
+}
+
 /* ═══ OUTER FRAME ═══ */
 .frame {
   position: absolute; inset: 0;
@@ -1213,7 +1219,9 @@ html, body {
   font-size: 11px;
   opacity: 0.75;
   display: -webkit-box;
+  display: -webkit-box; /* Fallback for Safari */
   -webkit-line-clamp: 2;
+  line-clamp: 2; /* Standard property for modern browsers */
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

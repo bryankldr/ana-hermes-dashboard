@@ -7,6 +7,8 @@ import { createTerminal } from './terminal.js';
 import { startBootGuard } from './core/bootGuard.js';
 import { requireAuth, formatWilayah } from './core/authGuard.js';
 import { initMapPanel, startMapBridge } from './map.js';
+import { initBitPanel } from './bitPanel.js';
+import { isLowEndDevice, prefersReducedMotion, getPerformanceLevel } from './core/device.js';
 
 // ═══ DOM refs ═══
 const $ = id => document.getElementById(id);
@@ -252,13 +254,24 @@ function usageBlock(u) {
 
 // ═══ PARTICLES ═══
 function initParticles() {
+  // Skip particles on low-end devices or reduced motion preference
+  if (isLowEndDevice() || prefersReducedMotion()) {
+    return; // Disable particles for performance
+  }
+
   const canvas = els.particles, ctx = canvas.getContext('2d');
-  let w, h, dots;
+  let w, h, dots, animId = null, paused = false;
+
+  // Reduce particle count based on performance level
+  const perfLevel = getPerformanceLevel();
+  const particleCount = perfLevel === 'medium' ? 30 : 60; // 30 for medium, 60 for high
+
   function resize() {
     w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight;
-    dots = Array.from({length: 60}, () => ({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*1.5+0.5, o: Math.random()*0.5+0.2, vx: (Math.random()-0.5)*0.2, vy: (Math.random()-0.5)*0.2 }));
+    dots = Array.from({length: particleCount}, () => ({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*1.5+0.5, o: Math.random()*0.5+0.2, vx: (Math.random()-0.5)*0.2, vy: (Math.random()-0.5)*0.2 }));
   }
   function draw() {
+    if (paused) return;
     ctx.clearRect(0, 0, w, h);
     for (const d of dots) {
       ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
@@ -267,9 +280,17 @@ function initParticles() {
       if (d.x < 0 || d.x > w) d.vx *= -1;
       if (d.y < 0 || d.y > h) d.vy *= -1;
     }
-    requestAnimationFrame(draw);
+    animId = requestAnimationFrame(draw);
   }
-  resize(); window.addEventListener('resize', resize); draw();
+  resize(); window.addEventListener('resize', resize);
+
+  // Pause when tab is hidden/background
+  document.addEventListener('visibilitychange', () => {
+    paused = document.hidden;
+    if (!paused && !animId) draw();
+  });
+
+  draw();
 }
 
 // ═══ TOP DIALS ═══
@@ -347,7 +368,7 @@ function setDial(key, frac) {
   if (known && prev === undefined) host.dataset.prev = String(shown);
 }
 
-// Poll 2 detik. Berhenti saat dokumen hidden supaya tab background tak menendang
+// Poll 2 detik (high-end), 5 detik (low-end). Berhenti saat dokumen hidden supaya tab background tak menendang
 // server tiap 2 detik tanpa perlu; catch-up terjadi di visibilitychange.
 let _dialTimer = null;
 let lastSysMetrics = {};   // dipakai initTelemetry() juga: satu fetch, dua widget
@@ -365,8 +386,9 @@ async function refreshDials() {
 function startDialPoll() {
   if (_dialTimer) return;
   refreshDials();
-  _dialTimer = setInterval(() => { if (!document.hidden) refreshDials(); }, 2000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDials(); });
+  // Reduce polling frequency on low-end devices (5s instead of 2s)
+  const pollInterval = isLowEndDevice() ? 5000 : 2000;
+  _dialTimer = setInterval(() => { if (!document.hidden) refreshDials(); }, pollInterval);
 }
 
 // ═══ OCTAGONAL FRAME ═══
@@ -473,12 +495,27 @@ function initIntel() {
           intelLog('🗑 Sesi dihapus', 'session');
           log('session', 'SESI', 'hapus sesi');
           refreshSessionSelector();
+        } else {
+          intelLog(`❌ Gagal hapus sesi: ${r.error || 'Unknown error'}`, 'error');
+          alert(`Gagal hapus sesi: ${r.error || 'Terjadi kesalahan. Silakan coba lagi.'}`);
         }
-      } catch (_) {}
+      } catch (err) {
+        intelLog(`❌ Error hapus sesi: ${err.message}`, 'error');
+        alert(`Terjadi kesalahan jaringan saat menghapus sesi. Silakan coba lagi.`);
+      }
     });
     document.getElementById('sessionSelect').addEventListener('change', (e) => {
       const sid = e.target.value;
       if (!sid) return;
+      const sel = e.target;
+      const prevValue = sel.value;
+      const prevText = sel.options[sel.selectedIndex]?.text || '...';
+
+      // Show loading state
+      sel.disabled = true;
+      const originalHTML = sel.innerHTML;
+      sel.innerHTML = `<option value="${sid}">Memuat sesi...</option>`;
+
       api.setSession(sid).then((r) => {
         if (r.ok) {
           currentSessionId = sid;
@@ -486,7 +523,23 @@ function initIntel() {
           intelLog(`🔗 Pindah ke sesi: ${sid}`, 'session');
           log('session', 'SESI', `pindah ke ${sid}`);
           try { _threadLoadHistory(sid); } catch (_) {}
+        } else {
+          // Error handling
+          intelLog(`❌ Gagal switch session: ${r.error || 'Unknown error'}`, 'error');
+          log('session', 'SESI', `gagal pindah ke ${sid}: ${r.error || 'Unknown'}`);
+          alert(`Gagal switch session: ${r.error || 'Terjadi kesalahan. Silakan coba lagi.'}`);
+          // Restore previous selection
+          sel.value = prevValue;
         }
+      }).catch((err) => {
+        // Network error or other exception
+        intelLog(`❌ Error switch session: ${err.message}`, 'error');
+        log('session', 'SESI', `error pindah ke ${sid}: ${err.message}`);
+        alert(`Terjadi kesalahan jaringan saat switch session. Silakan coba lagi.`);
+        sel.value = prevValue;
+      }).finally(() => {
+        sel.disabled = false;
+        refreshSessionSelector();
       });
     });
     refreshSessionSelector();
@@ -596,6 +649,8 @@ function startEqualizer() {
   const canvas = els.equalizer, ctx = canvas.getContext('2d');
   canvas.width = 80; canvas.height = 24;
   const bars = 16, barW = canvas.width / bars; let phase = 0;
+  // Disable shadowBlur on low-end devices for performance
+  const useGlow = !isLowEndDevice();
   function draw() {
     if (!document.body.classList.contains('speaking') && !els.hud.classList.contains('speaking')) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -611,8 +666,8 @@ function startEqualizer() {
       const hue = 180 + (h / 20) * 30; // cyan to blue-green
       ctx.fillStyle = `hsla(${hue}, 90%, 60%, ${alpha})`;
       ctx.fillRect(i * barW + 1, canvas.height - h, barW - 2, h);
-      // Subtle glow on taller bars
-      if (h > 12) {
+      // Subtle glow on taller bars (only on capable devices)
+      if (useGlow && h > 12) {
         ctx.shadowColor = `hsla(${hue}, 90%, 60%, 0.6)`;
         ctx.shadowBlur = 4;
         ctx.fillRect(i * barW + 1, canvas.height - h, barW - 2, h);
@@ -2089,6 +2144,19 @@ async function init() {
     } catch (_) {}
   })();
 
+  // Restore eviction banner from sessionStorage if user refreshed after eviction
+  (() => {
+    try {
+      if (sessionStorage.getItem('ana_evicted') === 'true') {
+        sessionStorage.removeItem('ana_evicted');
+        // Trigger evictHandler to show banner
+        if (api.evictedHandler) {
+          api.evictedHandler({ reason: 'evicted_by_new_device' });
+        }
+      }
+    } catch (_) {}
+  })();
+
   // Listen for session changes from other tabs
   window.addEventListener('storage', (e) => {
     if (e.key === 'ana_session') {
@@ -2178,6 +2246,7 @@ async function init() {
   try { layout.watchPairGeometry(); } catch (_) {}
   // Bridge ANA ↔ peta: poll /api/map/queue, eksekusi via adapter (Fase 5).
   try { startMapBridge({ token: ANA_TOKEN, log }); } catch (_) {}
+  try { initBitPanel({ token: ANA_TOKEN, log }); } catch(e){ try{ console.warn('BIT init',e.message);}catch(_){} }
   // Token basi (server restart) → auto-reload via BOOT_ID poll, tanpa baca token.
   // Auth gate — redirect to /login.html if no Directus cookie session
   // Handler evict: perangkat ini ditendang login perangkat lain → banner +
@@ -2186,20 +2255,83 @@ async function init() {
   try {
     api.evictedHandler = (info) => {
       try {
+        // Simpan eviction state di sessionStorage untuk persistence
+        try { sessionStorage.setItem('ana_evicted', 'true'); } catch (_) {}
+
         let b = document.getElementById('evictBanner');
-        if (!b) {
-          b = document.createElement('div');
-          b.id = 'evictBanner';
-          b.style.cssText = 'position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:9999;max-width:min(480px,calc(100%-24px));background:rgba(2,15,42,.96);border:1px solid #FB7185;border-radius:10px;padding:10px 14px;box-shadow:0 12px 32px rgba(0,0,0,.6);font-size:13px;color:var(--text-main);display:flex;gap:10px;align-items:center;';
-          b.innerHTML = '<span style="flex:1">Akun ini login di perangkat lain — sesi perangkat ini dialihkan. Chat & arsip ANNA tetap aman.</span>';
-          const btn = document.createElement('button');
-          btn.textContent = 'Ambil alih kembali';
-          btn.style.cssText = 'flex:0 0 auto;border:1px solid var(--neon);background:rgba(45,242,255,.12);color:var(--text-header);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;';
-          btn.addEventListener('click', () => { location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search); });
-          b.appendChild(btn);
-          document.body.appendChild(b);
+        let dismissTimer = null;
+
+        // Remove existing banner and timer if any
+        if (b) {
+          b.remove();
+          if (b._dismissTimer) clearTimeout(b._dismissTimer);
         }
-        b.style.display = 'flex';
+
+        b = document.createElement('div');
+        b.id = 'evictBanner';
+        b.style.cssText = 'position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:9999;max-width:min(520px,calc(100%-24px));background:rgba(2,15,42,.98);border:2px solid #FB7185;border-radius:12px;padding:14px 16px;box-shadow:0 16px 40px rgba(251,113,133,.4);font-size:13px;color:var(--text-main);display:flex;flex-direction:column;gap:12px;animation:slideIn 0.3s ease-out;';
+        b.innerHTML = `
+          <div style="display:flex;gap:12px;align-items:flex-start;">
+            <span style="font-size:20px;">⚠️</span>
+            <div style="flex:1;">
+              <div style="font-weight:600;color:#FB7185;margin-bottom:4px;">Sesi Perangkat Dialihkan</div>
+              <div style="opacity:0.9;line-height:1.5;">Akun ini login di perangkat lain. Sesi perangkat ini telah dialihkan. Chat & arsip ANNA tetap aman di server.</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="evictDismiss" style="flex:0 0 auto;border:1px solid rgba(251,113,133,.4);background:transparent;color:var(--text-dim);border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;transition:all 0.2s;">Tutup (30s)</button>
+            <button id="evictReclaim" style="flex:0 0 auto;border:1px solid var(--neon);background:rgba(45,242,255,.15);color:var(--text-header);border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.2s;">Ambil Alih Kembali</button>
+          </div>
+        `;
+
+        // Add CSS animation for slide-in
+        if (!document.getElementById('evictBannerStyles')) {
+          const style = document.createElement('style');
+          style.id = 'evictBannerStyles';
+          style.textContent = `
+            @keyframes slideIn {
+              from { opacity: 0; transform: translate(-50%, -20px); }
+              to { opacity: 1; transform: translate(-50%, 0); }
+            }
+            @keyframes fadeOut {
+              from { opacity: 1; }
+              to { opacity: 0; }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+
+        // Dismiss button with countdown
+        const dismissBtn = b.querySelector('#evictDismiss');
+        let countdown = 30;
+        const updateCountdown = () => {
+          if (countdown > 0) {
+            dismissBtn.textContent = `Tutup (${countdown}s)`;
+            countdown--;
+            dismissTimer = setTimeout(updateCountdown, 1000);
+          } else {
+            dismissBtn.textContent = 'Tutup';
+          }
+        };
+        updateCountdown();
+
+        dismissBtn.addEventListener('click', () => {
+          b.style.animation = 'fadeOut 0.3s ease-out forwards';
+          setTimeout(() => b.remove(), 300);
+          if (dismissTimer) clearTimeout(dismissTimer);
+          try { sessionStorage.removeItem('ana_evicted'); } catch (_) {}
+        });
+
+        // Reclaim button
+        const reclaimBtn = b.querySelector('#evictReclaim');
+        reclaimBtn.addEventListener('click', () => {
+          if (dismissTimer) clearTimeout(dismissTimer);
+          location.href = '/login.html?next=' + encodeURIComponent(location.pathname + location.search);
+        });
+
+        b._dismissTimer = dismissTimer;
+        document.body.appendChild(b);
+
         try { log('session', 'SESI', 'ditendang perangkat lain — banner tampil'); } catch {}
       } catch {}
     };
@@ -2254,8 +2386,11 @@ async function init() {
   // Panel options must run after every ensurePanel() call above, otherwise
   // the dynamic panels (voicePicker, briefingPanel, projectList,
   // missionKanban, vaultPanel, avdPanel) are missing from the menu.
-  setInterval(() => { refreshKanban().catch(()=>{}); }, 6000);
-  setInterval(() => { refreshAvd().catch(()=>{}); }, 7000);
+  // Reduce polling frequency on low-end devices and pause when hidden
+  const kanbanInterval = isLowEndDevice() ? 12000 : 6000;
+  const avdInterval = isLowEndDevice() ? 14000 : 7000;
+  setInterval(() => { if (!document.hidden) refreshKanban().catch(()=>{}); }, kanbanInterval);
+  setInterval(() => { if (!document.hidden) refreshAvd().catch(()=>{}); }, avdInterval);
   // Terminal is its own module (ui/src/terminal.js); it owns its DOM,
   // pty session and stream reader, and binds Ctrl+` itself.
   const terminal = createTerminal({
