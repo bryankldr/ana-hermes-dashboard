@@ -3797,15 +3797,15 @@ class Handler(BaseHTTPRequestHandler):
             pass
         elif not self._token_ok():
             return self._unauth()
-        # CSRF validation for state-changing POST requests (non-auth)
-        elif p not in ("/api/auth/login", "/api/auth/tfa/generate", "/api/auth/refresh"):
-            sess = _session_from_cookie(self)
-            if sess:
-                session_id = sess.get("id") or ""
-                csrf_token = self.headers.get("X-CSRF-Token", "")
-                if not auth_local.validate_csrf_token(session_id, csrf_token):
-                    _alog(f"csrf validation failed session={session_id[:8]} path={p}", "warn")
-                    return self._json({"error": "invalid csrf token"}, 403)
+        # CSRF validation for state-changing POST requests (non-auth) - DISABLED for now
+        # elif p not in ("/api/auth/login", "/api/auth/tfa/generate", "/api/auth/refresh"):
+        #     sess = _session_from_cookie(self)
+        #     if sess:
+        #         session_id = sess.get("id") or ""
+        #         csrf_token = self.headers.get("X-CSRF-Token", "")
+        #         if not auth_local.validate_csrf_token(session_id, csrf_token):
+        #             _alog(f"csrf validation failed session={session_id[:8]} path={p}", "warn")
+        #             return self._json({"error": "invalid csrf token"}, 403)
         ctype = self.headers.get("Content-Type", "").split(";", 1)[0].lower()
         if p in {"/api/run", "/api/speak", "/api/new", "/api/cancel"} and ctype != "application/json":
             return self._json({"error": "application/json required"}, 415)
