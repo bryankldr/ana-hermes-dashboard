@@ -11,10 +11,12 @@ if [ -f .env ]; then
   set +a
 fi
 
-# Explicitly export Hermes service credentials (for hermes_service.py)
-export HERMES_SERVICE_USER="${HERMES_SERVICE_USER:-}"
-export HERMES_SERVICE_PASSWORD="${HERMES_SERVICE_PASSWORD:-}"
-export HERMES_SERVICE_PROVIDER="${HERMES_SERVICE_PROVIDER:-basic}"
+# Explicitly export Hermes service credentials from .env (fallback)
+if [ -f .env ]; then
+  export HERMES_SERVICE_USER="${HERMES_SERVICE_USER:-$(grep -E '^[[:space:]]*HERMES_SERVICE_USER=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d ' \"')}"
+  export HERMES_SERVICE_PASSWORD="${HERMES_SERVICE_PASSWORD:-$(grep -E '^[[:space:]]*HERMES_SERVICE_PASSWORD=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d ' \"')}"
+  export HERMES_SERVICE_PROVIDER="${HERMES_SERVICE_PROVIDER:-$(grep -E '^[[:space:]]*HERMES_SERVICE_PROVIDER=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d ' \"')}"
+fi
 
 if [ -z "${ANA_PORT:-}" ] && [ -f .env ]; then
   ANA_PORT=$(grep -E '^[[:space:]]*ANA_PORT=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d ' "' | tr -d "'")
