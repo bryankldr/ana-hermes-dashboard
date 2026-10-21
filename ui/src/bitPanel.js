@@ -1,10 +1,41 @@
 // ui/src/bitPanel.js — BIT v0.1 drawer INSIDE spatial map (not a free panel).
 // Wired to #bitDrawer inside mapPanel .map-wrap. No ensurePanel.
 let _token="", _log=()=>{}, _busy=false;
+let _lastBitKey=""; // tanda tangan filter terakhir (cegah refetch saat filter peta tak berubah)
+const _bitKey = t=>JSON.stringify([t.tahun,t.bulan,t.periode,t.sampai_dengan,t.divre,t.kph,t.bkph,t.rph,t.tpg,t.ytd]);
 const BULAN=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 const esc = s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const fmtKg = kg=>{ const v=Number(kg)||0; if(Math.abs(v)>=1e6) return (v/1e6).toFixed(1)+"M"; if(Math.abs(v)>=1e3) return (v/1e3).toFixed(1)+"k"; return String(Math.round(v)); };
 const fmtPct = p=> p==null?"\u2014":Number(p).toFixed(1)+"%";
+// ── Sumber waktu & wilayah BIT: panel Filter SPATIAL MAP (satu state) ──
+// Aturan YTD (keputusan bisnis): YTD aktif = kumulatif hari ini, waktu panel
+// filter DIABAIKAN; YTD dilepas = tahun/bulan/periode/sampai ikut panel filter.
+// Wilayah selalu ikut panel filter (server tetap clamp scope jabatan sesi).
+const _fmtYM = (y,m,p)=> `${y}-${String(m).padStart(2,"0")} ${p===0?"Penuh":("P"+p)}`;
+function _bitTime(){
+  const now=new Date();
+  const ytd=!!document.getElementById("bitYTD")?.checked;
+  const f=(typeof window.__spatialFilterNow==="function")?window.__spatialFilterNow():null;
+  const b=f||{tahun:now.getFullYear(),bulan:now.getMonth()+1,periode:(now.getDate()<=15?1:2),sampai_dengan:"ya",divre:"",kph:"",bkph:"",rph:"",tpg:""};
+  const wil={divre:b.divre||"",kph:b.kph||"",bkph:b.bkph||"",rph:b.rph||"",tpg:b.tpg||""};
+  if(ytd) return {tahun:now.getFullYear(),bulan:now.getMonth()+1,periode:(now.getDate()<=15?1:2),sampai_dengan:"ya",ytd:true,...wil};
+  return {tahun:b.tahun,bulan:b.bulan,periode:b.periode,sampai_dengan:(b.sampai_dengan==="tidak"?"tidak":"ya"),ytd:false,...wil};
+}
+function _bitWilayah(t){ // filter peta → param server; server clamp ke scope jabatan
+  const w={};
+  if(t.divre) w.kode_divre=String(t.divre);
+  if(t.kph) w.kode_kph=String(t.kph);
+  if(t.bkph) w.kode_bkph=String(t.bkph);
+  if(t.rph) w.kode_rph=String(t.rph);
+  if(t.tpg) w.kode_tpg_list=[String(t.tpg)];
+  return w;
+}
+function _bitChip(t){
+  const el=document.getElementById("bitFilterChip"); if(!el) return;
+  const w=t.tpg?("TPG "+t.tpg):t.rph?("RPH "+t.rph):t.bkph?("BKPH "+t.bkph):t.kph?("KPH "+t.kph):t.divre?("DIVRE "+t.divre):"semua wilayah";
+  el.textContent=(t.ytd?"YTD \u00b7 "+_fmtYM(t.tahun,t.bulan,t.periode):"Filter peta \u00b7 "+_fmtYM(t.tahun,t.bulan,t.periode)+(t.sampai_dengan==="ya"?" (kumulatif)":""))+" \u00b7 "+w;
+  el.title=t.ytd?"YTD aktif: waktu dari panel filter diabaikan":"Mengikuti tahun/bulan/periode/sampai + wilayah dari panel Filter peta";
+}
 const kpiCard=(label,value,sub)=>`<div><div style="font-size:10px;color:var(--text-dim);letter-spacing:.06em">${esc(label)}</div><div style="font-size:14px;font-weight:600">${esc(value)}</div><div style="font-size:10px;color:var(--text-dim)">${esc(sub||"")}</div></div>`;
 function renderBar(k){
   const _isYa = String(k.sampai_dengan||"ya").toLowerCase()==="ya";
@@ -118,7 +149,8 @@ function renderKasus(data){
     if(msgEl) msgEl.textContent="Menyimpan...";
     btn.disabled=true;
     try{
-      const tahun=parseInt(document.getElementById("bitTahun")?.value||"2026"), bulan=parseInt(document.getElementById("bitBulan")?.value||"2"), periode=parseInt(document.getElementById("bitPeriode")?.value||"0"), sampai_dengan=(document.getElementById("bitSampai")?.value||"ya");
+      const _T=_bitTime();
+      const tahun=_T.tahun, bulan=_T.bulan, periode=_T.periode, sampai_dengan=_T.sampai_dengan;
       const token=document.querySelector('meta[name="ana-token"]')?.content||_token||"";
       let did=""; try{ did=localStorage.getItem("ana_device_id")||"";}catch(_){}
       const payload={gejala, pertanyaan:(tanyaEl.value||"").trim(), kepastian:(kepEl.value||"Belum teruji"), periode:{tahun,bulan,periode,sampai_dengan}};
@@ -175,21 +207,18 @@ function renderSebaran(h){
 async function fetchAndRender(){
   if(_busy) return; _busy=true;
   const btn=document.getElementById("bitRefresh"); if(btn){ btn.disabled=true; btn.textContent="…"; }
-  // YTD: selalu reset ke tahun/bulan/periode saat ini (default YTD)
+  // Waktu & wilayah: dari panel Filter peta (kecuali YTD aktif → kumulatif hari ini).
+  const _T = _bitTime(); _bitChip(_T); _lastBitKey = _bitKey(_T);
   try{
-    const ytdEl=document.getElementById("bitYTD");
-    if(ytdEl?.checked) _applyYTD();
-  }catch(_){}
-  try{
-    const tahun=parseInt(document.getElementById("bitTahun")?.value||"2026");
-    const bulan=parseInt(document.getElementById("bitBulan")?.value||"4");
-    const periode=parseInt(document.getElementById("bitPeriode")?.value||"2");
+    const tahun=_T.tahun;
+    const bulan=_T.bulan;
+    const periode=_T.periode;
     const breakdown=!!document.getElementById("bitBreakdown")?.checked;
-    let sampai_dengan=(document.getElementById("bitSampai")?.value||"ya").trim().toLowerCase();
+    let sampai_dengan=_T.sampai_dengan;
     if(!["ya","tidak"].includes(sampai_dengan)) sampai_dengan="ya";
     const token=_token||document.querySelector('meta[name="ana-token"]')?.content||"";
     let did=""; try{ did=localStorage.getItem("ana_device_id")||"";}catch(_){}
-    const payload={tahun, bulan, periode, sampai_dengan, include_breakdown: breakdown};
+    const payload={tahun, bulan, periode, sampai_dengan, include_breakdown: breakdown, ..._bitWilayah(_T)};
     let r,j;
     // hypothesis single call (kpi+aktivitas+Q+H1-H4) — fallback diagnostic -> target_gap
     try{
@@ -292,20 +321,11 @@ export function initBitPanel(opts={}){
       }
     }catch(_){}
   };
-  const _applyYTD=()=>{
-    const ytdEl=document.getElementById("bitYTD");
-    if(!ytdEl||!ytdEl.checked) return;
-    const now=new Date(); const y=now.getFullYear(), m=now.getMonth()+1, d=now.getDate();
-    const per = d<=15 ? "1" : "2";
-    const th=document.getElementById("bitTahun"), bh=document.getElementById("bitBulan"), ph=document.getElementById("bitPeriode"), sh=document.getElementById("bitSampai");
-    if(th) th.value=String(y);
-    if(bh) bh.value=String(m);
-    if(ph) ph.value=per;
-    if(sh) sh.value="ya";
-    [th,bh,ph,sh].forEach(el=>{ if(el) el.disabled=true; });
+  const _applyYTD=()=>{ // YTD aktif: chip menandai waktu filter diabaikan (tak ada kontrol waktu lokal lagi)
+    try{ _bitChip(_bitTime()); }catch(_){}
   };
-  const _releaseYTD=()=>{
-    ["bitTahun","bitBulan","bitPeriode","bitSampai"].forEach(id=>{ const el=document.getElementById(id); if(el) el.disabled=false; });
+  const _releaseYTD=()=>{ // YTD dilepas: BIT kembali mengikuti waktu panel filter
+    try{ _bitChip(_bitTime()); }catch(_){}
   };
   // drawer lives inside mapPanel — wait until mapPanel exists
   let tries=0;
@@ -329,14 +349,22 @@ export function initBitPanel(opts={}){
         const ytdEl=document.getElementById("bitYTD"); if(ytdEl?.checked) _applyYTD();
       }
     }catch(_){ try{ _applyYTD(); }catch(_){} }
-    // populate bulan
-    const sel=document.getElementById("bitBulan");
-    if(sel && !sel.options.length){
-      BULAN.forEach((b,i)=>{ const o=document.createElement("option"); o.value=String(i+1); o.textContent=b; if(i+1===4) o.selected=true; sel.appendChild(o); });
-    }
+    // waktu/tahun/bulan/periode & wilayah: TIDAK ada kontrol lokal — ikut panel filter
     let _dragMoved=false;
+    // Filter peta berubah → BIT ikut (kecuali YTD aktif). Drawer tertutup:
+    // tandai kotor, fetch sekali saat dibuka.
+    let _bitDirty=false;
+    window.addEventListener("spatial:filters", ()=>{
+      try{
+        if(document.getElementById("bitYTD")?.checked){ _applyYTD(); return; }
+        const T=_bitTime(); _bitChip(T);
+        if(_bitKey(T)===_lastBitKey) return;
+        if(drawer.classList.contains("collapsed")){ _bitDirty=true; return; }
+        fetchAndRender();
+      }catch(_){}
+    });
     const headEl = drawer.querySelector("#bitToggle");
-    headEl?.addEventListener("click", (e)=>{ if(_dragMoved) return; drawer.classList.toggle("collapsed"); _saveBit(); });
+    headEl?.addEventListener("click", (e)=>{ if(_dragMoved) return; drawer.classList.toggle("collapsed"); _saveBit(); if(!drawer.classList.contains("collapsed") && _bitDirty){ _bitDirty=false; fetchAndRender(); } });
     drawer.querySelector("#bitRefresh")?.addEventListener("click", fetchAndRender);
     // tabs
     const tabs=drawer.querySelectorAll(".bit-tab");

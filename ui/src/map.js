@@ -202,10 +202,7 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '      <div class="bit-drawer-body" id="bitBody">'
       + '        <div class="bit-controls">'
       + '          <label class="bit-check" title="Kumulatif 1 Jan s/d hari ini — reset ke tahun/bulan/periode saat ini"><input type="checkbox" id="bitYTD" checked> YTD</label>'
-      + '          <label>Tahun <select id="bitTahun" class="spatial-mini" style="width:68px"><option>2024</option><option>2025</option><option selected>2026</option></select></label>'
-      + '          <label>Bulan <select id="bitBulan" class="spatial-mini" style="width:92px"></select></label>'
-      + '          <label>Sampai dgn <select id="bitSampai" class="spatial-mini" style="width:88px" title="Ya = hitung sejak awal tahun sampai periode terpilih, Tidak = hanya periode terpilih"><option value="ya" selected>Ya</option><option value="tidak">Tidak</option></select></label>'
-      + '          <label>Periode <select id="bitPeriode" class="spatial-mini" style="width:118px"><option value="0">Penuh (P1+P2)</option><option value="1">P1 (1-15)</option><option value="2" selected>P2 (16-akhir)</option></select></label>'
+      + '          <span id="bitFilterChip" class="bit-chip" title="Tahun/bulan/periode/wilayah mengikuti panel Filter peta">Mengikuti filter peta</span>'
       + '          <label class="bit-check" title="Tampilkan rincian per Mandor dan TPG"><input type="checkbox" id="bitBreakdown"> Per Mandor \u00d7 TPG</label>'
       + '          <button id="bitRefresh" class="spatial-btn" style="margin-left:auto">Tampilkan</button>'
       + '        </div>'
@@ -287,6 +284,69 @@ export function initMapPanel({ log = () => {} } = {}) {
       + '  </div>'
       + '</div>',
   });
+  // Badge wilayah user login di TENGAH header SPATIAL MAP.
+  // Aturan tampil: DIVRE → nama divre; KPH/ADM (dan level di bawahnya) → nama
+  // KPH; DIREKSI/ADMINISTRATOR (tanpa kode wilayah) → kode jabatan.
+  // initMapPanel jalan sebelum auth selesai → isi disusulkan (retry singkat),
+  // dan di-refresh lagi dari __spatialApplyUserScope setelah window._authUser ada.
+  function _wilayahHeader() {
+    try {
+      const u = window._authUser || {};
+      const j = u.jabatan;
+      const jab = (j && typeof j === 'object' && !Array.isArray(j))
+        ? String(j.kode_jabatan || j.nama_jabatan || '').trim().toUpperCase()
+        : String(j || '').trim().toUpperCase();
+      const val = (v, k) => {
+        if (!v) return '';
+        if (typeof v === 'object' && !Array.isArray(v)) return String(v[k] || '').trim();
+        return '';
+      };
+      const namaDivre = val(u.kode_divre, 'divre');
+      const kodeDivre = val(u.kode_divre, 'kode_divre');
+      const namaKph = val(u.kode_kph, 'kph');
+      const kodeKph = val(u.kode_kph, 'kode_kph');
+      let label = jab;
+      if (jab === 'ADM') label = 'KPH';   // ADM = jabatan admin KPH (istilah bisnis: KPH)
+      let nama = '';
+      if (jab === 'DIVRE') nama = namaDivre;
+      else if (namaKph) nama = namaKph;
+      else if (namaDivre) nama = namaDivre;
+      const bits = [];
+      if (jab) bits.push(jab);
+      if (kodeDivre) bits.push('DIVRE ' + kodeDivre);
+      if (kodeKph) bits.push('KPH ' + kodeKph);
+      return { label: label.trim(), name: nama.trim(), title: bits.join(' · ') };
+    } catch (_) { return { label: '', name: '', title: '' }; }
+  }
+  function _syncJabatan(tries) {
+    const badge = document.getElementById('shJabatan');
+    if (!badge) return;
+    const info = _wilayahHeader();
+    if (info.label || info.name) {
+      // Bangun DOM (bukan innerHTML) — nilai dari profil user, jangan di-parse HTML.
+      badge.textContent = '';
+      const a = document.createElement('span');
+      a.className = 'sh-jab';
+      a.textContent = info.label || '';
+      badge.appendChild(a);
+      if (info.name) {
+        const sep = document.createElement('span');
+        sep.className = 'sh-sep';
+        sep.textContent = '·';
+        const b = document.createElement('span');
+        b.className = 'sh-nama';
+        b.textContent = info.name;
+        badge.appendChild(sep);
+        badge.appendChild(b);
+      }
+      badge.title = info.title || (info.label + ' ' + info.name).trim();
+      badge.style.visibility = 'visible';
+      return;
+    }
+    badge.textContent = '';
+    badge.style.visibility = 'hidden';
+    if ((tries || 0) < 12) setTimeout(function () { _syncJabatan((tries || 0) + 1); }, 400);
+  }
   // Header panel asli SPATIAL MAP — BUSINESS INTELLIGENCE + periode + mode ANA (bukan panel baru di map)
   try {
     const head = el.querySelector('.panel-title');
@@ -295,12 +355,15 @@ export function initMapPanel({ log = () => {} } = {}) {
       head.style.alignItems = 'center';
       head.style.justifyContent = 'space-between';
       head.style.gap = '8px';
+      head.style.position = 'relative';
       const curP = d0.getDate() <= 15 ? '1' : '2';
       const perTxt = d0.getFullYear() + '-' + String(d0.getMonth()+1).padStart(2,'0') + '-P' + curP;
       // bungkus judul asli
       const titleText = head.textContent.trim() || 'SPATIAL MAP';
       head.innerHTML = '<span style="display:flex;align-items:center;gap:8px;"><span>SPATIAL MAP</span><span class="sh-title" style="font-family:var(--font-disp);font-size:7px;letter-spacing:.12em;color:var(--text-dim);opacity:.9">BUSINESS INTELLIGENCE</span></span>'
+        + '<span id="shJabatan" class="sh-badge jab" style="position:absolute;left:50%;transform:translateX(-50%);pointer-events:none;visibility:hidden"></span>'
         + '<span class="sh-badges" style="display:flex;gap:4px;align-items:center"><span id="shPeriode" class="sh-badge periode">' + perTxt + '</span><span id="shMode" class="sh-badge mode-coding">CODING</span><button id="spatialTilesBtn" class="sh-tiles" title="Pengaturan tiles (rebuild + cron harian)" aria-label="Pengaturan tiles">⚙</button></span>';
+      _syncJabatan(0);
     }
   } catch(_) {}
   _built = true;
@@ -853,6 +916,25 @@ function updateLegend(biz, kat) {
       filters: base,
     };
   }
+  // ── Jembatan filter untuk BIT drawer: satu sumber state (panel Filter peta) ──
+  // Dibaca bitPanel._bitTime(); event 'spatial:filters' memicu BIT refetch bila
+  // YTD dilepas. Wilayah ikut peta; server tetap clamp ke scope jabatan sesi.
+  function _bitFilterNow() {
+    const f = collectState().filters;
+    const _p = parseInt(f.periode, 10);
+    return {
+      tahun: parseInt(f.tahun, 10) || 2026,
+      bulan: parseInt(f.bulan, 10) || (d.getMonth() + 1),
+      periode: (f.periode === '0' || f.periode === 0) ? 0 : (_p === 2 ? 2 : 1),
+      sampai_dengan: (f.sampai_dengan === 'tidak' ? 'tidak' : 'ya'),
+      divre: f.divre || '', kph: f.kph || '', bkph: f.bkph || '', rph: f.rph || '', tpg: f.tpg || '',
+    };
+  }
+  window.__spatialFilterNow = _bitFilterNow;
+  const _emitBitFilters = () => {
+    try { window.dispatchEvent(new CustomEvent('spatial:filters', { detail: _bitFilterNow() })); } catch (_) {}
+  };
+
   _restorePanelState(); // refresh-safe: pulihkan bisnis+filter tersimpan (di sini agar const di atas sudah terinisialisasi)
 
   function renderChips() {
@@ -1397,6 +1479,7 @@ function updateLegend(biz, kat) {
     }
   }
   function scheduleReload() {
+    _emitBitFilters(); // BIT drawer ikut filter peta (bila YTD dilepas)
     clearTimeout(_debounce);
     _debounce = setTimeout(reloadBusiness, 420);
   }
@@ -2620,6 +2703,9 @@ function updateLegend(biz, kat) {
   // jalan sebelum auth selesai, jadi scope login diterapkan susulan di sini).
   try {
     window.__spatialApplyUserScope = function() {
+      try {
+        _syncJabatan(0);
+      } catch (_) {}
       try {
         renderWilayah();
         // Sinkron PENUH (bisnis + filter): setFilters saja memancarkan snap

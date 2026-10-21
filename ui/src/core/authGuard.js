@@ -19,7 +19,12 @@ export async function requireAuth() {
       if (r.ok) {
         const j = await r.json();
         if (j && j.authenticated) {
-          if (j.user && j.user.tfa_enabled === false) {
+          // Paksa setup TFA HANYA bila server memang menegakkan 2FA
+          // (tfa_enforced). Saat ANA_2FA_ENABLED=0, akun 2fa=0 harus langsung
+          // masuk — dulu di sini selalu dipaksa ke /login.html?setup2fa=1
+          // sehingga user tanpa 2FA terlempar balik ke halaman login.
+          const _tfaOn = !(j.user && j.user.tfa_enforced === false) && !(j.tfa_enforced === false);
+          if (j.user && j.user.tfa_enabled === false && _tfaOn) {
             // force TFA setup
             const next = encodeURIComponent(location.pathname + location.search);
             location.href = '/login.html?setup2fa=1&next=' + next;

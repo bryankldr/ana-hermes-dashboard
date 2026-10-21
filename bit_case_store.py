@@ -154,9 +154,27 @@ def create_case(payload: dict, user_email="", scope=None):
         _save(rows)
     return case
 
-def list_cases(limit=50, offset=0, status=None, q=None):
+def _visible(case_scope, viewer):
+    """Case boleh dilihat bila berada di dalam scope wilayah viewer.
+
+    viewer {} = DIREKSI/ADMINISTRATOR (tanpa clamp) → semua case.
+    viewer ber-scope = hanya case yang scope-nya memuat seluruh kode viewer.
+    Case tanpa scope (global) hanya untuk viewer tanpa clamp."""
+    view = {k: str(x).strip() for k, x in (viewer or {}).items()
+            if k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph") and str(x or "").strip()}
+    if not view:
+        return True
+    cs = dict(case_scope or {}) if isinstance(case_scope, dict) else {}
+    if not cs:
+        return False
+    return all(str(cs.get(k) or "").strip() == val for k, val in view.items())
+
+
+def list_cases(limit=50, offset=0, status=None, q=None, scope=None):
     with _LOCK:
         rows = _load()
+    if scope is not None:
+        rows = [r for r in rows if _visible((r.get("periode") or {}).get("scope") or r.get("scope"), scope)]
     # filter
     if status and status in _ALLOWED_STATUS:
         rows = [r for r in rows if r.get("status")==status]
@@ -174,7 +192,11 @@ def list_cases(limit=50, offset=0, status=None, q=None):
     false_rate = round(100*false_n/closed_n,1) if closed_n else None
     return {"rows": page, "total": total, "limit": lim, "offset": off, "false_n": false_n, "closed_n": closed_n, "false_rate_pct": false_rate}
 
-def get_case(cid: str):
+def _case_scope_of(row):
+    return (row.get("periode") or {}).get("scope") or row.get("scope")
+
+
+def get_case(cid: str, scope=None):
     cid = str(cid or "").strip()
     if not cid:
         raise ValueError("id diperlukan")
@@ -182,10 +204,12 @@ def get_case(cid: str):
         rows = _load()
     for r in rows:
         if r.get("id")==cid:
+            if scope is not None and not _visible(_case_scope_of(r), scope):
+                raise PermissionError("case di luar wilayah login")
             return r
     raise KeyError(f"case {cid} tidak ditemukan")
 
-def update_case(cid: str, patch: dict, user_email=""):
+def update_case(cid: str, patch: dict, user_email="", scope=None):
     cid = str(cid or "").strip()
     patch = dict(patch or {})
     with _LOCK:
@@ -193,6 +217,8 @@ def update_case(cid: str, patch: dict, user_email=""):
         idx = next((i for i,r in enumerate(rows) if r.get("id")==cid), None)
         if idx is None:
             raise KeyError(f"case {cid} tidak ditemukan")
+        if scope is not None and not _visible(_case_scope_of(rows[idx]), scope):
+            raise PermissionError("case di luar wilayah login")
         cur = rows[idx]
         # allow fields: status, kesimpulan, kepastian, keputusan, hasil, tags, hipotesis
         if "status" in patch:
@@ -226,10 +252,14 @@ def update_case(cid: str, patch: dict, user_email=""):
         _save(rows)
         return cur
 
-def delete_case(cid: str):
+def delete_case(cid: str, scope=None):
     cid = str(cid or "").strip()
     with _LOCK:
         rows = _load()
+        if scope is not None:
+            hit = next((r for r in rows if r.get("id")==cid), None)
+            if hit is not None and not _visible(_case_scope_of(hit), scope):
+                raise PermissionError("case di luar wilayah login")
         n0=len(rows)
         rows=[r for r in rows if r.get("id")!=cid]
         if len(rows)==n0:

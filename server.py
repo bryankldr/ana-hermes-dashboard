@@ -451,6 +451,8 @@ def _tiles_scope_ok(handler, kind, kode):
         if jab in ("DIREKSI", "ADMINISTRATOR"):
             return True, ""
         scope = _wilayah_scope_from_session(handler)
+        if scope.get(_SCOPE_DENY):
+            return False, str(scope.get(_SCOPE_DENY))
         kode = str(kode or "").strip()
         if not kode:
             return False, "kode kosong"
@@ -484,16 +486,22 @@ def _tiles_scope_ok(handler, kind, kode):
         return False, "gagal cek scope"
 
 
+_SCOPE_DENY = "__deny__"
+
+
 def _wilayah_scope_from_session(handler):
-    """Scope wilayah user login dari cookie sesi. {} = tak ada sesi
-    (pemanggil token-only seperti ANA system — sengaja tanpa scope).
+    """Scope wilayah user login dari cookie sesi. {} = tanpa clamp (semua
+    DIVRE + semua KPH): sesi DIREKSI/ADMINISTRATOR, atau pemanggil token-only
+    seperti ANA system.
 
     Jabatan-aware (single source of truth, cerminkan di map.js _userScope):
     - DIREKSI/ADMINISTRATOR → {} (semua, tanpa clamp/filter)
-    - DIVRE  → {kode_divre} (semua di bawah divrenya)
-    - ADM    → {kode_divre, kode_kph} (admin KPH: hanya wilayah KPH-nya)
+    - DIVRE  → {kode_divre} (semua di bawah divrenya); kode_divre WAJIB
+    - ADM    → {kode_divre, kode_kph} (admin KPH: hanya wilayah KPH-nya); kode_kph WAJIB
     - ASPER/KSSPROD/MANTRI → turun s/d kode_bkph bila ada
-    - lain (M1-M5/K1-K5/tanpa jabatan) → apa adanya (terdalam menang)."""
+    - lain (M1-M5/K1-K5) → apa adanya (terdalam menang)
+    - tanpa jabatan, atau jabatan butuh kode tapi kodenya kosong →
+      {_SCOPE_DENY: alasan} — fail-closed, TIDAK boleh jadi akses penuh."""
     try:
         sess = _session_from_cookie(handler)
     except Exception:
@@ -513,19 +521,26 @@ def _wilayah_scope_from_session(handler):
             jab = ""
         if jab in ("DIREKSI", "ADMINISTRATOR"):
             return {}
+        if not jab:
+            # Fail-closed: akun tanpa jabatan TIDAK boleh otomatis jadi akses
+            # penuh ({} = semua divre/kph). Login sudah menolak, ini lapis 2
+            # untuk sesi lama / baris jabatan yang dihapus belakangan.
+            return {_SCOPE_DENY: "akun tanpa jabatan"}
         scope = {}
         dv = _scope_code(sess.get("kode_divre"), "kode_divre")
         kp = _scope_code(sess.get("kode_kph"), "kode_kph")
         bk = _scope_code(sess.get("kode_bkph"), "kode_bkph")
         rp = _scope_code(sess.get("kode_rph"), "kode_rph")
         if jab == "DIVRE":
-            if dv:
-                scope["kode_divre"] = dv
+            if not dv:
+                return {_SCOPE_DENY: "DIVRE tanpa kode_divre"}
+            scope["kode_divre"] = dv
         elif jab == "ADM":
+            if not kp:
+                return {_SCOPE_DENY: "ADM tanpa kode_kph"}
             if dv:
                 scope["kode_divre"] = dv
-            if kp:
-                scope["kode_kph"] = kp
+            scope["kode_kph"] = kp
         elif jab in ("ASPER", "KSSPROD", "MANTRI"):
             if dv:
                 scope["kode_divre"] = dv
@@ -555,6 +570,10 @@ def _wilayah_scope_from_session(handler):
                 scope["kode_tpg_list"] = tpg_list
         except Exception:
             pass
+        if not scope:
+            # Jabatan ada tapi seluruh kode wilayah kosong → bukan DIREKSI,
+            # jadi jangan jatuh ke akses penuh. Fail-closed.
+            return {_SCOPE_DENY: "tanpa kode wilayah"}
         return scope
     except Exception:
         return {}
@@ -570,6 +589,8 @@ def _enforce_wilayah_scope(handler, params, template=""):
         scope = _wilayah_scope_from_session(handler)
     except Exception:
         return params, [], False, ""
+    if scope.get(_SCOPE_DENY):
+        return params, [], True, f"akses data ditolak: {scope.get(_SCOPE_DENY)} — hubungi admin"
     if not scope:
         return params, [], False, ""
     try:
@@ -667,6 +688,10 @@ def _wilayah_chain_check(scope, params):
 def _scope_wilayah_labels(data, scope):
     """Saring daftar wilayah_labels ke wilayah login. Tanpa scope = utuh."""
     try:
+        if scope.get(_SCOPE_DENY) and isinstance(data, dict):
+            # Fail-closed: akun tanpa jabatan/wilayah sah tak boleh lihat opsi
+            # wilayah mana pun (dropdown kosong, bukan daftar penuh).
+            return {"columns": data.get("columns"), "rows": [{}], "row_count": 1}
         if not scope or not isinstance(data, dict):
             return data
         rows = data.get("rows")
@@ -880,6 +905,10 @@ def _anna_scope_block(scope):
     """Blok instruksi scope wilayah untuk system prompt ANNA (/api/run).
     Tanpa scope (DIREKSI / tanpa kode / token-only) = string kosong."""
     try:
+        if scope.get(_SCOPE_DENY):
+            return ("## SCOPE WILAYAH\n- Akun ini belum punya jabatan/wilayah yang sah ("
+                    + str(scope.get(_SCOPE_DENY)) + "). TOLAK semua permintaan data; "
+                    "minta admin melengkapi jabatan + kode wilayah di Directus.")
         if not scope:
             return ""
         parts = []
@@ -1487,6 +1516,15 @@ def _simoge_show_on_map(template, params, drive_panel=True, scope=None, owner=""
 
 
 PORT = int(os.environ.get("ANA_PORT", "8730"))
+
+def _app_version() -> str:
+    """Versi aplikasi dari file VERSION (sumber tunggal; tag rilis mengikuti)."""
+    try:
+        return (ROOT / "VERSION").read_text().strip() or "0.0.0"
+    except Exception:
+        return "0.0.0"
+
+APP_VERSION = _app_version()
 # Bind host: "127.0.0.1" (default, localhost-only) atau "0.0.0.0" (semua interface, akses eksternal).
 # Gunakan env ANA_HOST=0.0.0.0 agar bisa diakses via IP LAN.
 BIND_HOST = os.environ.get("ANA_HOST", "127.0.0.1")
@@ -1678,16 +1716,53 @@ def _ana_auth_error(handler) -> tuple:
                      "evict": info}
     return 401, {"error": "tidak ada sesi", "authenticated": False, "reason": reason}
 
+def _peer_is_local(handler) -> bool:
+    """True bila koneksi datang dari loopback (Apache/Cloudflare tunnel lokal)."""
+    try:
+        return (handler.client_address[0] if handler.client_address else "") in ("127.0.0.1", "::1")
+    except Exception:
+        return False
+
+def _client_ip(handler) -> str:
+    """IP klien nyata di balik reverse proxy/tunnel.
+
+    Header proxy (CF-Connecting-IP / X-Real-IP / X-Forwarded-For) HANYA dipercaya
+    bila peer loopback — mencegah spoof dari LAN. Tanpa ini seluruh pengguna
+    tunnel terlihat sebagai 127.0.0.1: rate-limit login (5/menit) jadi kolektif
+    dan log audit kehilangan asal request.
+    """
+    try:
+        peer = handler.client_address[0] if handler.client_address else "?"
+    except Exception:
+        peer = "?"
+    if not _peer_is_local(handler):
+        return peer
+    for key in ("CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"):
+        v = (handler.headers.get(key) or "").strip()
+        if not v:
+            continue
+        cand = v.split(",")[0].strip()
+        if cand:
+            return cand
+    return peer
+
+def _req_is_https(handler) -> bool:
+    """HTTPS efektif: header X-Forwarded-Proto dari proxy lokal, atau env."""
+    try:
+        if _peer_is_local(handler):
+            h = handler.headers
+            if (h.get("X-Forwarded-Proto") or "").strip().lower() == "https":
+                return True
+            if (h.get("X-Forwarded-SSL") or "").strip().lower() == "on":
+                return True
+            if (h.get("HTTPS") or "").strip().lower() == "on":
+                return True
+    except Exception:
+        pass
+    return os.environ.get("ANA_COOKIE_SECURE", "0").strip() == "1"
+
 def _set_session_cookie(handler, sid: str, did: str = ""):
-    # Auto-detect HTTPS from environment or Apache proxy headers
-    secure = os.environ.get("ANA_COOKIE_SECURE","0").strip() == "1"
-    if not secure:
-        # Check Apache proxy headers for HTTPS
-        secure = (
-            handler.headers.get("X-Forwarded-Proto", "").lower() == "https" or
-            handler.headers.get("X-Forwarded-SSL", "").lower() == "on" or
-            handler.headers.get("HTTPS", "").lower() == "on"
-        )
+    secure = _req_is_https(handler)
     parts = [f"ana_session={sid}", "Path=/", "HttpOnly", "SameSite=Lax"]
     if secure: parts.append("Secure")
     try: ttl = int(os.environ.get("ANA_SESSION_TTL","28800"))
@@ -2475,9 +2550,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", csp)
 
     def _json(self, body, code=200):
+        import datetime
         import decimal
         def _dec(o):
+            # Nilai mentah MySQL (date/time) & Decimal harus bisa diserialkan:
+            # BIT top_petak membawa kolom tanggal → dulu TypeError → 500 kosong.
             if isinstance(o, decimal.Decimal): return float(o)
+            if isinstance(o, (datetime.datetime, datetime.date)): return o.isoformat()
+            if isinstance(o, datetime.timedelta): return o.total_seconds()
+            if isinstance(o, (bytes, bytearray)): return o.decode("utf-8", "replace")
             raise TypeError
         data = json.dumps(body, default=_dec).encode()
         try:
@@ -3047,7 +3128,7 @@ class Handler(BaseHTTPRequestHandler):
             # buka login. Gagal DB = 503 (frontend sembunyikan kartu, bukan
             # angka bohong). Aturan keras #2.
             try:
-                ip = (self.client_address[0] if self.client_address else "?")
+                ip = _client_ip(self)
             except Exception:
                 ip = "?"
             if not _landing_rl_ok(ip):
@@ -3072,7 +3153,7 @@ class Handler(BaseHTTPRequestHandler):
             # Engine v1 (Q2: endpoint baru). Baca snapshot file — TANPA query
             # per request. Publik tanpa token. Rate-limit ikut landing.
             try:
-                ip = (self.client_address[0] if self.client_address else "?")
+                ip = _client_ip(self)
             except Exception:
                 ip = "?"
             if not _landing_rl_ok(ip):
@@ -3101,6 +3182,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._unauth()
         if p == "/api/status":
             return self._json(dict(
+                version=APP_VERSION,
                 runtime=runtime.runtime_kind(),
                 permission=runtime.PERMISSION,
                 profile=runtime.PROFILE,
@@ -3431,6 +3513,8 @@ class Handler(BaseHTTPRequestHandler):
                         _sc = _wilayah_scope_from_session(self)
                     except Exception:
                         _sc = {}
+                    if _sc.get(_SCOPE_DENY):
+                        return self._json({"error": str(_sc.get(_SCOPE_DENY))}, 403)
                     if any(_sc.get(k) for k in ("kode_divre", "kode_kph", "kode_bkph", "kode_rph")) or _sc.get("kode_tpg_list"):
                         return self._json({"error": "di luar scope tile — pakai file scope (/api/tiles/scope/)"}, 403)
             return self._serve_pmtiles()
@@ -3651,7 +3735,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             ua = self.headers.get("User-Agent", "") or ""
-            ip = self.client_address[0] if self.client_address else "unknown"
+            ip = _client_ip(self)
             try:
                 sid, _, evicted, _ = auth_local.create_session(
                     rec.get("profile") or {}, ua, ip, "", pending_bind=True)
@@ -3825,7 +3909,7 @@ class Handler(BaseHTTPRequestHandler):
             body = {}
         # ── Local Auth (internal DB, public + cookie) ─────────────
         if p == "/api/auth/login":
-            ip = self.client_address[0] if self.client_address else "unknown"
+            ip = _client_ip(self)
             email = (body.get("email") or "").strip() if isinstance(body, dict) else ""
             if not auth_local.check_rate_limit(ip):
                 _alog(f"auth login 429 rate-limit ip={ip} email={(email or '')[:32]}", "warn")
@@ -3851,10 +3935,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "database tidak terjangkau — cek DB lokal (port 3306) lalu coba lagi"}, 503)
             try:
                 _h = (row.get("password","") or "") if row else ""
-                _pw_len = len(password)
-                _h_len = len(_h)
-                _h_pre = _h[:18] if _h else "-"
-                _pw_pre = password[:2] + "*"*(max(0,_pw_len-2)) if _pw_len else "-"
                 _ver = False
                 _ver_err = ""
                 if row and _h and _ARGON2_AVAILABLE and _h.startswith("$argon2"):
@@ -3873,7 +3953,11 @@ class Handler(BaseHTTPRequestHandler):
                             _ver_err = "VerifyMismatch"
                     except Exception as e:
                         _ver_err=type(e).__name__+":"+str(e)[:60]
-                _alog(f"auth login DBG email={email[:32]} ip={ip} found={bool(row)} h_len={_h_len} h_pre={_h_pre} pw_len={_pw_len} pw_pre={_pw_pre} ver={_ver} err={_ver_err}", "warn")
+                # Debug hanya bila ANA_AUTH_DEBUG=1. JANGAN pernah log potongan
+                # password / hash ke file log (pw_pre/h_pre = kebocoran kredensial).
+                _dbg = str(os.environ.get("ANA_AUTH_DEBUG", "0") or "0").strip().lower() in ("1","true","yes","on")
+                if _dbg:
+                    _alog(f"auth login DBG email={email[:32]} ip={ip} found={bool(row)} h_len={len(_h)} ver={_ver} err={_ver_err}", "warn")
             except Exception as _e:
                 _alog(f"auth login DBG err {type(_e).__name__}:{str(_e)[:80]}", "warn")
             if not row or not auth_local.verify_password(row.get("password","") or "", password):
@@ -3886,6 +3970,11 @@ class Handler(BaseHTTPRequestHandler):
             if prof.get("status") and prof.get("status") != "active":
                 _alog(f"auth login 403 status={prof.get('status')} email={email[:32]} ip={ip}", "warn")
                 return self._json({"error": "akun tidak aktif"}, 403)
+            # Jabatan wajib: tanpa jabatan scope wilayah jatuh ke fail-closed,
+            # jadi lebih baik ditolak di login dengan pesan jelas.
+            if not prof.get("jabatan"):
+                _alog(f"auth login 403 tanpa jabatan email={email[:32]} ip={ip}", "warn")
+                return self._json({"error": "akun belum punya jabatan — hubungi admin untuk melengkapi data jabatan & wilayah"}, 403)
             hud = prof.get("hud_access")
             hud_ok = bool(int(hud) if isinstance(hud, (int, float)) or (isinstance(hud, str) and hud.isdigit()) else hud) if hud is not None else False
             has_hud_field = "hud_access" in prof
@@ -4333,6 +4422,18 @@ class Handler(BaseHTTPRequestHandler):
                     traceback.print_exc()
                 return self._json({"error": str(e)[:300]}, 500)
 
+        # Gate tunggal untuk seluruh endpoint BIT: sesi tanpa jabatan/wilayah sah
+        # (scope DENY) tidak boleh menembak BIT — tanpa ini _scope deny diabaikan
+        # engine (tak ada kunci wilayah = data global) karena _enforce_wilayah_scope
+        # hanya jalan bila body mengirim kode wilayah.
+        if p.startswith("/api/bit/"):
+            try:
+                _bit_gate = _wilayah_scope_from_session(self)
+            except Exception:
+                _bit_gate = {}
+            if _bit_gate.get(_SCOPE_DENY):
+                return self._json({"error": "akses ditolak: " + str(_bit_gate.get(_SCOPE_DENY)) + " — hubungi admin"}, 403)
+
         if p == "/api/bit/target_gap":
             # BIT v0.1 — deterministic Target vs Rencana vs Actual
             # Body: {tahun, bulan, periode, include_breakdown?, kode_* scope optional (ditimpa scope login)}
@@ -4589,6 +4690,8 @@ class Handler(BaseHTTPRequestHandler):
                 scope = _wilayah_scope_from_session(self) or {}
             except Exception:
                 email=""; scope={}
+            if scope.get(_SCOPE_DENY):
+                return self._json({"error": "akses ditolak: " + str(scope.get(_SCOPE_DENY)) + " — hubungi admin"}, 403)
             try:
                 if p == "/api/bit/cases":
                     if method == "GET" or body.get("action") in (None, "", "list"):
@@ -4596,7 +4699,7 @@ class Handler(BaseHTTPRequestHandler):
                         status = str(body.get("status") or "").strip().lower() or None
                         lim = int(body.get("limit", 20) or 20)
                         off = int(body.get("offset", 0) or 0)
-                        out = bit_case_store.list_cases(limit=lim, offset=off, status=status, q=q or None)
+                        out = bit_case_store.list_cases(limit=lim, offset=off, status=status, q=q or None, scope=scope)
                         return self._json({"ok": True, **out})
                     if body.get("action") in ("create", "add"):
                         payload = body.get("payload") or body.get("case") or {k: body[k] for k in ("gejala","pertanyaan","periode","snapshot","hipotesis","kesimpulan","kepastian","keputusan","hasil","tags") if k in body}
@@ -4613,23 +4716,25 @@ class Handler(BaseHTTPRequestHandler):
                     if not cid and act not in ("list",):
                         return self._json({"error": "id case diperlukan"}, 400)
                     if act in ("", "get"):
-                        out = bit_case_store.get_case(cid)
+                        out = bit_case_store.get_case(cid, scope=scope)
                         return self._json({"ok": True, "case": out})
                     if act in ("update","patch"):
                         patch = body.get("patch") or {k: body[k] for k in ("status","kesimpulan","kepastian","keputusan","hasil","tags","hipotesis") if k in body}
-                        out = bit_case_store.update_case(cid, patch, user_email=email)
+                        out = bit_case_store.update_case(cid, patch, user_email=email, scope=scope)
                         _blog(f"cases update {cid} -> {patch} by {email}", "info")
                         return self._json({"ok": True, "case": out})
                     if act in ("delete","remove"):
-                        out = bit_case_store.delete_case(cid)
+                        out = bit_case_store.delete_case(cid, scope=scope)
                         _blog(f"cases delete {cid} by {email}", "info")
                         return self._json({"ok": True, **out})
                     if act in ("verify",):
                         # shortcut: status verified + hasil
                         patch = {"status": "verified", "hasil": body.get("hasil") or {"outcome": str(body.get("outcome","sukses")), "catatan": str(body.get("catatan",""))}}
-                        out = bit_case_store.update_case(cid, patch, user_email=email)
+                        out = bit_case_store.update_case(cid, patch, user_email=email, scope=scope)
                         return self._json({"ok": True, "case": out})
                     return self._json({"error": "action get|update|delete|verify"}, 400)
+            except PermissionError as pe:
+                return self._json({"error": str(pe)[:300]}, 403)
             except ValueError as ve:
                 return self._json({"error": str(ve)[:300]}, 400)
             except KeyError as ke:
@@ -5399,6 +5504,8 @@ class Handler(BaseHTTPRequestHandler):
             _run_scope = _wilayah_scope_from_session(self)
         except Exception:
             _run_scope = {}
+        if _run_scope.get(_SCOPE_DENY):
+            return self._json({"error": "akses ditolak: " + str(_run_scope.get(_SCOPE_DENY)) + " — hubungi admin"}, 403)
         _scope_block = ""
         try:
             _scope_block = _anna_scope_block(_run_scope)
