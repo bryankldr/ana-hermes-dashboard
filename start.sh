@@ -134,12 +134,17 @@ _hermes_listen_ports() {
     port=$(printf '%s' "$line" | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2)
     [ -n "$pid" ] && [ -n "$port" ] || continue
     if printf '%s' "$line" | grep -q '"hermes"'; then
-      echo "$port"
+      :
     elif tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qi hermes; then
-      # verifikasi perilaku agar tak salah menunjuk proses python lain
-      if curl -s -m 3 "http://127.0.0.1:$port/api/health" 2>/dev/null | grep -q 'displayVersion'; then
-        echo "$port"
-      fi
+      :
+    else
+      continue
+    fi
+    # hanya port server dashboard: root-nya memuat session token.
+    # `hermes gateway run` juga listener "hermes", tapi root tanpa token ->
+    # dulu head -1 memilihnya, _hermes_token_for kosong, start.sh FATAL.
+    if curl -s -m 3 "http://127.0.0.1:$port/" 2>/dev/null | grep -q '__HERMES_SESSION_TOKEN__='; then
+      echo "$port"
     fi
   done
 }
