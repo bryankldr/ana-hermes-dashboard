@@ -71,3 +71,8 @@ ui/data/ref_jawa_kabkot.geojson
 # build artifact UI (npm run build:ui)
 ui/dist/
 node_modules/
+
+# state runtime yang berubah di server — JANGAN di-commit (deploy jangan menimpanya)
+data/bit_cases.json
+.ana_transcript
+.ana_live_stored
