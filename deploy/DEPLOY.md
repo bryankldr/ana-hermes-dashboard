@@ -58,29 +58,48 @@ sudo systemctl daemon-reload && sudo systemctl enable --now simoge-hud
 
 ## 6. Reverse proxy: nginx atau Apache (+ Cloudflare Tunnel)
 
-nginx: lihat header `deploy/nginx-simoge.conf`. Apache (XAMPP/mod_proxy):
+nginx: lihat header `deploy/nginx-simoge.conf`.
+
+Apache (LAMPP/XAMPP Linux). Kalau tunnel Cloudflare sudah menargetkan
+`http://127.0.0.1:443`, **jangan** pakai SSL di origin: TLS berakhir di edge, dan
+Apache yang memasang `SSLEngine on` di 443 akan menjawab `400 Bad Request` untuk
+setiap request HTTP polos dari `cloudflared` ("plain HTTP request sent to HTTPS port").
+Karena itu 443 dibuat sebagai listener HTTP biasa:
 
 ```apache
+# /opt/lampp/etc/extra/httpd-hud.conf
+Listen 443
+
 <VirtualHost *:443>
     ServerName hud.kphbwb.web.id
-    SSLEngine on
-    SSLCertificateFile    "conf/ssl.crt/hud.kphbwb.web.id.crt"
-    SSLCertificateKeyFile "conf/ssl.key/hud.kphbwb.web.id.key"
-
     ProxyPreserveHost On
+    ProxyRequests Off
     RequestHeader set X-Forwarded-Proto "https"   # memicu cookie Secure
-    ProxyTimeout 600                              # run ANNA panjang
-
-    ProxyPass        /  http://127.0.0.1:8730/ flushpackets=on retry=0
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteRule /(.*) ws://127.0.0.1:8730/$1 [P,L]
+    ProxyPass        /  http://127.0.0.1:8730/ timeout=600 flushpackets=on retry=0
     ProxyPassReverse /  http://127.0.0.1:8730/
 </VirtualHost>
 ```
 
+Wajib: `Include etc/extra/httpd-ssl.conf` di `httpd.conf` **di-comment** (kalau tidak
+ada dua `Listen 443` dan vhost SSL default menangkap Host HUD). Modul yang harus
+aktif: `proxy`, `proxy_http`, `proxy_wstunnel`, `rewrite`, `headers`.
+Bila reload memunculkan `AH00819 Could not allocate shared memory segment for shmcb`
+/ `AH02312 Fatal error initialising mod_ssl`, modul SSL masih mencoba membuat session
+cache: nonaktifkan `LoadModule ssl_module` sama sekali (TLS di Cloudflare) lalu
+**start penuh** (`apachectl -k start`), bukan `graceful` — graceful pada kondisi itu
+mematikan Apache termasuk port 80.
+
 - `flushpackets=on` wajib: `/api/run` mengalirkan NDJSON bertahap (tanpa ini jawaban tertahan).
+- `RewriteRule` WebSocket wajib: `/api/terminal-stream` dan stream run memakai upgrade.
 - `ANA_ALLOWED_HOSTS` **wajib** diisi domain publik; tanpa itu Host/Origin publik → 403.
 - Jangan tambahkan `Access-Control-Allow-Origin` di proxy: UI dan API satu origin, CORS tak dibutuhkan.
 - Cloudflare: aktifkan *Always Use HTTPS*; **bypass cache untuk `/api/*`** (kalau tidak, rebuild
   tiles/insight harian tampak tidak berubah). Koneksi idle diputus di 100 detik (524).
+- `img-src`/`connect-src` CSP diturunkan dari `DIRECTUS_URL` (foto penyadap diambil dari
+  `https://sandbox2.kphbwb.web.id/assets/<id>`). Tanpa itu foto diblokir CSP.
 
 ## 7. Verifikasi
 - `curl -s http://127.0.0.1:8730/login.html | grep -o 'landing.css?v=[^"]*'` → versi kini
@@ -95,3 +114,41 @@ nginx: lihat header `deploy/nginx-simoge.conf`. Apache (XAMPP/mod_proxy):
 ## 8. Rollback
 Tiap rilis = tag git. Mundur: `git checkout <tag-lama> && sudo systemctl restart simoge-hud`.
 Backup sebelum upgrade: `.env`, `layout_*.json`, `.ana_insight.json`.
+
+## 9. Catatan lapangan: KPHBWB (LAMPP, 2026-10-21, v1.1.3 → 1.1.4)
+
+Kondisi nyata server: Ubuntu 22.04, LAMPP di `/opt/lampp` (Apache 2.4.58, MariaDB 10.4),
+`cloudflared` di host, tunnel `hud.kphbwb.web.id` → `http://127.0.0.1:443`, tanpa systemd
+unit untuk HUD, venv dibangun pakai Anaconda Python 3.12 (`/home/bryan/anaconda3/bin/python3`)
+karena `python3` sistem 3.10 tidak memenuhi `pandas==3.0.6`.
+
+```bash
+# kode
+rsync -a --exclude .venv --exclude node_modules --exclude ui/dist --exclude logs \
+      --exclude .env --exclude '.ana_*' ./ bryan@host:ana-hermes-dashboard/
+# runtime
+~/anaconda3/bin/python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+npm ci --no-audit --no-fund && node scripts/build_ui.mjs     # ui/dist/app.min.js, ANA_UI_BUNDLE=1
+```
+
+Launcher yang benar adalah `start.sh`, **bukan** `python server.py` langsung:
+`start.sh` menemukan/menjalankan `hermes serve` lalu mengekspor `ANA_GATEWAY_URL` +
+`ANA_GATEWAY_TOKEN`. Tanpa itu `/api/status` melaporkan `"runtime": "mock"` dan
+`brain MOCK — Hermes CLI not reachable` walau CLI `hermes` sehat.
+
+`~/run-hud.sh` (dipakai `crontab @reboot`):
+```bash
+#!/usr/bin/env bash
+cd /home/bryan/ana-hermes-dashboard || exit 1
+export PATH=/home/bryan/.local/bin:/usr/local/bin:/usr/bin:/bin
+mkdir -p logs
+exec ./start.sh >> logs/server.log 2>&1
+```
+
+Prosedur ganti versi di server: sisihkan direktori lama (`mv`), `rsync` tag baru,
+`pip install -r requirements.txt` (hanya bila berubah), `npm run build:ui`, lalu
+`kill $(lsof -ti:8730)` + jalankan `~/run-hud.sh`. Jangan `pkill -f "server.py"` dari
+sesi SSH yang teks perintahnya sendiri memuat `server.py` — pola itu membunuh sesi itu sendiri.
+
+Langkah yang butuh `sudo` (password diminta di console server, jangan lewat chat):
+`/opt/lampp/etc` root-owned, Apache master berjalan sebagai root untuk bind 443.
