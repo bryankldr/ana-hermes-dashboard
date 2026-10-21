@@ -150,5 +150,55 @@ Prosedur ganti versi di server: sisihkan direktori lama (`mv`), `rsync` tag baru
 `kill $(lsof -ti:8730)` + jalankan `~/run-hud.sh`. Jangan `pkill -f "server.py"` dari
 sesi SSH yang teks perintahnya sendiri memuat `server.py` — pola itu membunuh sesi itu sendiri.
 
+Pasang pertama kali boleh `rsync`; setelah itu **update pakai git**, bukan rsync:
+
+```bash
+ssh host 'cd ~/ana-hermes-dashboard
+  git fetch --tags -f
+  git checkout -f v1.1.5          # -f: buang sisa modifikasi manual
+  .venv/bin/pip install -r requirements.txt   # hanya bila requirements berubah
+  npm ci --no-audit --no-fund && node scripts/build_ui.mjs   # hanya bila ui/src berubah
+  bash ~/restart-hud.sh'
+```
+
+Kenapa aman: semua yang berubah di server bersifat **untracked/gitignored**, jadi
+`git checkout -f` tidak menyentuhnya:
+
+| Bertahan otomatis | Alasan |
+|---|---|
+| `.env` | gitignored |
+| `.venv/`, `node_modules/`, `ui/dist/` | gitignored, dibangun di server |
+| `logs/` | gitignored |
+| `layout.json`, `layout_*.json`, `state.json` | gitignored (posisi panel per user) |
+| `data/bit_cases.json`, `.ana_transcript`, `.ana_live_stored` | **sejak v1.1.5 untracked** |
+| `ui/data/*.pmtiles`, `petak_simple.json` | gitignored (artefak tiles) |
+| `.env` hasil `cp` lama, `.ana_token`, `.ana_mode` | gitignored |
+
+Jangan pakai `rsync -a --delete` dari working tree untuk update rutin: file state di
+lokal (layout, state.json, data/) akan ikut menimpa milik server. Kalau tetap rsync,
+tambahkan `--exclude layout*.json --exclude state.json --exclude data/ --exclude '.ana_*'`.
+
+## 10. Pengembangan lokal
+
+Satu repo, dua mode jalan. UI bisa disajikan mentah (bisa di-debug per file) atau
+sebagai bundel minified (mirip produksi):
+
+```bash
+cd ~/PROYEK_2026/ana-hermes-dashboard
+ANA_UI_BUNDLE=0 ./start.sh     # dev: /src/main.js = modul asli ui/src, tanpa build
+ANA_UI_BUNDLE=1 ./start.sh     # prod-like: /src/main.js = ui/dist/app.min.js
+npm run build:ui               # hasilkan ulang bundel setelah mengubah ui/src
+```
+
+Alur rilis-lokal → server:
+1. edit di lokal, uji di `http://127.0.0.1:8730` (dev, `ANA_UI_BUNDLE=0`);
+2. `node scripts/build_ui.mjs` bila UI berubah → uji sekali dengan `ANA_UI_BUNDLE=1`;
+3. naikkan `VERSION` + footer `ui/login.html`, `git commit`, `git tag vX.Y.Z`, `git push origin main && git push origin vX.Y.Z`;
+4. di server jalankan blok "update pakai git" di §9.
+
+Database: lokal dan server sama-sama menunjuk `127.0.0.1:3306/kph_bwb_sandbox2` (root),
+jadi migrasi data uji lokal TIDAK otomatis ada di server — kalau perlu data, salin
+manual atau pakai `REMOTE_DB_*` di `.env` untuk membaca DB server dari lokal.
+
 Langkah yang butuh `sudo` (password diminta di console server, jangan lewat chat):
 `/opt/lampp/etc` root-owned, Apache master berjalan sebagai root untuk bind 443.
