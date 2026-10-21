@@ -36,7 +36,8 @@ cd ana-hermes-dashboard && \
 ./install.sh
 ```
 
-The installer creates a private `.env` file, starts the dashboard, and opens:
+The installer creates a private `.env`, optionally builds the minified UI bundle
+(`npm run build:ui`, skip with `ANA_UI_BUILD=no`), starts the dashboard, and opens:
 
 <http://127.0.0.1:8730>
 
@@ -133,7 +134,8 @@ start.sh        local launcher
 ## Security
 
 - The server binds only to `127.0.0.1`; it is not exposed to the network.
-- Every state-changing API request requires a per-launch random token, same-origin request, valid localhost host header, approved content type, and bounded request size.
+- Browser auth uses an `HttpOnly` session cookie only; the master API token stays server-side and is never sent to the client (scripts on the host may still call the API with it).
+- Same-origin + host-header allowlist (`ANA_ALLOWED_HOSTS`) guard every request; unauthenticated API traffic is rate-limited per IP, authenticated traffic per session.
 - Agent runs are serialized so multiple tabs cannot race the shared Hermes session.
 - Raw prompt logging is disabled unless `ANA_RAW_LOG` is explicitly configured; opt-in logs are created with mode `0600` and symlink protection.
 - `.env`, state files, Python caches, and local credentials are ignored by Git.
