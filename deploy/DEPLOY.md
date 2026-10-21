@@ -178,6 +178,16 @@ Jangan pakai `rsync -a --delete` dari working tree untuk update rutin: file stat
 lokal (layout, state.json, data/) akan ikut menimpa milik server. Kalau tetap rsync,
 tambahkan `--exclude layout*.json --exclude state.json --exclude data/ --exclude '.ana_*'`.
 
+**Sekali saja saat naik ke v1.1.5** (file itu masih tracked di versi lama, jadi checkout
+menghapusnya bersama direktori `data/`):
+
+```bash
+mkdir -p ~/ana-hermes-dashboard/data
+cp -p ~/ana-hermes-dashboard.old-*/data/bit_cases.json ~/ana-hermes-dashboard/data/
+```
+
+Setelah itu `data/bit_cases.json` untracked → checkout versi berikutnya tidak menyentuhnya.
+
 ## 10. Pengembangan lokal
 
 Satu repo, dua mode jalan. UI bisa disajikan mentah (bisa di-debug per file) atau
