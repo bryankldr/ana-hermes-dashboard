@@ -24,8 +24,10 @@ const els = {
  sessionBtn: $('sessionBtn'), sessionIdEl: $('sessionId'),
 };
 
-// Token for layout API (avoids relying on __ANA_TOKEN__ injected into JS)
-const ANA_TOKEN = document.querySelector('meta[name="ana-token"]')?.content || '';
+// Auth browser = cookie sesi HttpOnly (lihat api.js). Tidak ada token di JS.
+// Auth browser 100% lewat cookie sesi (HttpOnly). Master API token TIDAK
+// pernah dikirim ke klien — dulu via <meta name=ana-token> (bocor ke DevTools).
+const ANA_TOKEN = '';
 
 // ═══ STATE ═══
 let running = false, answer = '', firstDelta = false, speakThisRun = true;
@@ -374,7 +376,7 @@ let _dialTimer = null;
 let lastSysMetrics = {};   // dipakai initTelemetry() juga: satu fetch, dua widget
 async function refreshDials() {
   try {
-    const t = document.querySelector('meta[name=ana-token]')?.content;
+    const t = '';
     const r = await fetch('/api/sysmetrics', { headers: { 'X-Ana-Token': t || '' } });
     if (!r.ok) return;
     const m = await r.json();

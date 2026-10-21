@@ -1,12 +1,12 @@
 // ui/src/core/bootGuard.js — sinkron token server↔frontend tanpa'expose token.
 //
 // Masalah: server restart → API_TOKEN baru → .ana_token ditulis ulang, tapi Halaman
-// masih memegang <meta name="ana-token"> yang lama. Semua fetch kena 401, antrean
+// masih memakai halaman (dan sesi) dari proses server yang lama. Semua fetch 401, antrean
 // /api/map/queue tak pernah kekuras, peta "diam". Dulu harus hard refresh manual.
 //
 // Solusi: server punya BOOT_ID (8 hex acak, baru tiap start) yang dicek lewat
 // endpoint tanpa-auth /api/token-status. Halaman poll endpoint itu: boot berubah
-// = ada proses server baru = token meta di halaman ini sudah basi → reload sekali.
+// = ada proses server baru = halaman ini dari proses lama → reload sekali.
 // Token tidak pernah dikirim ke mana pun, dan tidak pernah disimpan di storage.
 //
 // Keamanan: BOOT_ID bukan rahasia (acak, publik, tak memberi akses apa pun).

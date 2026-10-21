@@ -67,3 +67,7 @@ graph.json
 ui/data/ref_jawa_kabkot.geojson
 .ana_live_stored
 .ana_transcript
+
+# build artifact UI (npm run build:ui)
+ui/dist/
+node_modules/

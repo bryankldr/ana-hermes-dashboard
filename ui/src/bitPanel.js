@@ -151,7 +151,7 @@ function renderKasus(data){
     try{
       const _T=_bitTime();
       const tahun=_T.tahun, bulan=_T.bulan, periode=_T.periode, sampai_dengan=_T.sampai_dengan;
-      const token=document.querySelector('meta[name="ana-token"]')?.content||_token||"";
+      const token=''||_token||"";
       let did=""; try{ did=localStorage.getItem("ana_device_id")||"";}catch(_){}
       const payload={gejala, pertanyaan:(tanyaEl.value||"").trim(), kepastian:(kepEl.value||"Belum teruji"), periode:{tahun,bulan,periode,sampai_dengan}};
       const r=await fetch("/api/bit/cases",{method:"POST",headers:{"X-Ana-Token":token,"Content-Type":"application/json","X-Ana-Device":did},body:JSON.stringify({action:"create", payload})});
@@ -168,7 +168,7 @@ async function refreshKasus(){
   const el=document.getElementById('bitKasus'); if(!el) return;
   el.innerHTML='<div style="color:var(--text-dim);font-size:11px;padding:8px">Memuat kasus...</div>';
   try{
-    const token=document.querySelector('meta[name="ana-token"]')?.content||_token||"";
+    const token=''||_token||"";
     let did=""; try{ did=localStorage.getItem("ana_device_id")||"";}catch(_){}
     const r=await fetch("/api/bit/cases",{method:"POST",headers:{"X-Ana-Token":token,"Content-Type":"application/json","X-Ana-Device":did},body:JSON.stringify({action:"list", limit:20})});
     const j=await r.json();
@@ -216,7 +216,7 @@ async function fetchAndRender(){
     const breakdown=!!document.getElementById("bitBreakdown")?.checked;
     let sampai_dengan=_T.sampai_dengan;
     if(!["ya","tidak"].includes(sampai_dengan)) sampai_dengan="ya";
-    const token=_token||document.querySelector('meta[name="ana-token"]')?.content||"";
+    const token=_token||''||"";
     let did=""; try{ did=localStorage.getItem("ana_device_id")||"";}catch(_){}
     const payload={tahun, bulan, periode, sampai_dengan, include_breakdown: breakdown, ..._bitWilayah(_T)};
     let r,j;
@@ -274,7 +274,7 @@ async function fetchAndRender(){
   finally{ _busy=false; const b=document.getElementById("bitRefresh"); if(b){ b.disabled=false; b.textContent="Tampilkan"; } }
 }
 export function initBitPanel(opts={}){
-  _token=opts.token||document.querySelector('meta[name="ana-token"]')?.content||"";
+  _token=opts.token||''||"";
   _log=opts.log||(()=>{});
   // persist per-user (localStorage, like panel layout but inside map)
   const BIT_KEY="ana_bit_drawer_v1";

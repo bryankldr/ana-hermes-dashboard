@@ -5,7 +5,7 @@
 
 import { isLowEndDevice, isMobile } from './core/device.js';
 
-const TOKEN = () => document.querySelector('meta[name="ana-token"]')?.content || '';
+const TOKEN = () => '' || '';
 
 function headers() {
   return { 'X-Ana-Token': TOKEN(), 'Content-Type': 'application/json' };

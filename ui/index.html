@@ -7,7 +7,6 @@
        Tanpa ini soft-refresh + SW cache bisa salah tier (desktop ↔ tablet)
        karena layout.js mode() baca innerWidth sebelum device.js siap. -->
   <script>try{(function(){var t='desktop',c=false;try{var m=window.matchMedia;if(m){if(m('(max-width: 780px)').matches)t='phone';else if(m('(max-width: 1180px)').matches)t='tablet';}else{var w=window.innerWidth||0;t=w<=780?'phone':w<=1180?'tablet':'desktop';}c=m&&m('(pointer: coarse)').matches||(navigator.maxTouchPoints||0)>0;}catch(_){}document.documentElement.dataset.device=t;document.documentElement.dataset.touch=c?'coarse':'fine';})();}catch(_){}</script>
-  <meta name="ana-token" content="__ANA_TOKEN__">
   <meta name="ana-directus-url" content="__ANA_DIRECTUS_URL__">
   <meta name="theme-color" content="#020F2A">
   <meta name="color-scheme" content="dark">

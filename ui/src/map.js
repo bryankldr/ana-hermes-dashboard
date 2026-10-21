@@ -1169,7 +1169,7 @@ function updateLegend(biz, kat) {
     // set_features diff-by-id, bukan full replace (anti flicker).
     let executed = false;
     try {
-      const tok = document.querySelector('meta[name="ana-token"]')?.content || '';
+      const tok = '' || '';
       const r = await fetch('/api/map/queue', { headers: { 'X-Ana-Token': tok }, credentials: 'same-origin' });
       if (!r.ok) return false;
       const { commands = [] } = await r.json();
@@ -1281,7 +1281,7 @@ function updateLegend(biz, kat) {
               const _v = parseInt(_params[_k]);
               if (Number.isFinite(_v)) _params[_k] = _v;
             }
-            const _tok2 = document.querySelector('meta[name="ana-token"]')?.content || '';
+            const _tok2 = '' || '';
             const _r = await fetch('/api/simoge/show_on_map', {
               method: 'POST',
               headers: { 'X-Ana-Token': _tok2, 'Content-Type': 'application/json' },
@@ -1412,7 +1412,7 @@ function updateLegend(biz, kat) {
         // ── pin-point aktivitas (GPS foto) — only when biz=aktivitas ──
         try {
           if (st.business === 'aktivitas' && _ctl && typeof _ctl.set_aktivitas_points === 'function') {
-            const _tok = document.querySelector('meta[name="ana-token"]')?.content || '';
+            const _tok = '' || '';
             // Cap pin longgar-tetap 4000 (batas aman Leaflet ~4k circleMarker):
             // cap berbasis jumlah polygon TERBUKTI memotong data (polygon
             // bisa tersaring viewport < total; pin periode penuh terpotong
@@ -1550,7 +1550,7 @@ function updateLegend(biz, kat) {
   $sel('#spatialQuickReset')?.addEventListener('click', function(){ fReset?.click(); });
 
   // ── P2-4: modal Pengaturan Tiles (rebuild manual + cron harian) ──
-  // Token dari meta ana-token (disuntik server via __ANA_TOKEN__).
+  // Auth via cookie sesi (HttpOnly); klien tak lagi memegang master token.
   // Status: GET /api/tiles/status. Rebuild: GET /api/tiles/rebuild (bisa
   // 1-2 menit — tombol dikunci selama jalan). Cron: POST /api/tiles/cron
   // {action: status|enable|disable, schedule}.
@@ -1574,7 +1574,7 @@ function updateLegend(biz, kat) {
       }
     } catch(_) {}
     const getSched = () => { const h=(hourSel&&hourSel.value)||'6'; const m=(minSel&&minSel.value)||'10'; return m+' '+h+' * * *'; };
-    const tok = () => document.querySelector('meta[name="ana-token"]')?.content || '';
+    const tok = () => '' || '';
     const H = () => ({ 'X-Ana-Token': tok(), 'Content-Type': 'application/json' });
     const fmtB = (n) => (n == null ? '-' : (n > 1048576 ? (n/1048576).toFixed(1)+' MB' : Math.round(n/1024)+' KB'));
     const fmtT = (t) => { try { return t ? new Date(t*1000).toLocaleString('id-ID') : '-'; } catch(_) { return '-'; } };
@@ -1766,7 +1766,7 @@ function updateLegend(biz, kat) {
   let _ovKey = '', _ovTimer = null, _ovOn = false;
   let _ovSeq = 0; // kunci murahan request overview — respons basi dibuang
   const _ovColorCache = {}; // key overview -> {colors, rows} (cap 60)
-  const _tokPm = () => { try { return document.querySelector('meta[name="ana-token"]')?.content || ''; } catch (_) { return ''; } };
+  const _tokPm = () => { try { return '' || ''; } catch (_) { return ''; } };
   async function _tileManifestLoad() {
     if (_tileManifest) return _tileManifest;
     try {
@@ -3017,7 +3017,7 @@ function updateLegend(biz, kat) {
   } catch (_) {}
   // chart + laporan panel di DALAM #mapPanel — ANA full control via session state
   // (/api/spatial/chart dan /api/spatial/report)
-  const _tok = document.querySelector('meta[name="ana-token"]')?.content || '';
+  const _tok = '' || '';
   try { initSpatialChart({ token: _tok, log }); } catch (_) {}
   // laporan multi halaman siap cetak (Unduh = window.print, Tutup = POST visible:false)
   try { initSpatialReport({ token: _tok, log }); } catch (_) {}

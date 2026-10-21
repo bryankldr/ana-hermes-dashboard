@@ -17,15 +17,13 @@ function anaDeviceId() {
 }
 export class ApiClient {
   constructor() {
-    this.token = document.querySelector('meta[name="ana-token"]')?.content || '';
+    // Auth browser = cookie sesi HttpOnly. Master token TIDAK ada di klien.
+    this.token = '';
     this.evictedHandler = null; // dipasang main.js: banner + ambil alih
   }
   headers(extra = {}) {
-    const h = {
-      'x-ana-token': this.token,
-      'content-type': 'application/json',
-      ...extra
-    };
+    const h = { 'content-type': 'application/json', ...extra };
+    if (this.token) h['x-ana-token'] = this.token;
     try {
       const d = anaDeviceId();
       if (d) h['X-Ana-Device'] = d;

@@ -17,6 +17,10 @@ import server  # noqa: E402
 class H:
     """Handler palsu — _session_from_cookie di-monkeypatch."""
 
+    def __init__(self, peer="127.0.0.1", headers=None):
+        self.headers = headers or {}
+        self.client_address = (peer, 54321)
+
 
 def scope_for(sess):
     server._session_from_cookie = lambda h: sess
@@ -44,12 +48,17 @@ DENY = server._SCOPE_DENY
 fails = []
 
 
+N = [0]
+
+
 def eq(label, got, want):
+    N[0] += 1
     if got != want:
         fails.append(f"{label}: got {got!r} want {want!r}")
 
 
 def truthy(label, cond):
+    N[0] += 1
     if not cond:
         fails.append(f"{label}: false")
 
@@ -88,9 +97,13 @@ eq("KPH dengan kode -> clamp kph", scope_for(sess(jab("KPH"), kph=31211)).get("k
 eq("TPG-only", scope_for(sess(jab("K1"), tpg=[{"kode_tpg": "77"}])),
    {"kode_tpg_list": ["77"]})
 
-# tanpa sesi = jalur sistem/token-only (ANA), tetap {}
+# tanpa sesi: hanya pemanggil LOKAL (skrip/cron) yang boleh tanpa clamp.
+# Klien jauh dengan token saja → TOLAK (dulu {} = data global = bypass jabatan).
 server._session_from_cookie = lambda h: None
-eq("tanpa sesi", server._wilayah_scope_from_session(H()), {})
+eq("tanpa sesi dari loopback = global", server._wilayah_scope_from_session(H("127.0.0.1")), {})
+_remote = server._wilayah_scope_from_session(H("203.0.113.9"))
+truthy("tanpa sesi dari klien jauh DITOLAK", server._SCOPE_DENY in _remote)
+truthy("alasan menyebut sesi", "tanpa sesi" in str(_remote.get(server._SCOPE_DENY)))
 
 # enforcement ikut menolak
 server._session_from_cookie = lambda h: sess(jab("DIVRE"))
@@ -110,4 +123,4 @@ if fails:
     for f in fails:
         print(" -", f)
     sys.exit(1)
-print("ALL PASS", "(%d cek)" % 16)
+print("ALL PASS", "(%d cek)" % N[0])

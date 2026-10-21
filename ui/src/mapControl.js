@@ -409,7 +409,7 @@ export class LeafletAdapter {
       if (!evapotKey) return;
       let rows = this._penyadapDetailByEvapot.get(evapotKey);
       if (!rows) {
-        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const tok = '' || '';
         const res = await fetch('/api/simoge/query', {
           method: 'POST',
           credentials: 'same-origin',
@@ -867,7 +867,7 @@ _nearestOnPolygonRaw(ev, lat, lng) {
   return best;
 }
 set_aktivitas_points(points, opts = {}) {
-  const token = opts.token || document.querySelector('meta[name="ana-token"]')?.content || '';
+  const token = opts.token || '' || '';
   this._ensureAktivitasLines();
   // Dedup: data sama (reload ganda filter+viewport overlap) → skip rebuild,
   // hanya enforce visibility. Tanpa ini clear+rebuild tiap respons membuat
@@ -1407,7 +1407,7 @@ function _ensurePetakModal() {
         document.getElementById('anaPetakTitle').textContent = 'Kode Evapot ' + (evapot || '');
         document.getElementById('anaPetakBody').textContent = 'memuat…';
         box.style.display = 'flex';
-        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const tok = '' || '';
         const q = async (template, params) => {
           const r = await fetch('/api/simoge/query', { method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },
@@ -1566,7 +1566,7 @@ function _ensureAktivitasModal() {
         document.getElementById('anaAktTitle').textContent = 'Aktivitas · ' + (NAMA_BULAN[B] || B) + ' ' + perLabel + ' ' + Y;
         document.getElementById('anaAktBody').textContent = 'memuat…';
         box.style.display = 'flex';
-        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const tok = '' || '';
         const q = async (template, params) => {
           const r = await fetch('/api/simoge/query', { method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },
@@ -1687,7 +1687,7 @@ function _ensureProduksiModal() {
         document.getElementById('anaProdTitle').textContent = 'Produksi · ' + (NAMA_BULAN[B] || B) + ' ' + perLabel + ' ' + Y;
         document.getElementById('anaProdBody').textContent = 'memuat…';
         box.style.display = 'flex';
-        const tok = (document.querySelector('meta[name="ana-token"]') || {}).content || '';
+        const tok = '' || '';
         const q = async (template, params) => {
           const r = await fetch('/api/simoge/query', { method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json', 'X-Ana-Token': tok },

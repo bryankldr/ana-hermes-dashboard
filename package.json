@@ -1,0 +1,11 @@
+{
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "name": "ana-hermes-dashboard",
+  "private": true,
+  "description": "SIMOGE HUD — build tooling UI (bukan aplikasi Node)",
+  "scripts": {
+    "build:ui": "node scripts/build_ui.mjs"
+  }
+}

@@ -436,7 +436,7 @@ export function initSpatialArchive({ token = "", log = () => {} } = {}) {
   let _preloadTries = 0;
   const preload = async () => {
     if (!_token) {
-      try { _token = document.querySelector('meta[name="ana-token"]')?.content || ""; } catch(_) {}
+      try { _token = '' || ""; } catch(_) {}
     }
     if (!_token && _preloadTries++ < 20) { setTimeout(preload, 800); return; }
     try { _items = await apiList(); updateBadge(); } catch(_) {}

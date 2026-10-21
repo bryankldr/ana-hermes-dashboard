@@ -2,7 +2,7 @@
 // Persist: layout.json di folder project (via /api/layout).
 
 const LAYOUT_URL = '/api/layout';
-const getToken = () => document.querySelector('meta[name="ana-token"]')?.content || '';
+const getToken = () => '' || '';
 // Deteksi mobile TERPUSAT (device.js): matchMedia 780px, bukan innerWidth
 // mentah — tanpa ini CSS 779px vs JS 780px off-by-one di tepi breakpoint.
 import { deviceTier as _deviceTier } from './device.js';
