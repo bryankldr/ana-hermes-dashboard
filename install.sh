@@ -159,6 +159,24 @@ if [ -d "$DIST/vault" ]; then
 fi
 fi # _process_profile
 
+# ── build UI (opsional, non-fatal): bundel minified ui/dist/app.min.js ──
+# Server tetap menyajikan ui/src apa adanya bila bundel tak ada (ANA_UI_BUNDLE=0).
+# Lewati dengan: ANA_UI_BUILD=no ./install.sh
+if [ "${ANA_UI_BUILD:-auto}" != "no" ] && command -v npm >/dev/null 2>&1 && [ -f package.json ]; then
+  echo "ANA: build UI (bundel produksi)..." >&2
+  if npm ci --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund >/dev/null 2>&1; then
+    if node scripts/build_ui.mjs; then
+      echo "ANA: bundel siap. Aktifkan dengan ANA_UI_BUNDLE=1 di .env" >&2
+    else
+      echo "ANA: build UI gagal — server tetap pakai ui/src (bukan blocker)" >&2
+    fi
+  else
+    echo "ANA: npm install gagal (offline?) — lewati build, server pakai ui/src" >&2
+  fi
+else
+  echo "ANA: build UI dilewati (npm tak ada atau ANA_UI_BUILD=no) — server pakai ui/src" >&2
+fi
+
 chmod +x start.sh install.sh
 echo "ANA: siap. jalan: ./start.sh (port ${ANA_PORT:-8730})"
 exec ./start.sh
