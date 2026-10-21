@@ -2537,13 +2537,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         # Content-Security-Policy - Permissive untuk awal, bisa diperketat nanti
         # Allow inline scripts/styles untuk legacy compatibility
+        # Foto penyadap diambil langsung dari Directus (/assets/<id>) oleh
+        # ui/src/mapControl.js → origin Directus WAJIB ada di img-src, kalau tidak
+        # semua foto diblokir CSP. Diturunkan dari DIRECTUS_URL per request.
+        _dup = ""
+        try:
+            from urllib.parse import urlsplit as _us
+            _ds = _us((os.environ.get("DIRECTUS_URL") or "https://sandbox2.kphbwb.web.id").strip().rstrip("/"))
+            if _ds.netloc:
+                _dup = f"{_ds.scheme}://{_ds.netloc}"
+        except Exception:
+            _dup = ""
+        _dsp = f" {_dup}" if _dup else ""
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; "
             "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob: https://server.arcgisonline.com; "
+            f"img-src 'self' data: blob: https://server.arcgisonline.com{_dsp}; "
             "font-src 'self' data:; "
-            "connect-src 'self' https://server.arcgisonline.com https://static.cloudflareinsights.com; "
+            f"connect-src 'self' https://server.arcgisonline.com https://static.cloudflareinsights.com{_dsp}; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self';"
