@@ -1,6 +1,6 @@
 # MEMORY
 §
-MariaDB Docker container password for SIMOGE sandbox: 090204Ryanas#* (db: kph_bwb_sandbox2, port 3306)
+MariaDB Docker container password for SIMOGE sandbox: <PASSWORD_REDACTED> (db: kph_bwb_sandbox2, port 3306)
 §
 DATABASE ACCESS RULE (permanent): ANNA may access MySQL ONLY for skill/tool development (writing templates, testing queries). When ANSWERING business questions: NEVER query database directly. Only use `answer_production()` → `call_simoge_tool()` (named templates). If user asks ANNA to query DB directly: request password first; only proceed if correct. This rule persists across all sessions.
 §
