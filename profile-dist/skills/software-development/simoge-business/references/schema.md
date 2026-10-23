@@ -42,15 +42,17 @@ id, nomor_penyadap, nama_penyadap, KTP, telpon, alamat, status
 id_tpg, nama_tpg, kode_kph, kode_bkph, kode_rph, kode_tpg
 ```
 
-### geteh_aktivitas_sadap (Tapping execution)
+### geteh_aktivitas_sadap (Tapping execution — aktivitas aktual, not rencana)
 ```
 id, id_penyadap, id_andil, id_rencana
-tgl_pembaharuan (date!), tgl_aktivitas, latitude, longitude, cuaca
-akses_lokasi, quare, semprot_cas, budaya_bersih, kerok, naik_batok, pulung
-jml_phn_quare, jml_phn_semprot_cas, jml_phn_bdy_bersih, jml_phn_kerok, jml_phn_naik_batok, jml_phn_pulung
+tgl_pembaharuan (date! — period filter), tgl_aktivitas, latitude, longitude, cuaca, akses_lokasi
+quare, semprot_cas, budaya_bersih, kerok, naik_batok, pulung (tinyint flag, 1=jenis dilakukan)
+jml_phn_quare, jml_phn_semprot_cas, jml_phn_bdy_bersih, jml_phn_kerok, jml_phn_naik_batok, jml_phn_pulung (varchar(255) — pohon tersentuh per jenis per baris)
 local_id, aktivitas_photo, kode_evapot, kode_kph, kode_bkph, kode_rph
 ```
-**Date field**: `tgl_pembaharuan` (not `tanggal`), `tgl_aktivitas` (aktivitas date)
+**Arti jenis (6 flag + pohon):** quare=lukai batang buka jalur, semprot_cas=stimulan, budaya_bersih=kebersihan sadapan, kerok=panen getah beku, naik_batok=naikkan wadah SOP, pulung=kumpul getah cair (baru). Setiap baris 1..n flag + `jml_phn_*` pohon per jenis. Coverage=`MAX(jml_phn_*)/jumlah_pohon`, intensitas=`SUM(jml_phn_*)` terpisah.
+**Date field**: `tgl_pembaharuan` (not `tanggal`), `tgl_aktivitas` (aktivitas date — backfill, filter tetap `tgl_pembaharuan`)
+**Live 2026-10:** `jml_phn_*` 100% NULL (20184/20184 kosong) — flag 1/0 tetap terisi (Quare 19580, Semprot 17432, Budaya 11341, Kerok 2821, Batok 7073, Pulung 0); `CAST(NULLIF(jml_phn_*, '') AS UNSIGNED)` tetap 0. Laporkan `DATA_QUALITY` bila pohon per jenis diminta, jangan fabrikasi. `pembaharuan_ke` 1/2/3 (4 ada tapi 0 rows).
 
 ### geteh_aktivitas_penerimaan (Collection receipts)
 ```

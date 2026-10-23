@@ -15,6 +15,7 @@ metadata:
 **Distribusi-portable & hemat token (upgrade path):**
 - `ANA_WORKDIR` (`.env`) = path absolut dashboard di mesin tsb — jangan hardcode `/home/bryankldr/...` di kode/SKILL. Semua `sys.path.insert` pakai `pathlib.Path(__file__).resolve().parents[2]` atau `ANA_WORKDIR` env, bukan `ls -R`/`cat .env`/`read simoge_db.py` (hemat 8-12 exec, cache 300K+ → ~20K). `ponytail:` `references/` lazy-load on-demand — preload semua tiap turn hanya bila prompt butuh map/laporan.
 - Prompt `sekarang`/`hari ini` → interpretasi = periode latest dengan data (`freshness()`/`provenance()`), label eksplisit `data terakhir tersedia September P0 (1-30 Sep)` bila fallback, bukan Oktober. Jika `produksi_aktiv.total_kg is None` tapi `status_petak_per_wilayah.aktif>0` → suffix TTS `"(aktivitas tanpa penerimaan — penerimaan belum masuk)"` untuk hindari misread 0 kg vs 7 aktif.
+- **Bulan berjalan kosong — 3 cek dulu, jangan langsung jawab 0:** (1) `call_simoge_tool("produksi_trend",{"tahun":Y})` → baris (bulan,periode) yang muncul = bulan yang punya penerimaan; bulan tanpa baris = belum ada penerimaan sama sekali. (2) `call_simoge_tool("data_freshness",{})` → `tgl_terakhir`/`hari_ini`/`tujuh_hari` untuk aktivitas. (3) `aktivitas_agregat` bulan berjalan → `rows=[]` = input stop. Laporkan bulan terakhir berdata dengan label eksplisit, lalu pisahkan DUA sebab: produksi riil turun (n_penerimaan/n_petak menurun berbulan-bulan) vs input berhenti (`rows=[]` + `tgl_terakhir` basi) — jangan digabung jadi satu diagnosis, karena yang kedua belum tentu produksi nol.
 - `ponytail:` cache `757K>356K` mahal — upgrade lazy-load refs bila `cache_read >500K` persisten; bila `300K` masih acceptable skip.
 
 
@@ -24,7 +25,7 @@ metadata:
 - Temporal (periode/tahun/bulan) atau geografis (KPH/BKPH/RPH/TPG)
 
 ## CRITICAL — One Call Does Everything
-DB access **and** map display in one function. Never `docker exec`/`mysql`/hand-SQL. Never hand-build GeoJSON + `/api/map/command set_features` untuk subset — panel auto `reloadBusiness()` akan wipe push manual.
+DB access **and** map display in one function. Never `docker exec`/`mysql`/hand-SQL. DB mati = `(2003, "Can't connect to MySQL server on '127.0.0.1' ([Errno 111] Connection refused)")` → nyalakan Docker Desktop unit user (`systemctl --user start docker-desktop`, tunggu ±25 s sampai `docker ps` lihat `mariadb`) lalu ulangi call yang sama — bukan alasan pindah ke SQL mentah. Never hand-build GeoJSON + `/api/map/command set_features` untuk subset — panel auto `reloadBusiness()` akan wipe push manual.
 
 **Statistics only (no map) — WAJIB Packet (hemat, anti-halusinasi):**
 ```python
@@ -93,6 +94,8 @@ show_on_map("petak_efektivitas_map", tahun=2026, limit=1000, warna="kuning")  # 
 
 **Verify the call:** `r=show_on_map(...); print(r.get("features"), r.get("spatial_id"))` — `None`/falsy = broken, stop jangan fallback chart. `row_count` vs `features` beda 1 wajar (petak tanpa polygon). Detail → `references/troubleshooting.md`.
 
+**Param `bulan`/`periode` tidak selalu dihormati template agregat:** `produksi_per_wilayah` mengembalikan `actual_kg` identik untuk dua bulan berbeda (kumulatif, param diabaikan). Sebelum melaporkan angka bulanan dari template agregat, panggil dua bulan berdekatan — hasil identik = template mengabaikan param; ganti sumber ke `produksi_trend` (fakta per bulan) atau `answer_production` (KPI + evidence).
+
 Requires `polygon` column. Map-capable: `petak_with_geometry`, `petak_bongkor_map`, `petak_efektivitas_map`, `rkap_map` (+ `petak_detail` single).
 
 ### Q&A bisnis — router, bukan laporan
@@ -154,7 +157,7 @@ show_on_map("aktivitas_per_penyadap_petak", tahun=2026, bulan=5, periode=0, id_p
 **Filter jenis aktivitas (param resmi `jenis_aktivitas`):** quare/semprot_cas/kerok/naik_batok/budaya_bersih/pulung — saring baris aktivitas ke satu jenis flag (`AND s.<flag>=1`). Terapkan HANYA ke hitungan `cur` (periode berjalan) dan breakdown andil (`aa`/`ab`); `prev`/`two` (jendela logika idle/bongkor) tetap penuh — kalau ikut difilter, definisi idle/bongkor rusak. Helper `_jenis_aktivitas_where(kw, alias)` ikut pola `_pembaharuan_where`; kolom baru yang belum ada di DB live = `AND 1=0` via cek `information_schema` (bukan error 1054). Terima label manusia juga ("semprot cas", "naik batok", "budaya bersih").
 - Uji filter JENIS hanya di periode yang berdata (cek `MAX(tgl_pembaharuan)` dulu) — hasil identik di semua opsi artinya periode kosong, bukan filter rusak. Jangan nyatakan filter broken sebelum verifikasi ini.
 
-**Kolom aktivitas baru** — `tgl_aktivitas` (date aktivitas, beda dari `tgl_pembaharuan` = update date), `pulung` (flag aktivitas), dan `jml_phn_*` (jumlah pohon per jenis). `pulung` otomatis ikut `grup_by:"aktivitas"` via `AKTIVITAS_FLAGS` di `scripts/simoge_db.py`. Selalu filter periode pakai `tgl_pembaharuan`, bukan `tgl_aktivitas`.
+**Kolom aktivitas baru** — `tgl_aktivitas` (date aktivitas, beda dari `tgl_pembaharuan` = update date), `pulung` (flag aktivitas), dan `jml_phn_*` (jumlah pohon per jenis). `pulung` otomatis ikut `grup_by:"aktivitas"` via `AKTIVITAS_FLAGS` di `scripts/simoge_db.py`. Selalu filter periode pakai `tgl_pembaharuan`, bukan `tgl_aktivitas`. Schema-evolution checklist (skip satu = knowledge drift): patch `references/schema.md` + `scripts/simoge_db.py` + vault `ANNA-KNOWLEDGE/raw/articles/skema-database-kph-bwb-sandbox2.md` + ontology `SIMOGE Business Knowledge & Ontology.md` #5.12 + `rsync` ke `profile-dist/skills/software-development/<skill>/` (`diff -q --exclude=__pycache__` must be 0) + `git commit` — vault/wiki bukan di `profile-dist`, update manual tiap skema berubah.
 
 **Kolom tanggal filter (aturan umum):** filter periode WAJIB pakai tanggal kerja yang ditulis pelapor (`tgl_pembaharuan` untuk aktivitas, `tanggal` untuk penerimaan) — JANGAN `date_created` (tanggal baris masuk server; lag upload nyata hingga 41 hari di aktivitas dan ratusan ribu hari di penerimaan karena input tahun 33/1932, laporan telat unggah jatuh ke periode salah). Migrasi ke kolom tanggal baru (`tgl_aktivitas` masih 0/20184) hanya setelah backfill massal, kalau tidak histori hilang dari filter. Tanggal sampah = masalah input lapangan: tahan sebagai catatan kanban + guard tahun wajar (`BETWEEN '2020-01-01' AND CURDATE()` atau filter lag) sebelum agregat produksi, jangan diam-diam ikut hitungan. Validasi lag via `DATEDIFF(date_created, tgl_pembaharuan)` untuk bedakan telat upload vs salah input.
 
@@ -162,7 +165,7 @@ show_on_map("aktivitas_per_penyadap_petak", tahun=2026, bulan=5, periode=0, id_p
 
 ## Templates / Production KPI / Business Rules / Map / Transport
 - Templates (36 verified) — `describe()` / `list_templates()` ; detail `references/templates.md`
-- Production KPI `answer_production(tahun,bulan,periode,mode,**wilayah)` 1 call — `references/production_kpi.md`
+- Production KPI `answer_production(tahun,bulan,periode,mode,**wilayah)` 1 call — `references/production_period_params.md (bulan penuh = periode:0), references/production_kpi.md`
 - Business Rules `kode_evapot`, periode, warna merah/kuning/hijau, target RO/NPS — `references/business_rules.md`
 - Map ops `set_features`/`spatial_set` via `/api/map/command` — `references/map_ops.md`
 - Chart transport `spatial_chart_store POST/GET /api/spatial/chart` — `references/chart_transport.md`

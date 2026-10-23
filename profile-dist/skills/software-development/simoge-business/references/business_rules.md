@@ -45,3 +45,11 @@ Setiap polygon harus menjawab 1 pertanyaan bisnis — jangan campur indikator:
 - Kurang produktif = penyadap aktif, banyak aktivitas tapi `berat_penerimaan < target` (target = `target_rkap * persen RO/NPS periode * (luas_andil/luas_baku)`)
 - Analisa efektivitas 1: `luas_baku` vs `SUM(luas_andil)` → butuh penyadap/tidak
 - Analisa efektivitas 2: matrik `luas_andil, jml_pohon` (getah_andil) vs `luas_baku, jumlah_pohon` (getah_petak)
+
+### Rencana Aktivitas — getah_rencana_aktivitas (planning vs execution gate)
+
+- Tabel `getah_rencana_aktivitas` (14.594 baris snapshot 2026-10-03): `tanggal_rencana, id_penyadap, rencana_berat, id_rencana UNI, local_id UNI, id_andil, keterangan, kode_* wilayah, tpg FK, user_created` (mandor/KTS pembuat rencana). Bukan target — target di `getah_petak.target_rkap × getah_target_ro_nps` persen kumulatif.
+- Join terverifikasi: `rencana → aktivitas` via `id_rencana`; `rencana → petak` via `kode_evapot AND tahun_rtt`; `rencana → penyadap/andil` via `id_penyadap`; `rencana → mandor/KTS` via `user_created → directus_users → jabatan (M1-M5/K1-K5)`. Jangan join rencana ke drum/penerimaan langsung — lewat aktivitas.
+- 2 template terverifikasi: scalar `rencana_aktivitas(tahun,bulan,periode)` = `SUM(rencana_berat) WHERE tanggal_rencana BETWEEN period_bounds` (satu pintu untuk Target Coverage); `laporan_perencanaan_target_setor_vs_ro_nps` = per Mandor×TPG dengan dedup `GROUP BY user_created,kode_tpg,kode_evapot` lalu `MAX(target_rkap)` sebelum `SUM` — tanpa dedup target terdistorsi 2-5× karena satu petak bisa punya beberapa rencana.
+- Period selalu `tanggal_rencana`, bukan `date_created`. P1=1-15, P2=16-akhir bulan. Laporan judul `LAPORAN PERENCANAAN TARGET SETOR VS TARGET RO/NPS (DD MMMM YYYY)` dengan `DD=e1` dari `period_bounds`.
+- Pitfall: `laporan_perencanaan...` dapat 0 rows padahal scalar `rencana_aktivitas` 100+ ton — penyebab `JOIN r.kode_evapot=pt.kode_evapot AND pt.tahun_rtt` mismatch; cek scalar dulu, laporkan template-empty sebagai "laporan belum tersedia, bukan nol". Untuk GAP diagnosis bedakan `Rencana < Target` (planning failure) vs `Rencana > Target` tapi `Realisasi < Rencana` (execution failure); buffer `Rencana > Target` memang disengaja untuk serap andil shortfall.

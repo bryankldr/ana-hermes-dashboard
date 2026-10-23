@@ -14,6 +14,12 @@ Jangan `--select`/file 1-2 baris untuk multi-baris — `\n` terpotong. Pakai `2>
 ## Pitfall patch menyisipkan karakter asing
 Edit merusak f-string sekitar sisip (`f"..." _fmt_num(x)` → SyntaxError). Aturan: tiap patch `ast.parse` + sapu char asing. Fix pakai patch terarah, bukan `re.sub` global.
 
+## DB tidak bisa connect (errno 111)
+`{"ok":false,"error":"(2003, \"Can't connect to MySQL server on '127.0.0.1' ([Errno 111] Connection refused)\")"}` = MariaDB container belum jalan, bukan query salah. Unit user Docker Desktop default `disabled`: `systemctl --user start docker-desktop`, tunggu ±20-25 s sampai `docker ps` menampilkan `mariadb`, lalu jalankan ulang call yang sama. Jangan fallback ke `docker exec`/`mysql` — aturan no-SQL tetap berlaku.
+
+## Hasil tool jadi marker `<<ccr:HASH,string,NKB>>`
+Hasil `terminal`/`read_file` di atas ~1 KB bisa diganti marker kompresi — itu bukan isi file, dan mengulang call yang sama tidak menolong. Baca lewat `execute_code` dengan `open(path).read()` lalu `print` potongan <1 KB per call; lebih hemat lagi: saring dulu (`[l for l in src.splitlines() if re.search(r"def |TEMPLATES", l)]`) lalu print hanya baris yang cocok — cukup untuk menemukan nama fungsi/template/param.
+
 ## Verify the call
 `show_on_map` wajib return dict `{ok,features,spatial_id}`. `None`/falsy = broken — stop, jangan fallback chart. Cek: `r=show_on_map(...); print(type(r).__name__, r.get("features"), r.get("spatial_id"))`. `row_count` (DB rows) vs `features` (polygon ter-parse) beda 1 wajar.
 
