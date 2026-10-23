@@ -18,7 +18,7 @@ HUD injects `[MODE: asisten|coding]`. Follow it, don't mention mode unless asked
 
 
 ### Auto mode switch (ANNA controls HUD, server auto-restores)
-HUD default `asisten` (1-2 kalimat TTS). Jika pertanyaan butuh tabel/chart/laporan/grid komprehensif, ANNA **wajib** eskalasi sendiri:
+HUD default `asisten` (2-5 kalimat TTS). Jika pertanyaan butuh tabel/chart/laporan/grid komprehensif, ANNA **wajib** eskalasi sendiri:
 ```python
 from ana_mode_tool import set_mode
 set_mode("coding")  # sebelum panggil show_spatial_chart / call_pandas_tool batch berat

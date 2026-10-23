@@ -1707,6 +1707,15 @@ def _ana_auth_error(handler) -> tuple:
         reason = getattr(handler, "_ana_auth_reason", "") or "expired"
     except Exception:
         reason = "expired"
+    # Jejak 401: tanpa ini "chat tidak bisa dikirim" tidak bisa dibedakan antara
+    # cookie hilang, sesi dicabut perangkat lain, atau device_id berubah.
+    try:
+        _alog(f"auth401 reason={reason} dev={_ana_device_id(handler)[:10]!r} "
+              f"ua={(handler.headers.get('User-Agent') or '')[:40]!r} "
+              f"cookie={'y' if 'ana_session' in (handler.headers.get('Cookie') or '') else 'n'} "
+              f"path={(getattr(handler, 'path', '') or '')[:48]}", "warn")
+    except Exception:
+        pass
     try:
         info = getattr(handler, "_ana_auth_evict", {}) or {}
     except Exception:
@@ -3924,6 +3933,12 @@ class Handler(BaseHTTPRequestHandler):
         self._t0 = time.time()
         p = urlparse(self.path).path
         if not self._host_ok():
+            try:
+                _alog(f"post403 host_rejected host={self.headers.get('Host')!r} "
+                      f"origin={self.headers.get('Origin')!r} "
+                      f"ua={(self.headers.get('User-Agent') or '')[:34]!r}", "warn")
+            except Exception:
+                pass
             return self._json({"error": "request origin rejected"}, 403)
         
         # Anti-scraping: Check suspicious User-Agent (DISABLED for Apache proxy)
@@ -3948,6 +3963,12 @@ class Handler(BaseHTTPRequestHandler):
         # /api/auth/* adalah entry-point login: browser fetch selalu kirim Origin,
         # tapi curl/ health-check tanpa Origin tetap harus lulus host-check saja.
         if not p.startswith("/api/auth/") and not self._origin_ok():
+            try:
+                _alog(f"post403 origin_rejected path={p[:32]} "
+                      f"host={self.headers.get('Host')!r} origin={self.headers.get('Origin')!r} "
+                      f"ua={(self.headers.get('User-Agent') or '')[:34]!r}", "warn")
+            except Exception:
+                pass
             return self._json({"error": "request origin rejected"}, 403)
         # Auth endpoints are public (login) or cookie-authenticated (logout/refresh/tfa/me)
         # — they must not require X-Ana-Token
@@ -5548,6 +5569,12 @@ class Handler(BaseHTTPRequestHandler):
                     _log_to_file(f"[run] stale run diambil alih (> {RUN_TIMEOUT_SEC:.0f}s): {str(_stale_msg)[:60]}")
                 except Exception:
                     pass
+            try:
+                _alog(f"run accept user={str(_run_uk)[:8] or '-'} dev={_ana_device_id(self)[:10]!r} "
+                      f"cookie={'y' if _run_has_cookie else 'n'} "
+                      f"msg_len={len(str((body or {}).get('message') or '')) if isinstance(body, dict) else '?'}")
+            except Exception:
+                pass
             try:
                 with RUN_STATE_GUARD:
                     _run_slot["active"] = True
