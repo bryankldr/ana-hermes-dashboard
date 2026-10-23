@@ -382,7 +382,11 @@ export function initMapPanel({ log = () => {} } = {}) {
     // (SVG = ribuan node DOM = jank tiap render/zoom). Popup/tooltip/
     // dash/bringToFront tetap didukung. Animasi zoom/pan eksplisit.
     preferCanvas: false, zoomAnimation: true, fadeAnimation: true, inertia: true,
-    zoomSnap: 0.2,               // Snap ke increment 0.2 (1, 1.2, 1.4, 1.6, 1.8, 2, ...)
+    zoomSnap: 1,                 // Zoom integer saja: tile selalu tajam & cache-hit
+                                 // maksimal (0.2 = tile raster di-scale + set tile
+                                 // baru tiap 0.2 level + pin/garis ikut di-scale
+                                 // selama animasi zoom).
+    zoomDelta: 1,                // Satu roda/klik = satu level penuh
     wheelPxPerZoomLevel: 120,    // Lebih banyak scroll pixel per zoom level untuk lebih halus (default 60)
   }).setView(CENTER, 11);
   const street = window.L.tileLayer('/api/tiles/esri/street/{z}/{x}/{y}', {
@@ -1930,6 +1934,13 @@ function updateLegend(biz, kat) {
           try { updateLegend(bizSel?.value || 'petak', katSel?.value || 'semua'); } catch (_) {}
         }
         _ovKey = key;
+        // Cabut grup tile overview lama. _ovHideGeo() cuma membuang hit-layer,
+        // tile choropleth solid (opacity 0.92) tetap menempel sampai z15 dan
+        // menutupi petak + citra. Jalur tier hanya meng-hide 'bounds' bila
+        // _tier berubah, jadi bisnis non-petak (tier selalu geojson) bocor.
+        if (!(_ovBiz && z <= 10 && kphList.length === 1)) {
+          try { _ctl.set_pmtiles_group_visible('bounds', false); } catch (_) {}
+        }
         // ADM single-KPH: outline netral konteks tetangga (tanpa warna bisnis).
         if (_ovBiz && z <= 10 && kphList.length === 1) { _neutralBounds(); }
         else { try { _ovHideGeo(); } catch (_) {} }
@@ -2038,20 +2049,26 @@ function updateLegend(biz, kat) {
                       rules: _rules, maxDataZoom: 10 });
         }
       }
+      // Choropleth per-KPH = GeoJSON bounds_geo (fitur sudah per KPH) diwarnai
+      // agregat bisnis yang aktif. Tile overview hanya fallback: bake-nya cuma
+      // menyimpan prop `warna` bisnis petak, jadi bisnis lain tak akurat.
       let ovOk = false;
-      try {
-        const rr = _ctl.set_pmtiles_sources('bounds', oSrc, { token: tok });
-        ovOk = !!(rr && (rr.added > 0 || (rr.active || []).length > 0));
-      } catch (_) { ovOk = false; }
-      // Fallback: tanpa file overview (belum dibangun) = mode lama.
+      try { ovOk = await _ovShowHit(rows, false, _ovBiz, colors); } catch (_) { ovOk = false; }
+      if (ovOk) {
+        try { _ctl.set_pmtiles_group_visible('bounds', false); } catch (_) {} // anti cat dobel
+      } else {
+        try {
+          const rr = _ctl.set_pmtiles_sources('bounds', oSrc, { token: tok });
+          ovOk = !!(rr && (rr.added > 0 || (rr.active || []).length > 0));
+        } catch (_) { ovOk = false; }
+      }
+      // Fallback: tanpa geometri KPH dan tanpa file overview = mode lama.
       if (!ovOk) {
         _ovOn = false;
-        try { log('map', 'MAP', 'overview off: file overview tak ada'); } catch (_) {}
+        try { log('map', 'MAP', 'overview off: geometri & file overview tak ada'); } catch (_) {}
         return;
       }
       try { _ctl.set_pmtiles_group_visible('petak', false); } catch (_) {} // choropleth ganti petak di overview
-      // Hit-layer transparan utk tooltip + klik (binding post-hoc, pola terverifikasi).
-      try { await _ovShowHit(rows, false, _ovBiz); } catch (_) {}
       _ovOn = true;
       try { log('map', 'MAP', 'overview ON kph berwarna=' + Object.keys(colors).length); } catch (_) {}
       try { window.__spatialOverview = { key: key, wantOv: !!wantOv, kph: kphList.length, on: true, colored: Object.keys(colors).length }; } catch (_) {}
@@ -2172,7 +2189,7 @@ function updateLegend(biz, kat) {
       });
     } catch (_) {}
   }
-  async function _ovShowHit(rows, neutral, biz) {
+  async function _ovShowHit(rows, neutral, biz, colors) {
     // Return true bila hit-layer tampil. numbers: kode -> {b,k,t,n}.
     try {
       const layer = _ovEnsureLayer();
@@ -2205,13 +2222,24 @@ function updateLegend(biz, kat) {
           const kode = String(p.kode_kph || '');
           const g = f.geometry;
           if (!kode || !g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;
+          // Warna choropleth per bisnis (agregat per KPH). Netral = outline saja.
+          const _c = neutral ? '' : String((colors && colors[kode]) || '#94A3B8');
           gj.push({ type: 'Feature', geometry: g,
-                    properties: { kode_kph: kode, kph: p.kph || kode } });
+                    properties: { kode_kph: kode, kph: p.kph || kode, _c: _c } });
         } catch (_) {}
       }
       if (!gj.length) { _ovHideGeo(); return false; }
       layer.clearLayers();
       layer.addData({ type: 'FeatureCollection', features: gj });
+      // Fill per-KPH dari agregat bisnis: satu jalur untuk semua bisnis,
+      // tak bergantung warna bake tile overview (yang cuma untuk petak).
+      try {
+        layer.setStyle(function (f) {
+          const c = (f && f.properties && f.properties._c) || '';
+          if (!c) return { color: '#FFFFFF', weight: 1, opacity: 0.35, fillColor: '#FFFFFF', fillOpacity: 0 };
+          return { color: c, weight: 1.2, opacity: 0.9, fillColor: c, fillOpacity: 0.55 };
+        });
+      } catch (_) {}
       if (!map.hasLayer(layer)) layer.addTo(map);
       _ovBindHit(layer, neutral ? {} : nums, biz);
       try { window.__spatialOvLayer = layer; } catch (_) {}

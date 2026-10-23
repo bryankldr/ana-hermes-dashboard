@@ -73,19 +73,16 @@ def kwargs(src: str = "") -> dict:
 
 
 def public_info() -> dict:
-    """Info aman untuk API (tanpa password)."""
+    """Info aman untuk API (tanpa password dan user)."""
     env = _read_env()
     return dict(
         source=source(),
         local=dict(host=env.get("DB_HOST", "127.0.0.1"),
                    port=int(env.get("DB_PORT", "3306")),
-                   database=env.get("DB_NAME", "kph_bwb_sandbox2"),
-                   user=env.get("DB_USER", "root")),
+                   database=env.get("DB_NAME", "kph_bwb_sandbox2")),
         remote=dict(host=env.get("REMOTE_DB_HOST", "127.0.0.1"),
                     port=int(env.get("REMOTE_DB_PORT", str(REMOTE_LOCAL_PORT))),
-                    database=env.get("REMOTE_DB_NAME", env.get("DB_NAME", "kph_bwb_sandbox2")),
-                    user=env.get("REMOTE_DB_USER", "root"),
-                    has_password=bool(env.get("REMOTE_DB_PASSWORD", ""))),
+                    database=env.get("REMOTE_DB_NAME", env.get("DB_NAME", "kph_bwb_sandbox2"))),
         tunnel=tunnel_ok(),
     )
 

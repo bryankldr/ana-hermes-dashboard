@@ -772,15 +772,15 @@ _rebuildAktivitasLines() {
     outside++;
     try {
       grp.addLayer(this.L.polyline([[lat, lng], [target.lat, target.lng]], {
-        // Garis penghubung pin→petak WAJIB mencolok (keluhan: tak terlihat).
-        // Jauh (>28m) = oranye tebal putus-putus; dekat = cyan tebal solid.
-        // interactive:true + tooltip jarak agar garis bisa di-hover infonya.
+        // Garis penghubung pin→petak: tetap terlihat tapi lebih tipis dari
+        // sebelumnya (keluhan: terlalu tebal). Jauh (>28m) = oranye putus-putus;
+        // dekat = cyan solid. interactive:true + tooltip jarak agar bisa di-hover.
         // pane sendiri (di bawah pin, di atas polygon) + tak bubble ke petak.
         pane: 'aktivitasLinePane',
         renderer: this._aktivitasLineRenderer || undefined,
         color: far ? '#F97316' : '#2DF2FF',
-        weight: far ? 3.5 : 3,
-        opacity: far ? 0.95 : 0.9,
+        weight: far ? 2 : 1.5,
+        opacity: far ? 0.9 : 0.85,
         dashArray: far ? '7,5' : null,
         interactive: true,
         bubblingMouseEvents: false,
@@ -961,8 +961,8 @@ set_aktivitas_points(points, opts = {}) {
     const hasFoto = !!(fotoId && String(fotoId).trim());
     const stroke = hasFoto ? '#ffffff' : fill;
     const marker = this.L.circleMarker([lat, lng], {
-      radius: hasFoto ? 7 : 5,
-      color: stroke, weight: 1.5, opacity: 0.95,
+      radius: hasFoto ? 5 : 4,
+      color: stroke, weight: 1.2, opacity: 0.95,
       fillColor: fill, fillOpacity: hasFoto ? 0.92 : 0.65,
       pane: 'aktivitasPane', bubblingMouseEvents: false,
       renderer: this._aktivitasRenderer || undefined,

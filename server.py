@@ -24,7 +24,7 @@ import threading
 import time
 import traceback
 import webbrowser
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -2497,6 +2497,41 @@ def persona():
 
 
 
+# --- Cache LRU tile basemap Esri (memori) -------------------------------
+# ponytail: tanpa cache tiap request = urllib ke server.arcgisonline.com
+# (terukur 0,3-3,1 s/tile). Cache edge Cloudflare = langkah berikutnya; ini
+# menutup hit pertama setelah purge dan lonjakan cold-start.
+# Batas: 4000 tile / 64 MB (rata-rata tile 5-25 KB). Naikkan bila RAM longgar.
+_ESRI_CACHE = OrderedDict()
+_ESRI_CACHE_LOCK = threading.Lock()
+_ESRI_CACHE_MAX_ITEMS = 4000
+_ESRI_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_ESRI_CACHE_BYTES = 0
+
+
+def _esri_cache_get(key):
+    with _ESRI_CACHE_LOCK:
+        item = _ESRI_CACHE.get(key)
+        if item is None:
+            return None
+        _ESRI_CACHE.move_to_end(key)
+        return item
+
+
+def _esri_cache_put(key, data, ctype):
+    global _ESRI_CACHE_BYTES
+    with _ESRI_CACHE_LOCK:
+        old = _ESRI_CACHE.pop(key, None)
+        if old is not None:
+            _ESRI_CACHE_BYTES -= len(old[0])
+        _ESRI_CACHE[key] = (data, ctype)
+        _ESRI_CACHE_BYTES += len(data)
+        while _ESRI_CACHE and (len(_ESRI_CACHE) > _ESRI_CACHE_MAX_ITEMS
+                               or _ESRI_CACHE_BYTES > _ESRI_CACHE_MAX_BYTES):
+            _, evicted = _ESRI_CACHE.popitem(last=False)
+            _ESRI_CACHE_BYTES -= len(evicted[0])
+
+
 class QuietServer(ThreadingHTTPServer):
     # Bungkam traceback noise dari client yang disconnect tiba-tiba
     # (scanner LAN, browser close tab) — bukan error server.
@@ -2659,6 +2694,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._bytes(b"koordinat salah", "text/plain", 400)
         if svc not in self._ESRI_TILES or not (0 <= z <= 19) or x < 0 or y < 0 or x >= 2 ** z or y >= 2 ** z:
             return self._bytes(b"not found", "text/plain", 404)
+        key = (svc, z, x, y)
+        hit = _esri_cache_get(key)
+        if hit is not None:
+            return self._bytes(hit[0], hit[1], 200,
+                               cache_control="public, max-age=86400, immutable",
+                               extra_headers={"X-Tile-Cache": "HIT"})
         try:
             import urllib.request
             req = urllib.request.Request(
@@ -2672,7 +2713,10 @@ class Handler(BaseHTTPRequestHandler):
                 ctype = (r.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
                 if not ctype.startswith("image/"):
                     return self._bytes(b"bukan gambar", "text/plain", 502)
-                return self._bytes(data, ctype, 200, cache_control="public, max-age=86400, immutable")
+                _esri_cache_put(key, data, ctype)
+                return self._bytes(data, ctype, 200,
+                                   cache_control="public, max-age=86400, immutable",
+                                   extra_headers={"X-Tile-Cache": "MISS"})
         except Exception:
             return self._bytes(b"esri tak terjangkau", "text/plain", 502)
 
